@@ -8,11 +8,6 @@ overrides:
   effect: 4.0.0-rc.117
   typescript: 7.0.2
 
-patchedDependencies:
-  '@effect-uai/core@0.12.0':
-    hash: 482d9dd0932e8a1f42971a3c0b716bb559e83968b1f1e69a643a93462d48833c
-    path: patches/@effect-uai__core@0.12.0.patch
-
 importers:
 
   .:
@@ -106,11 +101,11 @@ importers:
         specifier: workspace:*
         version: link:../shared
       '@effect-uai/anthropic':
-        specifier: 0.12.0
-        version: 0.12.0(@effect-uai/core@0.12.0(patch_hash=482d9dd0932e8a1f42971a3c0b716bb559e83968b1f1e69a643a93462d48833c)(effect@4.0.0-rc.117))(effect@4.0.0-rc.117)
+        specifier: 0.17.0
+        version: 0.17.0(@effect-uai/core@0.17.0(effect@4.0.0-rc.117))(effect@4.0.0-rc.117)
       '@effect-uai/core':
-        specifier: 0.12.0
-        version: 0.12.0(patch_hash=482d9dd0932e8a1f42971a3c0b716bb559e83968b1f1e69a643a93462d48833c)(effect@4.0.0-rc.117)
+        specifier: 0.17.0
+        version: 0.17.0(effect@4.0.0-rc.117)
       '@effect/opentelemetry':
         specifier: 4.0.0-rc.117
         version: 4.0.0-rc.117(@opentelemetry/api-logs@0.222.0)(@opentelemetry/api@1.9.1)(@opentelemetry/resources@2.11.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.222.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.11.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.11.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-node@2.11.0(@opentelemetry/api@1.9.1))(@opentelemetry/semantic-conventions@1.43.0)(effect@4.0.0-rc.117)
@@ -195,8 +190,8 @@ importers:
   packages/effect-assistant:
     dependencies:
       '@effect-uai/core':
-        specifier: 0.12.0
-        version: 0.12.0(patch_hash=482d9dd0932e8a1f42971a3c0b716bb559e83968b1f1e69a643a93462d48833c)(effect@4.0.0-rc.117)
+        specifier: 0.17.0
+        version: 0.17.0(effect@4.0.0-rc.117)
       effect:
         specifier: 4.0.0-rc.117
         version: 4.0.0-rc.117
@@ -205,8 +200,8 @@ importers:
         version: 6.0.1
     devDependencies:
       '@effect-uai/anthropic':
-        specifier: 0.12.0
-        version: 0.12.0(@effect-uai/core@0.12.0(patch_hash=482d9dd0932e8a1f42971a3c0b716bb559e83968b1f1e69a643a93462d48833c)(effect@4.0.0-rc.117))(effect@4.0.0-rc.117)
+        specifier: 0.17.0
+        version: 0.17.0(@effect-uai/core@0.17.0(effect@4.0.0-rc.117))(effect@4.0.0-rc.117)
       '@effect/vitest':
         specifier: 4.0.0-rc.117
         version: 4.0.0-rc.117(effect@4.0.0-rc.117)(vitest@5.0.1(@opentelemetry/api@1.9.1)(@types/node@22.20.4)(vite@8.3.0(@types/node@22.20.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))
@@ -505,14 +500,14 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@effect-uai/anthropic@0.12.0':
-    resolution: {integrity: sha512-zrUScw+y/kxysLg8gaR5AFwW+CNCMPgMMj/RjQBUTzrvZUpKqtAh2a5p73Nu8TALNVEwCXoYd4lbjwDAy8vNPw==}
+  '@effect-uai/anthropic@0.17.0':
+    resolution: {integrity: sha512-fEsQ0E/UL653UpS/TvMZsOmt8jkutGHLqL6rkzGaDPQG/pnQyNZ0Z62vdZRtB+SPF1oQTxZWHO0Oelq6vLHK5A==}
     peerDependencies:
       '@effect-uai/core': '>=0.2.0 <1'
       effect: 4.0.0-rc.117
 
-  '@effect-uai/core@0.12.0':
-    resolution: {integrity: sha512-CCEzkai/4zlLEMyCWuOz3BC58IBwP82RkypSgv+WTA32lXzenIe0a1kSYP84pG5LEagx2vGqPiZcIIfW2CgRzg==}
+  '@effect-uai/core@0.17.0':
+    resolution: {integrity: sha512-KR5XE0HFoKelexeHMoyL+aZ5CfZd+e43jKQ492zWynTK5YsMVsCrQQ+3qKIFnmOs/p4P4QdShfK1BCNL3GvgrQ==}
     peerDependencies:
       effect: 4.0.0-rc.117
 
@@ -4112,12 +4107,12 @@ snapshots:
   '@dprint/win32-x64@0.50.2':
     optional: true
 
-  '@effect-uai/anthropic@0.12.0(@effect-uai/core@0.12.0(patch_hash=482d9dd0932e8a1f42971a3c0b716bb559e83968b1f1e69a643a93462d48833c)(effect@4.0.0-rc.117))(effect@4.0.0-rc.117)':
+  '@effect-uai/anthropic@0.17.0(@effect-uai/core@0.17.0(effect@4.0.0-rc.117))(effect@4.0.0-rc.117)':
     dependencies:
-      '@effect-uai/core': 0.12.0(patch_hash=482d9dd0932e8a1f42971a3c0b716bb559e83968b1f1e69a643a93462d48833c)(effect@4.0.0-rc.117)
+      '@effect-uai/core': 0.17.0(effect@4.0.0-rc.117)
       effect: 4.0.0-rc.117
 
-  '@effect-uai/core@0.12.0(patch_hash=482d9dd0932e8a1f42971a3c0b716bb559e83968b1f1e69a643a93462d48833c)(effect@4.0.0-rc.117)':
+  '@effect-uai/core@0.17.0(effect@4.0.0-rc.117)':
     dependencies:
       '@standard-schema/spec': 1.1.0
       effect: 4.0.0-rc.117
