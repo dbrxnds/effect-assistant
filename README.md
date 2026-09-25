@@ -42,7 +42,7 @@ const weather = Tool.make({
   name: "get_weather",
   description: "Current weather for a city.",
   inputSchema: WeatherInput,
-  run: Effect.fn(function*({ city }: typeof WeatherInput.Type) {
+  run: Effect.fn(function* ({ city }: typeof WeatherInput.Type) {
     return { city, weather: "sunny, 21°C" }
   })
 })
@@ -56,10 +56,12 @@ const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
   })
 )
 
-const AnthropicLive = Layer.unwrap(Effect.gen(function*() {
-  const apiKey = yield* Config.Redacted("ANTHROPIC_API_KEY")
-  return Anthropic.layer({ apiKey }).pipe(Layer.provide(FetchHttpClient.layer))
-}))
+const AnthropicLive = Layer.unwrap(
+  Effect.gen(function* () {
+    const apiKey = yield* Config.Redacted("ANTHROPIC_API_KEY")
+    return Anthropic.layer({ apiKey }).pipe(Layer.provide(FetchHttpClient.layer))
+  })
+)
 
 // The engine runs the chats and stores them in a log; both in memory here.
 const MyAssistantLive = MyAssistantHandlers.pipe(
@@ -68,7 +70,7 @@ const MyAssistantLive = MyAssistantHandlers.pipe(
   Layer.provideMerge(ChatLog.layerMemory)
 )
 
-const program = Effect.gen(function*() {
+const program = Effect.gen(function* () {
   const chatId = ChatId.make()
 
   // Returns at once: the assistant works in the background.
