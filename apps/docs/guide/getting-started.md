@@ -13,8 +13,8 @@ effect-assistant lives in this monorepo as a workspace package. It needs `effect
   "dependencies": {
     "effect": "4.0.0-rc.117",
     "effect-assistant": "workspace:*",
-    "@effect-uai/core": "0.12.0",
-    "@effect-uai/anthropic": "0.12.0"
+    "@effect-uai/core": "0.17.0",
+    "@effect-uai/anthropic": "0.17.0"
   }
 }
 ```
