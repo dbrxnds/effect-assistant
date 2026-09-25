@@ -9,13 +9,14 @@ import * as Items from "@effect-uai/core/Items"
 import type * as LanguageModel from "@effect-uai/core/LanguageModel"
 import * as Tool from "@effect-uai/core/Tool"
 import * as Toolkit from "@effect-uai/core/Toolkit"
-import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
+import * as FiberMap from "effect/FiberMap"
 import * as FiberSet from "effect/FiberSet"
 import * as Predicate from "effect/Predicate"
+import * as Queue from "effect/Queue"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
@@ -61,15 +62,15 @@ const finalText = (items: ReadonlyArray<Items.HistoryItem>): string =>
     .trim()
 
 /**
- * Runs a specialist's handler on `history` until its loop ends, and returns
- * the answer: the last text the model wrote.
+ * Runs a specialist's handler on its history until its loop ends, and
+ * returns the answer: the last text the model wrote.
  *
  * **Details**
  *
- * The history is extended in place, so the same array can be continued with
- * a follow-up. Messages pushed to `inbox` while it runs join the history at
- * its next step. Each event the handler's stream emits is recorded before
- * the stream is pulled again, so the next step reads it.
+ * What the loop does is added to `history`, so a follow-up continues it.
+ * Messages offered to `inbox` while it runs join the history at its next
+ * step. Each event the handler's stream emits is recorded before the stream
+ * is pulled again, so the next step reads it.
  *
  * @internal
  */
@@ -80,19 +81,20 @@ export const runBrief = Effect.fn(
       readonly specialist: Specialist.Any
       readonly runId: RunId.RunId
       readonly brief: Specialist.Brief
-      readonly history: Array<Items.HistoryItem>
-      readonly inbox: Array<Items.HistoryItem>
+      readonly history: Ref.Ref<ReadonlyArray<Items.HistoryItem>>
+      readonly inbox: Queue.Queue<Items.HistoryItem>
       readonly chatId: AssistantChat["Service"]["chatId"]
     }
   ) {
     const { history, inbox } = options
     const answer = yield* Ref.make("")
+    const add = (items: ReadonlyArray<Items.HistoryItem>) => Ref.update(history, (all) => [...all, ...items])
 
-    // Read before every model call, when no tool calls are open.
-    const current = Effect.sync(() => {
-      history.push(...inbox.splice(0))
+    // Read before every model call, when no tool calls are open: messages sent meanwhile join it now.
+    const current = Effect.gen(function* () {
+      yield* add(yield* Queue.clear(inbox))
 
-      return [...history]
+      return yield* Ref.get(history)
     })
 
     const run: Specialist.Run = {
@@ -118,9 +120,9 @@ export const runBrief = Effect.fn(
       Predicate.isTagged(event, "ToolStarted")
         ? Effect.void
         : Predicate.isTagged(event, "ToolResult")
-          ? Effect.sync(() => history.push(Items.toolCallOutput(event.callId, event.output)))
+          ? add([Items.toolCallOutput(event.callId, event.output)])
           : Effect.gen(function* () {
-              history.push(...event.items)
+              yield* add(event.items)
               const text = finalText(event.items)
 
               if (text.length > 0) yield* Ref.set(answer, text)
@@ -226,7 +228,7 @@ export const toolkit = (specialists: ReadonlyArray<Specialist.Any>): Toolkit.Too
 }
 
 /** How long a finished run stays available for follow-ups. */
-const warmMillis = 15 * 60 * 1000
+const warm = "15 minutes"
 
 /** A run of the chat: one specialist's history, continued by follow-ups. */
 interface Run {
@@ -235,14 +237,11 @@ interface Run {
   readonly handler: RunHandler
   readonly goal: string
   readonly brief: Specialist.Brief
-  readonly history: Array<Items.HistoryItem>
+  readonly history: Ref.Ref<ReadonlyArray<Items.HistoryItem>>
   /** Messages sent while it works; the loop reads them at its next step. */
-  readonly inbox: Array<Items.HistoryItem>
+  readonly inbox: Queue.Queue<Items.HistoryItem>
   /** Briefs so far, counting follow-ups; numbers the reports. */
-  briefs: number
-  /** The brief's loop, while it works: `stop` interrupts it. */
-  working: Fiber.Fiber<Outcome> | undefined
-  lastUsed: number
+  readonly briefs: Ref.Ref<number>
 }
 
 /**
@@ -250,11 +249,12 @@ interface Run {
  *
  * **Details**
  *
- * Runs are fibers in a `FiberSet` in the chat's scope. A message for a
- * running run steers it; a message for a finished one continues it. Every
+ * A run's brief loop is a fiber in `working`, keyed by run id, while it
+ * works: a message for it steers it, and `stop` removes it. A finished run
+ * stays for `warm`, so a message continues it, and is forgotten after. Every
  * time a run starts working it records `SpecialistStarted`, and when it
- * stops, however it stops, it reports `SpecialistFinished` through
- * `report`: answered, failed, stopped, or cut off.
+ * stops, however it stops, it reports `SpecialistFinished` through `report`:
+ * answered, failed, stopped, or cut off.
  *
  * Each run works inside `holding`, which keeps the chat up while it does.
  * `stop` interrupts only the brief's loop, so the run still reports and lets
@@ -273,71 +273,72 @@ export const makeRunner = Effect.fn(function* (options: {
   readonly report: (finished: AssistantEvent.SpecialistFinished) => Effect.Effect<void>
 }) {
   const { chat } = options
-  const fibers = yield* FiberSet.make()
   const runs = new Map<string, Run>()
   const byName = new Map(options.specialists.map((entry) => [entry.specialist.name, entry]))
+  // The brief loops working now, and the finished runs' countdowns to being forgotten.
+  const working = yield* FiberMap.make<string, Outcome>()
+  const forgetting = yield* FiberMap.make<string>()
+  const background = yield* FiberSet.make()
 
-  const forgetOld = Effect.gen(function* () {
-    const now = yield* Clock.currentTimeMillis
+  const report = Effect.fn(function* (run: Run, outcome: Outcome) {
+    const brief = yield* Ref.get(run.briefs)
 
-    for (const [id, run] of runs) if (run.working === undefined && now - run.lastUsed > warmMillis) runs.delete(id)
+    yield* options.report(finished(run.specialist.name, { runId: run.runId, brief, goal: run.goal }, outcome))
   })
 
-  const report = (run: Run, outcome: Outcome) =>
-    options.report(finished(run.specialist.name, { runId: run.runId, brief: run.briefs, goal: run.goal }, outcome))
+  const once = (run: Run) =>
+    runBrief(run.handler, {
+      specialist: run.specialist,
+      runId: run.runId,
+      brief: run.brief,
+      history: run.history,
+      inbox: run.inbox,
+      chatId: chat.chatId
+    }).pipe(
+      Effect.provideContext(Context.merge(options.model, services)),
+      Effect.match({
+        onSuccess: (answer): Outcome => ({ status: "answered", report: answer }),
+        onFailure: (error): Outcome => ({ status: "failed", error: String(error) })
+      })
+    )
 
-  /** Works on the brief until nothing new is in the inbox, then reports. */
+  // A message that arrived after the last read: keep working before reporting.
+  const untilCaughtUp = Effect.fn(function* (run: Run) {
+    let outcome = yield* once(run)
+
+    while ((yield* Queue.size(run.inbox)) > 0) outcome = yield* once(run)
+
+    return outcome
+  })
+
+  /** Works on the brief, reports, and starts the countdown to forgetting the run. */
   const work = Effect.fn(
     function* (run: Run) {
       yield* chat.append([
         AssistantEvent.SpecialistStarted.make({ runId: run.runId, specialist: run.specialist.name, goal: run.goal })
       ])
 
-      const once = runBrief(run.handler, {
-        specialist: run.specialist,
-        runId: run.runId,
-        brief: run.brief,
-        history: run.history,
-        inbox: run.inbox,
-        chatId: chat.chatId
-      }).pipe(
-        Effect.provideContext(Context.merge(options.model, services)),
-        Effect.match({
-          onSuccess: (report): Outcome => ({ status: "answered", report }),
-          onFailure: (error): Outcome => ({ status: "failed", error: String(error) })
-        })
-      )
-
-      // A message that arrived after the last read: keep working before reporting.
-      const loop = Effect.gen(function* () {
-        let outcome = yield* once
-
-        while (run.inbox.length > 0) outcome = yield* once
-
-        return outcome
-      })
-
-      const working = yield* Effect.forkChild(loop)
-
-      run.working = working
-
-      const exit = yield* Fiber.await(working)
-
-      run.working = undefined
-      run.lastUsed = yield* Clock.currentTimeMillis
+      const exit = yield* Fiber.await(yield* FiberMap.run(working, run.runId, untilCaughtUp(run)))
 
       // Only `stop` interrupts the loop alone.
       yield* report(run, Exit.isSuccess(exit) ? exit.value : { status: "stopped" })
+      yield* FiberMap.run(
+        forgetting,
+        run.runId,
+        Effect.sleep(warm).pipe(Effect.andThen(Effect.sync(() => runs.delete(run.runId))))
+      )
     },
     // A shutdown interrupts the whole run: no turn can start now, so the report waits for the chat's next start.
     (effect, run) => Effect.onInterrupt(effect, () => report(run, { status: "cut_off" }))
   )
 
-  const launch = (run: Run) => FiberSet.run(fibers, options.holding(work(run))).pipe(Effect.asVoid)
+  const launch = Effect.fn(function* (run: Run) {
+    yield* FiberMap.remove(forgetting, run.runId)
+    yield* FiberSet.run(background, options.holding(work(run)))
+  })
 
   const runner = Specialist.Runner.of({
     spawn: Effect.fn(function* (request: Specialist.SpawnRequest) {
-      yield* forgetOld
       const found = byName.get(request.kind)
 
       if (found === undefined) {
@@ -350,11 +351,9 @@ export const makeRunner = Effect.fn(function* (options: {
         handler: found.handler,
         goal: request.brief.goal,
         brief: request.brief,
-        history: [Items.userText(briefText(request.brief))],
-        inbox: [],
-        briefs: 1,
-        working: undefined,
-        lastUsed: yield* Clock.currentTimeMillis
+        history: yield* Ref.make<ReadonlyArray<Items.HistoryItem>>([Items.userText(briefText(request.brief))]),
+        inbox: yield* Queue.unbounded<Items.HistoryItem>(),
+        briefs: yield* Ref.make(1)
       }
 
       runs.set(run.runId, run)
@@ -363,7 +362,6 @@ export const makeRunner = Effect.fn(function* (options: {
       return run.runId
     }),
     message: Effect.fn(function* (runId: string, text: string) {
-      yield* forgetOld
       const run = runs.get(runId)
 
       if (run === undefined) {
@@ -372,31 +370,29 @@ export const makeRunner = Effect.fn(function* (options: {
         })
       }
 
-      run.briefs += 1
+      yield* Ref.update(run.briefs, (n) => n + 1)
 
-      if (run.working !== undefined) {
-        run.inbox.push(Items.userText(text))
+      if (yield* FiberMap.has(working, runId)) {
+        yield* Queue.offer(run.inbox, Items.userText(text))
 
         return "steered" as const
       }
 
-      run.history.push(Items.userText(text))
+      yield* Ref.update(run.history, (all) => [...all, Items.userText(text)])
       yield* launch(run)
 
       return "continued" as const
     }),
     stop: Effect.fn(function* (runId: string) {
-      const working = runs.get(runId)?.working
-
-      if (working === undefined) {
+      if (!(yield* FiberMap.has(working, runId))) {
         return yield* Specialist.SpecialistError.make({ message: `Run ${runId} isn't running.` })
       }
 
-      yield* Fiber.interrupt(working)
+      yield* FiberMap.remove(working, runId)
     })
   })
 
-  // What a run's handler gets: its chat, this runner, and (merged in `work`) the model.
+  // What a run's handler gets: its chat, this runner, and (merged in `once`) the model.
   const services = Context.make(AssistantChat, chat).pipe(Context.add(Specialist.Runner, runner))
 
   return runner
