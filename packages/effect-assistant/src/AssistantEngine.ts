@@ -53,7 +53,7 @@ import { ChatId } from "./ChatId.ts"
 import { ChatLog } from "./ChatLog.ts"
 import * as Chat from "./internal/chat.ts"
 import * as History from "./internal/history.ts"
-import * as Turns from "./internal/turns.ts"
+import type * as Turns from "./internal/turns.ts"
 
 /**
  * Service that runs assistants' chats. `toLayer` registers an assistant with

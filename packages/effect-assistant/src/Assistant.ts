@@ -434,7 +434,7 @@ export const make = <
   ): Layer.Layer<never, never, any> {
     return Layer.effectDiscard(
       Effect.gen(function* () {
-        const context = yield* Effect.context<never>()
+        const context = yield* Effect.context()
 
         const registration = yield* Turns.makeRegistration(definition, {
           // The build runs per chat activation, in the chat; here it only keeps the layer's services for it.
