@@ -56,9 +56,12 @@ InputId.fromKey(`${orderId}:shipped`)
 
 - `MyAssistant.subscribe(chatId)` streams stored entries, then live ones. It goes
   through the engine, so it works with the cluster engine too. Use it for a
-  chat UI.
-- The `ChatLog` service's `read(chatId)` returns what's stored
-  now. Use it in tests, or in code that runs where the log is written.
+  chat UI. A client that reconnects passes the last `seq` it has,
+  `subscribe(chatId, { after: seq })`, and gets only what's new.
+- An open chat keeps its entries in memory: turns and tools read them with
+  `AssistantChat`'s `entries`, not from the log.
+- The `ChatLog` service's `read(chatId)` (or `read(chatId, { after })`) returns
+  what's stored now. Use it in tests, or in code that runs where the log is written.
 
 `AssistantEvent` has helpers for common reads: `assistantTexts(entries)` for
 what the user was shown, `isInput`, and `isTurnEnd`.

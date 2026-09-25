@@ -30,11 +30,11 @@ export const MyAssistant = Assistant.make("my-assistant", {
 })
 ```
 
-| Member               | What it does                                                                  |
-| -------------------- | ----------------------------------------------------------------------------- |
-| `submit(chatId, in)` | Stores an input and returns: a message, a block answer, or a [fact](./facts). |
-| `subscribe(chatId)`  | Streams the chat's [events](./events): stored ones first, then live ones.     |
-| `toLayer(handler)`   | The handler's layer. It registers the assistant with the [engine](./engines). |
+| Member               | What it does                                                                                       |
+| -------------------- | -------------------------------------------------------------------------------------------------- |
+| `submit(chatId, in)` | Stores an input and returns: a message, a block answer, or a [fact](./facts).                      |
+| `subscribe(chatId)`  | Streams the chat's [events](./events): stored ones first (or those after `after`), then live ones. |
+| `toLayer(handler)`   | The handler's layer. It registers the assistant with the [engine](./engines).                      |
 
 The name is also the assistant's name in [traces](./observability)
 (`invoke_agent my-assistant`) and, with the cluster engine, in its entity type.

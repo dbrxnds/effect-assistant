@@ -3,7 +3,8 @@
  * `AssistantEvent`s.
  *
  * It's the storage: `append` numbers entries after the chat's last `seq`,
- * and `read` returns them in order. The engine's chats write through it one
+ * and `read` returns them in order, all of them or those after a `seq`. An
+ * open chat reads its log once and keeps its entries in memory. The engine's chats write through it one
  * at a time (each chat has a lock) and send new entries to the chat's
  * subscribers; an assistant's `subscribe` streams them. One process writes
  * each chat: the cluster engine sends a chat to one entity.
@@ -34,12 +35,23 @@ export class ChatLog extends Context.Service<
       chatId: ChatId,
       events: ReadonlyArray<AssistantEvent.AssistantEvent>
     ) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
-    /** Reads every stored entry of a chat, in order. */
-    readonly read: (chatId: ChatId) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
+    /** Reads a chat's stored entries, in order: all of them, or those after a `seq`. */
+    readonly read: (chatId: ChatId, options?: ReadOptions) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
     /** Chats whose last entry doesn't end a turn: the ones that may still owe one, after a restart. */
     readonly unfinished: Effect.Effect<ReadonlyArray<ChatId>>
   }
 >()("effect-assistant/ChatLog") {}
+
+/**
+ * Which of a chat's entries to read.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface ReadOptions {
+  /** Only the entries after this `seq`. */
+  readonly after?: number | undefined
+}
 
 /**
  * The storage a `ChatLog` is built on: read a chat, find its last `seq`,
@@ -49,7 +61,7 @@ export class ChatLog extends Context.Service<
  * @since 0.1.0
  */
 export interface Storage {
-  readonly read: (chatId: ChatId) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
+  readonly read: (chatId: ChatId, options?: ReadOptions) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
   readonly lastSeq: (chatId: ChatId) => Effect.Effect<number>
   readonly write: (chatId: ChatId, entries: ReadonlyArray<AssistantEvent.Entry>) => Effect.Effect<void>
   /** Every chat's last entry. */
@@ -104,7 +116,10 @@ export const layerMemory: Layer.Layer<ChatLog> = Layer.effect(
     const chats = yield* Ref.make(new Map<ChatId, ReadonlyArray<AssistantEvent.Entry>>())
 
     return make({
-      read: (chatId) => Effect.map(Ref.get(chats), (all) => all.get(chatId) ?? []),
+      read: (chatId, options) =>
+        Effect.map(Ref.get(chats), (all) =>
+          (all.get(chatId) ?? []).filter((entry) => entry.seq > (options?.after ?? 0))
+        ),
       lastSeq: (chatId) => Effect.map(Ref.get(chats), (all) => all.get(chatId)?.at(-1)?.seq ?? 0),
       write: (chatId, entries) =>
         Ref.update(chats, (all) => new Map(all).set(chatId, [...(all.get(chatId) ?? []), ...entries])),
@@ -158,8 +173,10 @@ export const layerSql: Layer.Layer<ChatLog, never, SqlClient.SqlClient> = Layer.
     const encodeEvent = Schema.encodeEffect(EventJson)
 
     return make({
-      read: Effect.fn(function* (chatId: ChatId) {
-        const rows = yield* sql`SELECT chat_id, seq, at, event FROM chat_log WHERE chat_id = ${chatId} ORDER BY seq`
+      read: Effect.fn(function* (chatId: ChatId, options?: ReadOptions) {
+        const rows = yield* sql`
+          SELECT chat_id, seq, at, event FROM chat_log WHERE chat_id = ${chatId} AND seq > ${options?.after ?? 0} ORDER BY seq
+        `
 
         return yield* toEntries(rows)
       }, Effect.orDie),

@@ -146,7 +146,8 @@ const make: <
     specialists: options?.specialists ?? [],
     toLayer,
     submit: (chatId, input) => AssistantEngine.use((engine) => engine.submit(name, chatId, input)),
-    subscribe: (chatId) => Stream.unwrap(AssistantEngine.useSync((engine) => engine.subscribe(name, chatId)))
+    subscribe: (chatId, options) =>
+      Stream.unwrap(AssistantEngine.useSync((engine) => engine.subscribe(name, chatId, options?.after ?? 0)))
   }
 
   return assistant
@@ -336,8 +337,11 @@ export interface Assistant<Name extends string = string, Specs extends Specialis
    * (a workflow update, say). The assistant works on it in the background.
    */
   readonly submit: (chatId: ChatId, input: AssistantEvent.Input) => Effect.Effect<void, never, AssistantEngine>
-  /** Streams the chat's stored events, then live ones. */
-  readonly subscribe: (chatId: ChatId) => Stream.Stream<AssistantEvent.Entry, never, AssistantEngine>
+  /** Streams the chat's stored events (those after `after`, for a client that has the rest), then live ones. */
+  readonly subscribe: (
+    chatId: ChatId,
+    options?: { readonly after?: number | undefined }
+  ) => Stream.Stream<AssistantEvent.Entry, never, AssistantEngine>
 }
 
 /**
@@ -541,8 +545,11 @@ interface Assistant<Name extends string = string, Specs extends Specialist.Any =
    * (a workflow update, say). The assistant works on it in the background.
    */
   readonly submit: (chatId: ChatId, input: AssistantEvent.Input) => Effect.Effect<void, never, AssistantEngine>
-  /** Streams the chat's stored events, then live ones. */
-  readonly subscribe: (chatId: ChatId) => Stream.Stream<AssistantEvent.Entry, never, AssistantEngine>
+  /** Streams the chat's stored events (those after `after`, for a client that has the rest), then live ones. */
+  readonly subscribe: (
+    chatId: ChatId,
+    options?: { readonly after?: number | undefined }
+  ) => Stream.Stream<AssistantEvent.Entry, never, AssistantEngine>
 }
 ```
 
