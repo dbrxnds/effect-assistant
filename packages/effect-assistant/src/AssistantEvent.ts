@@ -15,8 +15,9 @@
  * - Specialist runs: {@link SpecialistStarted}, {@link SpecialistFinished}. A
  *   finished run is an input too: its report wakes a turn.
  * - Blocks closed without an answer: {@link BlocksClosed}.
- * - The app's own events, like a summary for compaction: {@link Custom}. An
- *   assistant's `events` option decodes them to their own types.
+ * - The app's own events and inputs, like a summary for compaction or an
+ *   uploaded file: {@link AppEvent}, as they're stored. An assistant's
+ *   `events` and `inputs` decode them to their own types.
  *
  * Turns and specialist runs are the chat's activity: each opens with one event
  * and closes with another (see `AssistantActivity`).
@@ -121,21 +122,22 @@ export const Input = Schema.Union([UserMessage, BlockAnswer, Fact, SpecialistFin
 export type Input = typeof Input.Type
 
 /**
- * Schema for what a chat client may submit: user messages and block answers,
- * but not facts.
+ * Schema for the inputs from the chat's user: messages and block answers. A
+ * turn owes each one a reply. It's also what a chat client usually may
+ * submit; facts come from the server.
  *
  * @category inputs
  * @since 0.1.0
  */
-export const ClientInput = Schema.Union([UserMessage, BlockAnswer])
+export const UserInput = Schema.Union([UserMessage, BlockAnswer])
 
 /**
- * An input a chat client may submit.
+ * An input from the chat's user.
  *
  * @category inputs
  * @since 0.1.0
  */
-export type ClientInput = typeof ClientInput.Type
+export type UserInput = typeof UserInput.Type
 
 /**
  * The UI shown with a message: a block kind from the assistant's `BlockKit`, and
@@ -270,23 +272,7 @@ export class BlocksClosed extends Schema.TaggedClass<BlocksClosed>()("BlocksClos
 }) {}
 
 /**
- * An event of the app's own, stored as its name and its encoded value. An
- * assistant made with `events: [Summary]` writes a `Summary` this way with
- * `turn.append`, and reads it back as a `Summary` from `turn.entries`. The
- * model doesn't see it unless a handler puts it in the history.
- *
- * @category models
- * @since 0.1.0
- */
-export class Custom extends Schema.TaggedClass<Custom>()("Custom", {
-  /** The event's `_tag`. */
-  name: Schema.String,
-  /** The event, in its schema's encoded form. */
-  value: Schema.Unknown
-}) {}
-
-/**
- * Schema for every event in a chat.
+ * Schema for every event the library defines.
  *
  * @category schemas
  * @since 0.1.0
@@ -304,31 +290,95 @@ export const AssistantEvent = Schema.Union([
   TurnFailed,
   SpecialistStarted,
   SpecialistFinished,
-  BlocksClosed,
-  Custom
+  BlocksClosed
 ])
 
 /**
- * An event in a chat.
+ * An event the library defines.
  *
  * @category models
  * @since 0.1.0
  */
 export type AssistantEvent = typeof AssistantEvent.Type
 
+const libraryTags: ReadonlySet<string> = new Set(AssistantEvent.members.map((member) => member.identifier))
+
 /**
- * A stored event with its position in the chat. `seq` starts at 1 and has no
- * gaps; `at` is the time it was stored, in epoch milliseconds.
+ * Schema for the tag of one of the app's own events: any tag but the
+ * library's, branded, so narrowing an entry's event to one of the library's
+ * events (`Predicate.isTagged(event, "UserMessage")`) never leaves an app
+ * event in.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const AppTag = Schema.String.pipe(Schema.brand("effect-assistant/AppTag"))
+
+/**
+ * Schema for one of the app's own events or inputs, as it's stored and sent:
+ * its `_tag` and its fields in JSON. An assistant made with
+ * `events: [Summary]` decodes it to a `Summary` in `turn.entries` and in its
+ * `subscribe`; a client decodes it with the same schema.
  *
  * @category models
  * @since 0.1.0
  */
-export class Entry extends Schema.Class<Entry>("effect-assistant/AssistantEvent/Entry")({
+export const AppEvent = Schema.StructWithRest(Schema.Struct({ _tag: AppTag }), [
+  Schema.Record(Schema.String, Schema.Json)
+]).check(Schema.makeFilter((event) => !libraryTags.has(event._tag) || `${event._tag} is one of the library's events`))
+
+/**
+ * One of the app's own events, as it's stored.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type AppEvent = typeof AppEvent.Type
+
+/**
+ * Returns whether an event is one of the library's, not one of the app's own.
+ *
+ * @category guards
+ * @since 0.1.0
+ */
+export const isLibraryEvent = (event: { readonly _tag: string }): event is AssistantEvent => libraryTags.has(event._tag)
+
+/**
+ * A chat's entry with any event in it: the library's, or the app's own
+ * (decoded or not). What the folds over a chat take, so a client's typed
+ * entries fit too.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface AnyEntry {
+  readonly chatId: ChatId
+  readonly seq: number
+  readonly at: number
+  readonly event: { readonly _tag: string }
+}
+
+/**
+ * Schema for a stored event with its position in the chat. `seq` starts at 1
+ * and has no gaps; `at` is the time it was stored, in epoch milliseconds.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const Entry = Schema.Struct({
   chatId: ChatId,
   seq: Schema.Int,
   at: Schema.Finite,
-  event: AssistantEvent
-}) {}
+  event: Schema.Union([AssistantEvent, AppEvent])
+})
+
+/**
+ * A stored event with its position in the chat.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Entry = typeof Entry.Type
 
 /**
  * Returns whether an event is an input: a user message, a block answer, a
@@ -337,7 +387,7 @@ export class Entry extends Schema.Class<Entry>("effect-assistant/AssistantEvent/
  * @category guards
  * @since 0.1.0
  */
-export const isInput = (event: AssistantEvent): event is Input =>
+export const isInput = (event: { readonly _tag: string }): event is Input =>
   Predicate.isTagged(event, "UserMessage") ||
   Predicate.isTagged(event, "BlockAnswer") ||
   Predicate.isTagged(event, "Fact") ||
@@ -354,12 +404,12 @@ export const wakes = (input: Input): boolean =>
   !(Predicate.isTagged(input, "SpecialistFinished") && input.status === "stopped")
 
 /**
- * Returns whether an input came from the chat client (not a host fact).
+ * Returns whether an input came from the chat's user, and so is owed a reply.
  *
  * @category guards
  * @since 0.1.0
  */
-export const isClientInput = (input: Input): input is ClientInput =>
+export const isUserInput = (input: Input): input is UserInput =>
   Predicate.isTagged(input, "UserMessage") || Predicate.isTagged(input, "BlockAnswer")
 
 /**
@@ -368,7 +418,7 @@ export const isClientInput = (input: Input): input is ClientInput =>
  * @category guards
  * @since 0.1.0
  */
-export const isTurnEnd = (event: AssistantEvent): event is TurnCompleted | TurnFailed =>
+export const isTurnEnd = (event: { readonly _tag: string }): event is TurnCompleted | TurnFailed =>
   Predicate.isTagged(event, "TurnCompleted") || Predicate.isTagged(event, "TurnFailed")
 
 /**
@@ -377,5 +427,7 @@ export const isTurnEnd = (event: AssistantEvent): event is TurnCompleted | TurnF
  * @category getters
  * @since 0.1.0
  */
-export const assistantTexts = (entries: ReadonlyArray<Entry>): ReadonlyArray<string> =>
-  entries.flatMap(({ event }) => (Predicate.isTagged(event, "AssistantMessage") ? [event.text] : []))
+export const assistantTexts = (entries: ReadonlyArray<AnyEntry>): ReadonlyArray<string> =>
+  entries.flatMap(({ event }) =>
+    isLibraryEvent(event) && Predicate.isTagged(event, "AssistantMessage") ? [event.text] : []
+  )

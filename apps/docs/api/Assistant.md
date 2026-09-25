@@ -68,21 +68,30 @@ const AppLive = MyAssistantLive.pipe(
 
 ### make
 
-Defines an assistant: its name, its UI blocks, and its specialists.
+Defines an assistant: its name, its UI blocks, its specialists, and its own
+events and inputs.
 
 **Example** (Defining an assistant)
 
 ```ts
+import * as Schema from "effect/Schema"
 import { Assistant } from "effect-assistant"
 
-export const MyAssistant = Assistant.make("my-assistant", { blocks: Blocks, specialists: [Research] })
+const FileUploaded = Schema.TaggedStruct("FileUploaded", { id: InputId.InputId, name: Schema.String })
+
+export const MyAssistant = Assistant.make("my-assistant", {
+  blocks: Blocks,
+  specialists: [Research],
+  inputs: [FileUploaded]
+})
 ```
 
 ```ts
 const make: <
   const Name extends string,
   const Specs extends ReadonlyArray<Specialist.Any> = readonly [],
-  const Events extends ReadonlyArray<EventSchema> = readonly []
+  const Events extends ReadonlyArray<EventSchema> = readonly [],
+  const Inputs extends ReadonlyArray<EventSchema> = readonly []
 >(
   name: Name,
   options?: {
@@ -92,65 +101,19 @@ const make: <
     readonly specialists?: Specs | undefined
     /**
      * The app's own events, like a summary for compaction: tagged schemas.
-     * `turn.append` writes them to the chat's log and `turn.entries` reads
-     * them back, typed.
+     * `turn.append` writes them to the chat and `turn.entries` reads them
+     * back, typed. The model doesn't read them, unless a history view puts
+     * them in.
      */
     readonly events?: Events | undefined
+    /**
+     * The app's own inputs, like an uploaded file: tagged schemas. `submit`
+     * takes them, they wake a turn like a fact, and the model reads them.
+     * One with an `id` is stored once per id.
+     */
+    readonly inputs?: Inputs | undefined
   }
-): Assistant<Name, Specs[number], Events[number]["Type"]> => {
-  const definition: Turns.Definition = {
-    name,
-    blocks: options?.blocks,
-    specialists: options?.specialists ?? [],
-    events: options?.events ?? []
-  }
-
-  // The signature checks what the handler uses (`CheckServices`); the layer's services, which the build
-  // required, are provided to it and to every turn's stream, so what's left is the turn services.
-  function toLayer<R = never, RE = never, E = never, RX = never>(
-    build: (Handler<R, RE, Events[number]["Type"]> | Effect.Effect<Handler<R, RE, Events[number]["Type"]>, E, RX>) &
-      Specialist.CheckServices<Exclude<HandlerServices<R | RE>, RX>>
-  ): Layer.Layer<
-    never,
-    never,
-    | AssistantEngine
-    | LanguageModel.LanguageModel
-    | Specialist.HandlerOf<Specs[number]>
-    | Exclude<RX, Scope.Scope | AssistantChat>
-  >
-  function toLayer(
-    build: Handler<any, any, any> | Effect.Effect<Handler<any, any, any>, unknown, any>
-  ) => Layer.Layer<never, never, any> {
-    return Layer.effectDiscard(
-      Effect.gen(function* () {
-        const context = yield* Effect.context<never>()
-
-        const registration = yield* Turns.makeRegistration(definition, {
-          // The build runs per chat activation, in the chat; here it only keeps the layer's services for it.
-          open: (Effect.isEffect(build) ? build : Effect.succeed(build)).pipe(
-            Effect.map((handler) => (turn: Turn<any>) => Stream.provideContext(toStream(handler(turn)), context)),
-            Effect.provideContext(context),
-            Effect.orDie
-          )
-        })
-
-        yield* (yield* AssistantEngine).register(registration)
-      })
-    )
-  }
-
-  const assistant: Assistant<Name, Specs[number], Events[number]["Type"]> = {
-    [TypeId]: { definition },
-    name,
-    blocks: options?.blocks,
-    specialists: options?.specialists ?? [],
-    toLayer,
-    submit: (chatId, input) => AssistantEngine.use((engine) => engine.submit(name, chatId, input)),
-    subscribe: (chatId, options) =>
-      Stream.unwrap(AssistantEngine.useSync((engine) => engine.subscribe(name, chatId, options?.after ?? 0)))
-  }
-
-  return assistant
+) => Assistant<Name, Specs[number], Events[number]["Type"], Inputs[number]["Type"]>
 ```
 
 <small>Since 0.1.0</small>
@@ -173,7 +136,7 @@ type TurnServices = AssistantChat | Specialist.Runner
 Options for `turn.loop`.
 
 ```ts
-interface LoopOptions<Tools extends Toolkit.Toolkit, R> {
+interface LoopOptions<Tools extends Toolkit.Toolkit, R, Events = never> {
   /** The model to call, as the `LanguageModel` in context names it (e.g. `"claude-sonnet-5"`). */
   readonly model: string
   /** The assistant's role and rules. `Instructions.protocol` goes before them. */
@@ -186,212 +149,37 @@ interface LoopOptions<Tools extends Toolkit.Toolkit, R> {
   readonly maxSteps?: number | undefined
   /** What the reply pass tells the model when the turn would end without replying. */
   readonly replyNudge?: string | undefined
+  /** Which of the chat's entries the model reads, like the ones since a summary. Default: all of them. */
+  readonly history?: HistoryView<Events> | undefined
+}
+```
+
+<small>Since 0.1.0</small>
+
+### HistoryView
+
+Which of a chat's entries the model reads, and what else goes with them:
+returns entries (the model reads them as usual) and history items (it
+reads them as they are), in order.
+
+**Example** (The history since the last summary)
+
+```ts
+const sinceSummary: Assistant.HistoryView<Summary> = (entries) => {
+  const last = entries.findLast((entry) => entry.event._tag === "Summary")
+
+  return last === undefined || last.event._tag !== "Summary"
+    ? entries
+    : [Items.userText(`Earlier in this chat: ${last.event.text}`), ...entries.filter((entry) => entry.seq > last.seq)]
 }
 
-/**
- * A chat's entry, with the assistant's own events decoded to their types.
- *
- * @category models
- * @since 0.1.0
- */
-export interface Entry<Events = never> {
-  readonly chatId: ChatId
-  readonly seq: number
-  readonly at: number
-  readonly event: AssistantEvent.AssistantEvent | Events
-}
+turn.loop({ model, instructions, history: sinceSummary })
+```
 
-/**
- * Options for `turn.replyIfOwed`.
- *
- * @category models
- * @since 0.1.0
- */
-export interface ReplyOptions {
-  readonly model: string
-  /** The assistant's instructions, as for `turn.loop`: `Instructions.protocol` and the nudge are added. */
-  readonly instructions: string | Instructions.Resolved
-  /** What to tell the model. Default: that it hasn't replied yet, and should now. */
-  readonly nudge?: string | undefined
-}
-
-/**
- * One turn, as the assistant's handler sees it. `Events` are the assistant's
- * own events (its `events` option).
- *
- * **Details**
- *
- * `loop` is the whole agent loop with the library's rules. A handler that
- * runs its own loop builds it from the parts: `history` (or `entries`, for a
- * history of its own), `tools`, `instructions`, and `AssistantLoop.step`, and
- * ends with `replyIfOwed` so a user who asked something gets an answer.
- *
- * @category models
- * @since 0.1.0
- */
-export interface Turn<Events = never> {
-  readonly chatId: ChatId
-  /** The model's history, rebuilt from the chat's log. Read it before every model call; the loop does. */
-  readonly history: Effect.Effect<ReadonlyArray<Items.HistoryItem>>
-  /** The chat's entries, with the assistant's own events decoded. */
-  readonly entries: Effect.Effect<ReadonlyArray<Entry<Events>>>
-  /** Writes the assistant's own events to the chat's log, like a summary for compaction. */
-  readonly append: (...events: ReadonlyArray<Events>) => Effect.Effect<void>
-  /** The assistant's own tools: `send_user_message`, `wait`, and the specialist tools. */
-  readonly tools: Toolkit.Toolkit
-  /**
-   * The full system prompt for these instructions: `Instructions.protocol`,
-   * the instructions, and the specialist runs working now.
-   */
-  readonly instructions: (instructions: string | Instructions.Resolved) => Instructions.Resolved
-  /**
-   * The agent loop over the chat, with `Instructions.protocol`, the assistant's own tools,
-   * and these instructions, tools, and skills. Every step is a tool call. It
-   * ends with `replyIfOwed`.
-   */
-  readonly loop: <Tools extends Toolkit.Toolkit = Record<never, never>, R = never>(
-    options: LoopOptions<Tools, R>
-  ) => Stream.Stream<
-    AssistantLoop.Event,
-    AiError.AiError | AssistantLoop.ToolErrors<Tools>,
-    LanguageModel.LanguageModel | AssistantLoop.ToolServices<Tools> | R
-  >
-  /**
-   * One more pass, when the turn would end without replying to the user's
-   * latest message: the model can then only reply. Empty when no reply is
-   * owed, or when an input arrived that the next turn reads.
-   */
-  readonly replyIfOwed: (
-    options: ReplyOptions
-  ) => Stream.Stream<AssistantLoop.Event, AiError.AiError, LanguageModel.LanguageModel>
-}
-
-/**
- * An assistant's handler: runs a turn, as a stream of what the loop did. It
- * may return the stream from an Effect. `R` is what the stream needs, `RE`
- * what the Effect needs.
- *
- * The loop calls whatever `LanguageModel` the assistant's layer is given (like
- * effect-uai's `Anthropic.layer`), with the model `turn.loop` names.
- *
- * @category models
- * @since 0.1.0
- */
-export type Handler<R = never, RE = R, Events = never> = (
-  turn: Turn<Events>
-) =>
-  | Stream.Stream<AssistantLoop.Event, unknown, R>
-  | Effect.Effect<Stream.Stream<AssistantLoop.Event, unknown, R>, unknown, RE>
-
-/**
- * Returns what an assistant's handler needs beyond what its turns provide
- * (the turn services and `LanguageModel`): what its build Effect must
- * require.
- *
- * @category utility types
- * @since 0.1.0
- */
-export type HandlerServices<R> = Exclude<R, TurnServices | LanguageModel.LanguageModel>
-
-const TypeId = "~effect-assistant/Assistant"
-
-/** A handler's result as a stream: it may return the stream from an Effect. */
-const toStream = <R, RE>(
-  result:
-    | Stream.Stream<AssistantLoop.Event, unknown, R>
-    | Effect.Effect<Stream.Stream<AssistantLoop.Event, unknown, R>, unknown, RE>
-): Stream.Stream<AssistantLoop.Event, unknown, R | RE> => (Effect.isEffect(result) ? Stream.unwrap(result) : result)
-
-/**
- * An assistant's definition: what callers and the UI need to know, and its
- * handler's layer, which registers it with the engine.
- *
- * @category models
- * @since 0.1.0
- */
-export interface Assistant<Name extends string = string, Specs extends Specialist.Any = never, Events = never> {
-  readonly [TypeId]: { readonly definition: Turns.Definition }
-  readonly name: Name
-  readonly blocks: BlockKit.BlockKit | undefined
-  /** The specialists it can hand work to. */
-  readonly specialists: ReadonlyArray<Specs>
-  /**
-   * Registers the assistant's handler with the engine. The handler may use
-   * the turn services, `LanguageModel`, and services its build Effect
-   * required (see `Specialist.CheckServices`). The layer needs the model API
-   * and each specialist's handler (`Research.toLayer(...)`).
-   */
-  readonly toLayer: <R = never, RE = never, E = never, RX = never>(
-    build: (Handler<R, RE, Events> | Effect.Effect<Handler<R, RE, Events>, E, RX>) &
-      Specialist.CheckServices<Exclude<HandlerServices<R | RE>, RX>>
-  ) => Layer.Layer<
-    never,
-    never,
-    | AssistantEngine
-    | LanguageModel.LanguageModel
-    | Specialist.HandlerOf<Specs>
-    | Exclude<RX, Scope.Scope | AssistantChat>
-  >
-  /**
-   * Stores an input and returns: a user's message or block answer, or a fact
-   * (a workflow update, say). The assistant works on it in the background.
-   */
-  readonly submit: (chatId: ChatId, input: AssistantEvent.Input) => Effect.Effect<void, never, AssistantEngine>
-  /** Streams the chat's stored events (those after `after`, for a client that has the rest), then live ones. */
-  readonly subscribe: (
-    chatId: ChatId,
-    options?: { readonly after?: number | undefined }
-  ) => Stream.Stream<AssistantEvent.Entry, never, AssistantEngine>
-}
-
-/**
- * A schema for one of the app's own events: a tagged struct or class.
- *
- * @category models
- * @since 0.1.0
- */
-export type EventSchema = Schema.Codec<{ readonly _tag: string }, any>
-
-/**
- * Any assistant.
- *
- * @category models
- * @since 0.1.0
- */
-export type Any = Assistant<any, any, any>
-
-/**
- * Defines an assistant: its name, its UI blocks, and its specialists.
- *
- * **Example** (Defining an assistant)
- *
- * ```ts
- * import { Assistant } from "effect-assistant"
- *
- * export const MyAssistant = Assistant.make("my-assistant", { blocks: Blocks, specialists: [Research] })
- * ```
- *
- * @category constructors
- * @since 0.1.0
- */
-export const make = <
-  const Name extends string,
-  const Specs extends ReadonlyArray<Specialist.Any> = readonly [],
-  const Events extends ReadonlyArray<EventSchema> = readonly []
->(
-  name: Name,
-  options?: {
-    /** UI blocks the assistant can add to its messages. */
-    readonly blocks?: BlockKit.BlockKit | undefined
-    /** The specialists it can hand work to; each needs its `toLayer` provided to the assistant's. */
-    readonly specialists?: Specs | undefined
-    /**
-     * The app's own events, like a summary for compaction: tagged schemas.
-     * `turn.append` writes them to the chat's log and `turn.entries` reads
-     * them back, typed.
-     */
-    readonly events?: Events | undefined
-  }
+```ts
+type HistoryView<Events = never> = (
+  entries: ReadonlyArray<Entry<Events>>
+) => ReadonlyArray<Entry<Events> | Items.HistoryItem>
 ```
 
 <small>Since 0.1.0</small>
@@ -442,11 +230,14 @@ ends with `replyIfOwed` so a user who asked something gets an answer.
 ```ts
 interface Turn<Events = never> {
   readonly chatId: ChatId
-  /** The model's history, rebuilt from the chat's log. Read it before every model call; the loop does. */
-  readonly history: Effect.Effect<ReadonlyArray<Items.HistoryItem>>
-  /** The chat's entries, with the assistant's own events decoded. */
+  /**
+   * The model's history, from the chat's entries: all of them, or what a
+   * view keeps. Read it before every model call; the loop does.
+   */
+  readonly history: (view?: HistoryView<Events>) => Effect.Effect<ReadonlyArray<Items.HistoryItem>>
+  /** The chat's entries, with the assistant's own events and inputs decoded. */
   readonly entries: Effect.Effect<ReadonlyArray<Entry<Events>>>
-  /** Writes the assistant's own events to the chat's log, like a summary for compaction. */
+  /** Writes the assistant's own events to the chat, like a summary for compaction. */
   readonly append: (...events: ReadonlyArray<Events>) => Effect.Effect<void>
   /** The assistant's own tools: `send_user_message`, `wait`, and the specialist tools. */
   readonly tools: Toolkit.Toolkit
@@ -461,7 +252,7 @@ interface Turn<Events = never> {
    * ends with `replyIfOwed`.
    */
   readonly loop: <Tools extends Toolkit.Toolkit = Record<never, never>, R = never>(
-    options: LoopOptions<Tools, R>
+    options: LoopOptions<Tools, R, Events>
   ) => Stream.Stream<
     AssistantLoop.Event,
     AiError.AiError | AssistantLoop.ToolErrors<Tools>,
@@ -476,18 +267,6 @@ interface Turn<Events = never> {
     options: ReplyOptions
   ) => Stream.Stream<AssistantLoop.Event, AiError.AiError, LanguageModel.LanguageModel>
 }
-
-/**
- * An assistant's handler: runs a turn, as a stream of what the loop did. It
- * may return the stream from an Effect. `R` is what the stream needs, `RE`
- * what the Effect needs.
- *
- * The loop calls whatever `LanguageModel` the assistant's layer is given (like
- * effect-uai's `Anthropic.layer`), with the model `turn.loop` names.
- *
- * @category models
- * @since 0.1.0
- */
 ```
 
 <small>Since 0.1.0</small>
@@ -517,8 +296,12 @@ An assistant's definition: what callers and the UI need to know, and its
 handler's layer, which registers it with the engine.
 
 ```ts
-interface Assistant<Name extends string = string, Specs extends Specialist.Any = never, Events = never> {
-  readonly [TypeId]: { readonly definition: Turns.Definition }
+interface Assistant<
+  Name extends string = string,
+  Specs extends Specialist.Any = never,
+  Events = never,
+  Inputs = never
+> {
   readonly name: Name
   readonly blocks: BlockKit.BlockKit | undefined
   /** The specialists it can hand work to. */
@@ -530,7 +313,7 @@ interface Assistant<Name extends string = string, Specs extends Specialist.Any =
    * and each specialist's handler (`Research.toLayer(...)`).
    */
   readonly toLayer: <R = never, RE = never, E = never, RX = never>(
-    build: (Handler<R, RE, Events> | Effect.Effect<Handler<R, RE, Events>, E, RX>) &
+    build: (Handler<R, RE, Events | Inputs> | Effect.Effect<Handler<R, RE, Events | Inputs>, E, RX>) &
       Specialist.CheckServices<Exclude<HandlerServices<R | RE>, RX>>
   ) => Layer.Layer<
     never,
@@ -541,15 +324,21 @@ interface Assistant<Name extends string = string, Specs extends Specialist.Any =
     | Exclude<RX, Scope.Scope | AssistantChat>
   >
   /**
-   * Stores an input and returns: a user's message or block answer, or a fact
-   * (a workflow update, say). The assistant works on it in the background.
+   * Stores an input and returns: a user's message or block answer, a fact
+   * (a workflow update, say), or one of the assistant's own `inputs`. The
+   * assistant works on it in the background.
    */
-  readonly submit: (chatId: ChatId, input: AssistantEvent.Input) => Effect.Effect<void, never, AssistantEngine>
-  /** Streams the chat's stored events (those after `after`, for a client that has the rest), then live ones. */
+  readonly submit: (chatId: ChatId, input: AssistantEvent.Input | Inputs) => Effect.Effect<void, never, AssistantEngine>
+  /**
+   * Streams the chat's entries (those after `after`, for a client that has
+   * the rest), then live ones, with the assistant's own events decoded.
+   */
   readonly subscribe: (
     chatId: ChatId,
     options?: { readonly after?: number | undefined }
-  ) => Stream.Stream<AssistantEvent.Entry, never, AssistantEngine>
+  ) => Stream.Stream<Entry<Events | Inputs>, never, AssistantEngine>
+  /** Schema for the chat's entries, the assistant's own events included: for an RPC that streams them. */
+  readonly Entry: Schema.Codec<Entry<Events | Inputs>, Schema.Json>
 }
 ```
 
@@ -557,10 +346,13 @@ interface Assistant<Name extends string = string, Specs extends Specialist.Any =
 
 ### EventSchema
 
-A schema for one of the app's own events: a tagged struct or class.
+A schema for one of the app's own events or inputs: a tagged struct or
+class (`Schema.TaggedStruct`, `Schema.TaggedClass`) that needs no services.
 
 ```ts
-type EventSchema = Schema.Codec<{ readonly _tag: string }, any>
+type EventSchema = Schema.Codec<{ readonly _tag: string }, { readonly _tag: string }> & {
+  readonly fields: { readonly _tag: { readonly ast: SchemaAST.AST } }
+}
 ```
 
 <small>Since 0.1.0</small>
@@ -570,7 +362,7 @@ type EventSchema = Schema.Codec<{ readonly _tag: string }, any>
 Any assistant.
 
 ```ts
-type Any = Assistant<any, any, any>
+type Any = Assistant<any, any, any, any>
 ```
 
 <small>Since 0.1.0</small>

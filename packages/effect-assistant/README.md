@@ -62,7 +62,7 @@ export const AppLive = MyAssistantLive.pipe(
 )
 
 // Whom a chat is for is the app's data. At the edge, check the signed-in user may use it:
-const send = (userId: string, chatId: ChatId.ChatId, message: AssistantEvent.ClientInput) =>
+const send = (userId: string, chatId: ChatId.ChatId, message: AssistantEvent.UserInput) =>
   checkAccess(userId, chatId).pipe(Effect.andThen(MyAssistant.submit(chatId, message)))
 ```
 

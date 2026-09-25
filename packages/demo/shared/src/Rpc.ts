@@ -36,7 +36,7 @@ export const Subscribe = Rpc.make("Subscribe", {
  * @since 0.1.0
  */
 export const Submit = Rpc.make("Submit", {
-  payload: { chatId: ChatId.ChatId, input: AssistantEvent.ClientInput }
+  payload: { chatId: ChatId.ChatId, input: AssistantEvent.UserInput }
 })
 
 /**

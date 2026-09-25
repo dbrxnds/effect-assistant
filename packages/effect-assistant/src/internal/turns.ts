@@ -14,6 +14,7 @@ import * as Clock from "effect/Clock"
 import type * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import { identity } from "effect/Function"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Ref from "effect/Ref"
@@ -29,6 +30,7 @@ import type * as BlockKit from "../BlockKit.ts"
 import * as Instructions from "../Instructions.ts"
 import * as Skill from "../Skill.ts"
 import type * as Specialist from "../Specialist.ts"
+import * as AppEvents from "./events.ts"
 import * as History from "./history.ts"
 import { mapText } from "./instructions.ts"
 import * as Specialists from "./specialists.ts"
@@ -56,8 +58,8 @@ export interface Definition {
   readonly name: string
   readonly blocks: BlockKit.BlockKit | undefined
   readonly specialists: ReadonlyArray<Specialist.Any>
-  /** The app's own events, by schema. */
-  readonly events: ReadonlyArray<Assistant.EventSchema>
+  /** The app's own events and inputs. */
+  readonly app: AppEvents.AppEvents
 }
 
 /**
@@ -127,7 +129,7 @@ const failureMessage = (cause: Cause.Cause<unknown>): string =>
   })
 
 /** The specialist runs working now, for the prompt: what's in flight, without reading back through the chat. */
-const runningNow = (entries: ReadonlyArray<AssistantEvent.Entry>, now: number): string => {
+const runningNow = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, now: number): string => {
   const runs = [...AssistantActivity.fromEntries(entries).specialists.values()]
 
   if (runs.length === 0) return ""
@@ -141,22 +143,39 @@ const runningNow = (entries: ReadonlyArray<AssistantEvent.Entry>, now: number): 
   return `\n\nRunning now:\n${lines.join("\n")}`
 }
 
-const lastSeq = (entries: ReadonlyArray<AssistantEvent.Entry>, otherwise: number) => entries.at(-1)?.seq ?? otherwise
+const lastSeq = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, otherwise: number) => entries.at(-1)?.seq ?? otherwise
 
-/** The app's own event stored as `Custom`, decoded with its schema; any other entry as it is. */
-const decodeEntry = (definition: Definition, entry: AssistantEvent.Entry): Assistant.Entry<any> => {
-  if (!Predicate.isTagged(entry.event, "Custom")) return entry
+/**
+ * A history view's result as a history: each run of entries as the model
+ * reads them, and history items as they are, in order.
+ */
+const toHistory = (
+  viewed: ReadonlyArray<Assistant.Entry<any> | Items.HistoryItem>,
+  inputs: ReadonlySet<string>
+): ReadonlyArray<Items.HistoryItem> => {
+  const out: Array<Items.HistoryItem> = []
+  let run: Array<AssistantEvent.AnyEntry> = []
 
-  const { value } = entry.event
-
-  for (const schema of definition.events) {
-    const decoded = Schema.decodeUnknownOption(Schema.toCodecJson(schema))(value)
-
-    if (Option.isSome(decoded)) return { chatId: entry.chatId, seq: entry.seq, at: entry.at, event: decoded.value }
+  const flush = () => {
+    out.push(...History.fromEntries(run, inputs))
+    run = []
   }
 
-  return entry
+  for (const item of viewed) {
+    if (isEntry(item)) run.push(item)
+    else {
+      flush()
+      out.push(item)
+    }
+  }
+
+  flush()
+
+  return out
 }
+
+const isEntry = (item: Assistant.Entry<any> | Items.HistoryItem): item is Assistant.Entry<any> =>
+  Predicate.hasProperty(item, "seq")
 
 /**
  * Closes the calls this turn made that have no result: the handler's stream
@@ -199,11 +218,11 @@ const closeOpenCalls = Effect.fn(function* (chat: AssistantChat["Service"], star
  * input got no reply; an input that arrived after the turn's last read gets
  * the next turn, which replies.
  */
-const finishTurn = Effect.fn(function* (chat: AssistantChat["Service"], read: number) {
+const finishTurn = Effect.fn(function* (chat: AssistantChat["Service"], read: number, inputs: ReadonlySet<string>) {
   const entries = yield* chat.entries
 
   const end =
-    History.owesReply(entries, read) && !History.unreadAfter(entries, read)
+    History.owesReply(entries, read) && !History.unreadAfter(entries, read, inputs)
       ? AssistantEvent.TurnFailed.make({ throughSeq: read, message: silentTurnMessage })
       : AssistantEvent.TurnCompleted.make({ throughSeq: read })
 
@@ -227,11 +246,19 @@ const makeTurnApi = (
   running: string
 ): Assistant.Turn<any> => {
   const { definition, builtins } = registration
+  const { app } = definition
+
+  const decoded = (all: ReadonlyArray<AssistantEvent.AnyEntry>) =>
+    all.flatMap((entry) => Option.toArray(AppEvents.decodeEntry(app, entry)))
 
   // Reading the chat, for the history or the entries, moves how far the turn read.
-  const entries = Effect.tap(chat.entries, (all) => Ref.update(read, (seq) => lastSeq(all, seq)))
+  const entries = Effect.map(
+    Effect.tap(chat.entries, (all) => Ref.update(read, (seq) => lastSeq(all, seq))),
+    decoded
+  )
 
-  const history = Effect.map(entries, History.fromEntries)
+  const history = (view: Assistant.HistoryView<any> = identity) =>
+    Effect.map(entries, (all) => toHistory(view(all), app.inputs))
 
   const instructions = (given: string | Instructions.Resolved) =>
     mapText(given, (text) => `${Instructions.protocol}\n\n${text}${running}`)
@@ -246,7 +273,7 @@ const makeTurnApi = (
         const through = yield* Ref.get(read)
 
         // Something arrived after the loop's last read: the next turn reads it with the full loop, and replies.
-        if (History.unreadAfter(all, through) || !History.owesReply(all, through)) return Stream.empty
+        if (History.unreadAfter(all, through, app.inputs) || !History.owesReply(all, through)) return Stream.empty
 
         return AssistantLoop.stream({
           model: options.model,
@@ -256,7 +283,7 @@ const makeTurnApi = (
           ),
           toolkit: replyOnly,
           // Not `history`: what the reply pass reads, it can only reply to, so it doesn't move how far the turn read.
-          history: Effect.map(chat.entries, History.fromEntries),
+          history: Effect.map(chat.entries, (all) => History.fromEntries(all, app.inputs)),
           maxSteps: 1,
           // Named, not just required: a model used to calling wait would otherwise call a tool that isn't there.
           toolChoice: { type: "function", name: "send_user_message" }
@@ -265,20 +292,12 @@ const makeTurnApi = (
     )
 
   const append = (...events: ReadonlyArray<{ readonly _tag: string }>) =>
-    Effect.forEach(events, (event) => {
-      const schema = definition.events.find((candidate) => Schema.is(candidate)(event))
-
-      return schema === undefined
-        ? Effect.die(`${event._tag} isn't one of the ${definition.name} assistant's events.`)
-        : Effect.map(Schema.encodeUnknownEffect(Schema.toCodecJson(schema))(event), (value) =>
-            AssistantEvent.Custom.make({ name: event._tag, value })
-          )
-    }).pipe(Effect.orDie, Effect.flatMap(chat.append), Effect.asVoid)
+    Effect.forEach(events, (event) => AppEvents.encode(app, event)).pipe(Effect.flatMap(chat.append), Effect.asVoid)
 
   return {
     chatId: chat.chatId,
     history,
-    entries: Effect.map(entries, (all) => all.map((entry) => decodeEntry(definition, entry))),
+    entries,
     append,
     tools: builtins,
     instructions,
@@ -295,7 +314,7 @@ const makeTurnApi = (
               model: options.model,
               instructions: mapText(instructions(options.instructions), (text) => Skill.withCatalog(text, skills)),
               toolkit,
-              history,
+              history: history(options.history),
               maxSteps: options.maxSteps ?? 16,
               toolChoice: "required"
             })
@@ -327,7 +346,7 @@ export const runTurn = Effect.fn(
     const { chat } = options
     const before = yield* chat.entries
 
-    yield* Telemetry.agentInput(History.unhandledInputs(before))
+    yield* Telemetry.agentInput(History.unhandledInputs(before, options.registration.definition.app.inputs))
 
     const started = yield* chat.append([
       AssistantEvent.TurnStarted.make({ assistant: options.registration.definition.name })
@@ -353,7 +372,10 @@ export const runTurn = Effect.fn(
       Effect.onExit((exit) => (Exit.hasInterrupts(exit) ? Effect.void : closeOpenCalls(chat, startSeq))),
       Effect.provideContext(options.services),
       Effect.matchCauseEffect({
-        onSuccess: () => Effect.flatMap(Ref.get(read), (through) => finishTurn(chat, through)),
+        onSuccess: () =>
+          Effect.flatMap(Ref.get(read), (through) =>
+            finishTurn(chat, through, options.registration.definition.app.inputs)
+          ),
         onFailure: (cause) => failTurn(chat, cause)
       })
     )

@@ -32,11 +32,11 @@ Each event is stored as an `AssistantEvent.Entry`: the chat id, a `seq`
 | `TurnStarted`, `TurnCompleted`, `TurnFailed` | [Turn](./turns) bookkeeping.                                                                                      |
 | `SpecialistStarted`, `SpecialistFinished`    | A [specialist](./specialists) run working, and done; a finished run's report wakes a turn.                        |
 | `BlocksClosed`                               | [Blocks](./blocks) closed without an answer.                                                                      |
-| `Custom`                                     | An event of [your own](#your-own-events), like a summary.                                                         |
+| Your own events and inputs                   | [Yours](#your-own-events-and-inputs), like a summary or an uploaded file, stored as themselves.                   |
 
 The first three are **inputs**: submitting one starts a turn, or joins the
 one that is running. A chat client may submit `UserMessage` and
-`BlockAnswer` (`AssistantEvent.ClientInput`); facts come from your server,
+`BlockAnswer` (`AssistantEvent.UserInput`); facts come from your server,
 which submits them itself.
 
 ## Input ids make retries safe
@@ -103,24 +103,35 @@ A client that folds the stream one entry at a time uses
 working: the assistant took its last step, and the workflow's next fact wakes
 it.
 
-## Your own events
+## Your own events and inputs
 
-An assistant can store events of its own in the chat's log, like a summary
-for [compaction](./loops#compaction). Declare them as tagged schemas:
+An assistant can store events of its own in the chat, and take inputs of its
+own. Declare them as tagged schemas (`Schema.TaggedStruct` or
+`Schema.TaggedClass`):
 
 ```ts
-class Summary extends Schema.TaggedClass<Summary>()("Summary", {
-  throughSeq: Schema.Int,
-  text: Schema.String
+class Summary extends Schema.TaggedClass<Summary>()("Summary", { text: Schema.String }) {}
+
+class FileUploaded extends Schema.TaggedClass<FileUploaded>()("FileUploaded", {
+  id: InputId.InputId,
+  name: Schema.String
 }) {}
 
-export const MyAssistant = Assistant.make("my-assistant", { events: [Summary] })
+export const MyAssistant = Assistant.make("my-assistant", { events: [Summary], inputs: [FileUploaded] })
 ```
 
-In the handler, `turn.append(Summary.make({ ... }))` stores one as a `Custom`
-entry (its `name` and encoded `value`), and `turn.entries` reads it back
-decoded, as a `Summary`. The model doesn't see these events unless the
-handler puts them in the history.
+- **Events** are the app's records, like a summary for
+  [compaction](./loops#compaction). `turn.append` stores one; the model
+  doesn't read it unless a history view puts it in.
+- **Inputs** come from outside, like an uploaded file. `MyAssistant.submit`
+  takes one; it wakes a turn like a fact, and the model reads it as
+  `<FileUploaded>` with its fields in JSON. One with an `id` is stored once
+  per id.
+
+Both are stored as themselves, in their schema's JSON form: a `Date` or a
+`bigint` survives. `turn.entries` and `MyAssistant.subscribe` decode them to
+their types. For an RPC that streams a chat, use `MyAssistant.Entry` as the
+schema: it covers the assistant's own events too.
 
 ## History order
 

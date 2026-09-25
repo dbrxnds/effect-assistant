@@ -52,11 +52,6 @@ export * as ChatLog from "./ChatLog.ts"
 /**
  * @since 0.1.0
  */
-export * as AssistantHistory from "./AssistantHistory.ts"
-
-/**
- * @since 0.1.0
- */
 export * as AssistantLoop from "./AssistantLoop.ts"
 
 /**

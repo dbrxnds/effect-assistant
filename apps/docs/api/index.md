@@ -19,7 +19,6 @@ import * as Assistant from "effect-assistant/Assistant"
 - [AssistantChat](./AssistantChat)
 - [AssistantEngine](./AssistantEngine)
 - [AssistantEvent](./AssistantEvent)
-- [AssistantHistory](./AssistantHistory)
 - [AssistantLoop](./AssistantLoop)
 - [AssistantToolCall](./AssistantToolCall)
 - [Block](./Block)

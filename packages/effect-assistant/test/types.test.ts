@@ -178,7 +178,7 @@ describe("types", () => {
         model: "claude-haiku-4-5",
         instructions: turn.instructions("Help."),
         toolkit: turn.tools,
-        history: turn.history.pipe(Effect.map((items) => recent(items, 50))),
+        history: Effect.map(turn.history(), (items) => recent(items, 50)),
         toolChoice: "required"
       })
     )

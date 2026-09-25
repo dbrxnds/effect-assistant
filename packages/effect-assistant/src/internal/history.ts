@@ -41,21 +41,19 @@ const ago = (millis: number) => {
  * took, whether the user wrote since it started, and its report.
  */
 const finishedText = (
-  entries: ReadonlyArray<AssistantEvent.Entry>,
+  entries: ReadonlyArray<AssistantEvent.AnyEntry>,
   index: number,
   finished: AssistantEvent.SpecialistFinished
 ) => {
   const at = entries[index]!
-  let from = index
 
-  while (from > 0) {
-    from -= 1
-    const { event } = entries[from]!
+  const isStart = ({ event }: AssistantEvent.AnyEntry) =>
+    AssistantEvent.isLibraryEvent(event) &&
+    Predicate.isTagged(event, "SpecialistStarted") &&
+    event.runId === finished.runId
 
-    if (Predicate.isTagged(event, "SpecialistStarted") && event.runId === finished.runId) break
-  }
-
-  const started = Predicate.isTagged(entries[from]?.event, "SpecialistStarted") ? entries[from] : undefined
+  const from = entries.slice(0, index).findLastIndex(isStart)
+  const started = from === -1 ? undefined : entries[from]
   const since = started === undefined ? [] : entries.slice(from + 1, index)
   const wrote = since.some(({ event }) => Predicate.isTagged(event, "UserMessage"))
 
@@ -79,6 +77,10 @@ const finishedText = (
   )}\n</specialist>`
 }
 
+/** One of the app's own inputs as the model reads it: its tag, and its fields as JSON. */
+const appInputText = ({ _tag, ...fields }: { readonly _tag: string }) =>
+  `<${_tag}>\n${JSON.stringify(fields)}\n</${_tag}>`
+
 const answerText = (answer: AssistantEvent.BlockAnswer) =>
   `<answer message="${answer.messageId}" kind="${answer.kind}">\nThe user answered with the block on your message ${answer.messageId}.\n${JSON.stringify(answer.value)}\n</answer>`
 
@@ -97,7 +99,10 @@ const answerText = (answer: AssistantEvent.BlockAnswer) =>
  *
  * @internal
  */
-export const fromEntries = (entries: ReadonlyArray<AssistantEvent.Entry>): ReadonlyArray<Items.HistoryItem> => {
+export const fromEntries = (
+  entries: ReadonlyArray<AssistantEvent.AnyEntry>,
+  inputs: ReadonlySet<string>
+): ReadonlyArray<Items.HistoryItem> => {
   const history: Array<Items.HistoryItem> = []
   const held: Array<Items.HistoryItem> = []
   const open = new Set<string>()
@@ -108,13 +113,11 @@ export const fromEntries = (entries: ReadonlyArray<AssistantEvent.Entry>): Reado
 
   /** How far the next model step had read when it was written, if there is one. */
   const nextSeen = (from: number) => {
-    for (let j = from + 1; j < entries.length; j++) {
-      const event = entries[j]!.event
+    const next = entries.slice(from + 1).find(({ event }) => Predicate.isTagged(event, "ModelOutput"))?.event
 
-      if (Predicate.isTagged(event, "ModelOutput")) return event.seenThroughSeq
-    }
-
-    return undefined
+    return next !== undefined && AssistantEvent.isLibraryEvent(next) && Predicate.isTagged(next, "ModelOutput")
+      ? next.seenThroughSeq
+      : undefined
   }
 
   const input = (index: number, item: Items.HistoryItem) => {
@@ -124,7 +127,14 @@ export const fromEntries = (entries: ReadonlyArray<AssistantEvent.Entry>): Reado
     else history.push(item)
   }
 
-  entries.forEach(({ event }, index) =>
+  entries.forEach(({ event }, index) => {
+    if (!AssistantEvent.isLibraryEvent(event)) {
+      // The app's own events: its inputs the model reads; the rest are the app's records.
+      if (inputs.has(event._tag)) input(index, Items.userText(appInputText(event)))
+
+      return
+    }
+
     Match.value(event).pipe(
       Match.tagsExhaustive({
         UserMessage: (message) => input(index, Items.userText(message.text)),
@@ -148,21 +158,29 @@ export const fromEntries = (entries: ReadonlyArray<AssistantEvent.Entry>): Reado
         TurnFailed: () => undefined,
         SpecialistFinished: (finished) => input(index, Items.userText(finishedText(entries, index, finished))),
         SpecialistStarted: () => undefined,
-        BlocksClosed: () => undefined,
-        Custom: () => undefined
+        BlocksClosed: () => undefined
       })
     )
-  )
+  })
 
   return [...history, ...held]
 }
+
+/**
+ * Returns whether an event is an input: one of the library's, or one of the
+ * app's own `inputs`.
+ *
+ * @internal
+ */
+export const isInput = (event: { readonly _tag: string }, inputs: ReadonlySet<string>): boolean =>
+  AssistantEvent.isInput(event) || inputs.has(event._tag)
 
 /**
  * Returns the `seq` the last finished turn read through, or 0.
  *
  * @internal
  */
-export const handledThrough = (entries: ReadonlyArray<AssistantEvent.Entry>): number => {
+export const handledThrough = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): number => {
   const last = entries.findLast(({ event }) => AssistantEvent.isTurnEnd(event))?.event
 
   return last !== undefined && AssistantEvent.isTurnEnd(last) ? last.throughSeq : 0
@@ -170,14 +188,20 @@ export const handledThrough = (entries: ReadonlyArray<AssistantEvent.Entry>): nu
 
 /**
  * Returns the inputs no finished turn has read: what the next turn is about.
+ * A run the assistant stopped isn't one: it wakes nothing.
  *
  * @internal
  */
-export const unhandledInputs = (entries: ReadonlyArray<AssistantEvent.Entry>): ReadonlyArray<AssistantEvent.Input> => {
+export const unhandledInputs = (
+  entries: ReadonlyArray<AssistantEvent.AnyEntry>,
+  inputs: ReadonlySet<string>
+): ReadonlyArray<{ readonly _tag: string }> => {
   const seen = handledThrough(entries)
 
   return entries.flatMap(({ event, seq }) =>
-    seq > seen && AssistantEvent.isInput(event) && AssistantEvent.wakes(event) ? [event] : []
+    seq > seen && isInput(event, inputs) && !(AssistantEvent.isInput(event) && !AssistantEvent.wakes(event))
+      ? [event]
+      : []
   )
 }
 
@@ -186,7 +210,8 @@ export const unhandledInputs = (entries: ReadonlyArray<AssistantEvent.Entry>): R
  *
  * @internal
  */
-export const needsTurn = (entries: ReadonlyArray<AssistantEvent.Entry>): boolean => unhandledInputs(entries).length > 0
+export const needsTurn = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, inputs: ReadonlySet<string>): boolean =>
+  unhandledInputs(entries, inputs).length > 0
 
 /**
  * Returns whether the user's latest message (or block answer) read through
@@ -195,9 +220,9 @@ export const needsTurn = (entries: ReadonlyArray<AssistantEvent.Entry>): boolean
  *
  * @internal
  */
-export const owesReply = (entries: ReadonlyArray<AssistantEvent.Entry>, throughSeq: number): boolean => {
+export const owesReply = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, throughSeq: number): boolean => {
   const latest = entries.findLast(
-    ({ event, seq }) => seq <= throughSeq && AssistantEvent.isInput(event) && AssistantEvent.isClientInput(event)
+    ({ event, seq }) => seq <= throughSeq && AssistantEvent.isInput(event) && AssistantEvent.isUserInput(event)
   )
 
   return (
@@ -214,5 +239,8 @@ export const owesReply = (entries: ReadonlyArray<AssistantEvent.Entry>, throughS
  *
  * @internal
  */
-export const unreadAfter = (entries: ReadonlyArray<AssistantEvent.Entry>, throughSeq: number): boolean =>
-  entries.some(({ event, seq }) => seq > throughSeq && AssistantEvent.isInput(event))
+export const unreadAfter = (
+  entries: ReadonlyArray<AssistantEvent.AnyEntry>,
+  throughSeq: number,
+  inputs: ReadonlySet<string>
+): boolean => entries.some(({ event, seq }) => seq > throughSeq && isInput(event, inputs))

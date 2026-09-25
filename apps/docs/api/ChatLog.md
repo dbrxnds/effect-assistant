@@ -80,7 +80,7 @@ class ChatLog extends Context.Service<
     /** Appends events to a chat and returns them as stored entries. */
     readonly append: (
       chatId: ChatId,
-      events: ReadonlyArray<AssistantEvent.AssistantEvent>
+      events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.AppEvent>
     ) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
     /** Reads a chat's stored entries, in order: all of them, or those after a `seq`. */
     readonly read: (chatId: ChatId, options?: ReadOptions) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
@@ -141,7 +141,10 @@ interface Storage {
 export const make = (storage: Storage): ChatLog["Service"] =>
   ChatLog.of({
     read: storage.read,
-    append: Effect.fn(function* (chatId: ChatId, events: ReadonlyArray<AssistantEvent.AssistantEvent>) {
+    append: Effect.fn(function* (
+      chatId: ChatId,
+      events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.AppEvent>
+    ) {
       if (events.length === 0) return []
 
       const seq = yield* storage.lastSeq(chatId)

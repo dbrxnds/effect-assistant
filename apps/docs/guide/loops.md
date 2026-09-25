@@ -11,8 +11,8 @@ stream.
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | `turn.instructions(text)`                           | The full system prompt: `Instructions.protocol`, your text, and the specialist runs working now. |
 | `turn.tools`                                        | The assistant's own tools: `send_user_message`, `wait`, and the specialist tools.                |
-| `turn.history`                                      | The model's history, rebuilt from the chat's log each time you read it.                          |
-| `turn.entries`                                      | The chat's entries, for a history of your own (see [below](#change-what-the-model-sees)).        |
+| `turn.history(view?)`                               | The model's history from the chat's entries: all of them, or what a view keeps.                  |
+| `turn.entries`                                      | The chat's entries, with the assistant's own events decoded.                                     |
 | [`AssistantLoop.step`](/api/AssistantLoop#step)     | One step: call the model, run its tool calls.                                                    |
 | [`AssistantLoop.stream`](/api/AssistantLoop#stream) | The whole loop, steps until the model is done.                                                   |
 | `turn.replyIfOwed(...)`                             | One more pass, reply-only, when the user's latest message has no reply.                          |
@@ -45,7 +45,7 @@ const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
         model: "claude-sonnet-5",
         instructions: turn.instructions(instructions),
         toolkit: { ...turn.tools, ...toolkit },
-        history: turn.history,
+        history: turn.history(),
         toolChoice: "required"
       },
       (result) => (result.done || state.steps >= 12 ? Loop.stop() : Loop.next({ steps: state.steps + 1 }))
@@ -77,32 +77,26 @@ reply."). See [a reply to every message](./turns#a-reply-to-every-message).
 
 ## Change what the model sees
 
-Pass the loop a history of your own. `turn.entries` reads the chat's entries,
-and [`AssistantHistory.fromEntries`](/api/AssistantHistory#fromentries) turns
-any slice of them into the model's history, with the same rules as
-`turn.history`.
+A history view picks which of the chat's entries the model reads, and what
+goes with them. It gets the entries and returns entries (the model reads them
+as usual) and history items (it reads them as they are), in order. Pass it to
+the loop as `history`, or to `turn.history(view)` in a loop of your own.
 
 **Example** (Keep the last 10 turns)
 
 ```ts
-import { type Assistant, AssistantEvent, AssistantHistory, AssistantLoop } from "effect-assistant"
-import * as Effect from "effect/Effect"
-import * as Stream from "effect/Stream"
+import { type Assistant, AssistantEvent } from "effect-assistant"
 
-const lastTurns = (entries: ReadonlyArray<Assistant.Entry>, turns: number) => {
-  const starts = entries.flatMap((entry, i) => (AssistantEvent.isTurnEnd(entry.event) ? [i + 1] : []))
+const lastTurns =
+  (turns: number): Assistant.HistoryView =>
+  (entries) => {
+    const starts = entries.flatMap((entry, i) => (AssistantEvent.isTurnEnd(entry.event) ? [i + 1] : []))
 
-  return entries.slice(starts.at(-turns) ?? 0)
-}
+    return entries.slice(starts.at(-turns) ?? 0)
+  }
 
 const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
-  AssistantLoop.stream({
-    model: "claude-sonnet-5",
-    instructions: turn.instructions(instructions),
-    toolkit: { ...turn.tools, ...toolkit },
-    history: turn.entries.pipe(Effect.map((entries) => AssistantHistory.fromEntries(lastTurns(entries, 10)))),
-    toolChoice: "required"
-  }).pipe(Stream.concat(turn.replyIfOwed({ model: "claude-sonnet-5", instructions })))
+  turn.loop({ model: "claude-sonnet-5", instructions, history: lastTurns(10) })
 )
 ```
 
@@ -115,46 +109,35 @@ Instead of dropping the start of a long chat, summarize it. Store the summary
 as an event of your own, and start the history at the last one.
 
 Declare the event with the assistant's `events` option. `turn.append` writes
-it to the chat's log, and `turn.entries` reads it back as a `Summary`. The
-model doesn't see it unless you put it in the history.
+it to the chat, and `turn.entries` reads it back as a `Summary`. The model
+doesn't read it unless a view puts it in.
 
 ```ts
 import { Assistant } from "effect-assistant"
 import * as Schema from "effect/Schema"
 
-class Summary extends Schema.TaggedClass<Summary>()("Summary", {
-  throughSeq: Schema.Int, // the last entry it covers
-  text: Schema.String
-}) {}
+class Summary extends Schema.TaggedClass<Summary>()("Summary", { text: Schema.String }) {}
 
 export const MyAssistant = Assistant.make("my-assistant", { events: [Summary] })
 ```
 
-The handler builds the history from the last summary on: the summary's text
-first, then the entries after it. When that grows past a size, it appends a
-new summary through the last turn end before it runs the loop.
+The view starts at the last summary: its text first, then the entries after
+it. When that grows past a size, the handler appends a new summary before it
+runs the loop.
 
 **Example** (Summarize past 200 history items)
 
 ```ts
 import * as Items from "@effect-uai/core/Items"
-import { type Assistant, AssistantEvent, AssistantHistory, AssistantLoop } from "effect-assistant"
+import type { Assistant } from "effect-assistant"
 import * as Effect from "effect/Effect"
-import * as Stream from "effect/Stream"
 
-/** The last summary, and the entries after it. */
-const sinceSummary = (entries: ReadonlyArray<Assistant.Entry<Summary>>) => {
-  const summary = entries.flatMap(({ event }) => (event instanceof Summary ? [event] : [])).at(-1)
+const sinceSummary: Assistant.HistoryView<Summary> = (entries) => {
+  const last = entries.findLast(({ event }) => event instanceof Summary)
 
-  return { summary, since: entries.filter((entry) => entry.seq > (summary?.throughSeq ?? 0)) }
-}
-
-const historyOf = (entries: ReadonlyArray<Assistant.Entry<Summary>>) => {
-  const { summary, since } = sinceSummary(entries)
-
-  return AssistantHistory.fromEntries(since, {
-    before: summary === undefined ? [] : [Items.userText(`Earlier in this chat: ${summary.text}`)]
-  })
+  return last === undefined || !(last.event instanceof Summary)
+    ? entries
+    : [Items.userText(`Earlier in this chat: ${last.event.text}`), ...entries.filter(({ seq }) => seq > last.seq)]
 }
 
 const MyAssistantHandlers = MyAssistant.toLayer(
@@ -162,30 +145,18 @@ const MyAssistantHandlers = MyAssistant.toLayer(
     const summarizer = yield* Summarizer // your service: summarizes a history
 
     return Effect.fn(function* (turn: Assistant.Turn<Summary>) {
-      const entries = yield* turn.entries
-      const { since } = sinceSummary(entries)
-      const lastEnd = since.filter(({ event }) => !(event instanceof Summary) && AssistantEvent.isTurnEnd(event)).at(-1)
+      const history = yield* turn.history(sinceSummary)
 
-      if (lastEnd !== undefined && AssistantHistory.fromEntries(since).length > 200) {
-        const text = yield* summarizer.summarize(historyOf(entries.filter((entry) => entry.seq <= lastEnd.seq)))
-        yield* turn.append(Summary.make({ throughSeq: lastEnd.seq, text }))
-      }
+      if (history.length > 200) yield* turn.append(Summary.make({ text: yield* summarizer.summarize(history) }))
 
-      return AssistantLoop.stream({
-        model: "claude-sonnet-5",
-        instructions: turn.instructions(instructions),
-        toolkit: turn.tools,
-        history: turn.entries.pipe(Effect.map(historyOf)),
-        toolChoice: "required"
-      }).pipe(Stream.concat(turn.replyIfOwed({ model: "claude-sonnet-5", instructions })))
+      return turn.loop({ model: "claude-sonnet-5", instructions, history: sinceSummary })
     })
   })
 )
 ```
 
-The summary of a summarized chat includes the earlier summary, since
-`historyOf` puts it first. The full log stays in the chat: the UI still shows
-everything.
+A new summary covers the earlier one, since the view puts it first. The full
+log stays in the chat: the UI still shows everything.
 
 ## Change when it stops
 

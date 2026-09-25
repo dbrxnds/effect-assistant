@@ -9,6 +9,7 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as FiberSet from "effect/FiberSet"
+import * as Predicate from "effect/Predicate"
 import * as PubSub from "effect/PubSub"
 import * as Ref from "effect/Ref"
 import * as Semaphore from "effect/Semaphore"
@@ -22,6 +23,16 @@ import * as SpecialistService from "../Specialist.ts"
 import * as History from "./history.ts"
 import * as Specialists from "./specialists.ts"
 import * as Turns from "./turns.ts"
+
+/** An input's id: the library's inputs have one, and the app's may. */
+const idOf = (event: { readonly _tag: string }): string | undefined =>
+  AssistantEvent.isLibraryEvent(event)
+    ? AssistantEvent.isInput(event)
+      ? event.id
+      : undefined
+    : Predicate.hasProperty(event, "id") && Predicate.isString(event.id)
+      ? event.id
+      : undefined
 
 /** The chat's live entries, for its subscribers; shut down with the chat. */
 const makeChannelPubSub = Effect.acquireRelease(PubSub.unbounded<AssistantEvent.Entry>(), PubSub.shutdown)
@@ -74,6 +85,7 @@ export const makeChat = Effect.fn(function* (options: {
   readonly keepAlive: (enabled: boolean) => Effect.Effect<void>
 }) {
   const { registration, chatId } = options
+  const { inputs } = registration.definition.app
   const storage = yield* ChatLog
   const channel = yield* makeChannelPubSub
   const writes = yield* Semaphore.make(1)
@@ -98,10 +110,11 @@ export const makeChat = Effect.fn(function* (options: {
   })
 
   /** Stores the input unless an input with its id is already stored. */
-  const store = Effect.fn(function* (input: AssistantEvent.Input) {
+  const store = Effect.fn(function* (input: AssistantEvent.Input | AssistantEvent.AppEvent) {
+    const id = idOf(input)
     const stored = yield* chat.entries
 
-    if (!stored.some(({ event }) => AssistantEvent.isInput(event) && event.id === input.id)) yield* chat.append([input])
+    if (id === undefined || !stored.some(({ event }) => idOf(event) === id)) yield* chat.append([input])
   })
 
   // The handlers' builds run now, in the chat's scope: what they set up lives while the chat does.
@@ -119,7 +132,7 @@ export const makeChat = Effect.fn(function* (options: {
   /** Runs turns, one at a time, until no input is left unhandled. */
   const drain: Effect.Effect<void> = Semaphore.withPermit(turnsLock)(
     Effect.gen(function* () {
-      while (History.needsTurn(yield* chat.entries)) {
+      while (History.needsTurn(yield* chat.entries, inputs)) {
         yield* Turns.runTurn({ registration, handler, chat, services })
       }
     })
@@ -140,12 +153,13 @@ export const makeChat = Effect.fn(function* (options: {
 
   return {
     /** Stores the input, then runs turns until nothing is pending. */
-    submit: (input: AssistantEvent.Input) => store(input).pipe(Effect.andThen(drain)),
+    submit: (input: AssistantEvent.Input | AssistantEvent.AppEvent) => store(input).pipe(Effect.andThen(drain)),
     /** Stores the input, and runs turns for it in the background. */
-    submitInBackground: (input: AssistantEvent.Input) => store(input).pipe(Effect.andThen(inBackground(drain))),
+    submitInBackground: (input: AssistantEvent.Input | AssistantEvent.AppEvent) =>
+      store(input).pipe(Effect.andThen(inBackground(drain))),
     /** Runs turns in the background for inputs no turn has read, like a report stored during a shutdown. */
     resume: Effect.gen(function* () {
-      if (History.needsTurn(yield* chat.entries)) yield* inBackground(drain)
+      if (History.needsTurn(yield* chat.entries, inputs)) yield* inBackground(drain)
     }),
     /** The chat's entries after `after` (all of them by default), then new ones as they're appended. */
     stream: (after: number) =>

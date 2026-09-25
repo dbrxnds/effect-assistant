@@ -25,7 +25,7 @@ export const useSend = (
   const submit = useAtomSet(AcmeRpc.submit, { mode: "promiseExit" })
 
   return useCallback(
-    async (input: AssistantEvent.ClientInput) => {
+    async (input: AssistantEvent.UserInput) => {
       const pending: ChatState.ChatMessage | undefined = Predicate.isTagged(input, "UserMessage")
         ? { id: input.id, role: "user", text: input.text }
         : undefined
