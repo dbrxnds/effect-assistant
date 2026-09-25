@@ -2,6 +2,7 @@
   "name": "effect-assistant",
   "version": "0.0.0",
   "description": "A colleague assistant on Effect: an append-only event log per chat, an interruptible agent loop, specialists, skills, and UI blocks",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/dbrxnds/effect-assistant.git",
