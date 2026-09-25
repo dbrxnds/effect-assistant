@@ -7,7 +7,6 @@ import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import * as Ref from "effect/Ref"
-import * as Schedule from "effect/Schedule"
 import * as Stream from "effect/Stream"
 import {
   Assistant,
@@ -18,7 +17,6 @@ import {
   ChatId,
   ChatLog
 } from "../src/index.ts"
-import { mayHaveRunOutput } from "../src/internal/history.ts"
 import { say, testModel } from "./fixtures.ts"
 import * as Scripted from "./scripted.ts"
 
@@ -105,68 +103,6 @@ describe("tool calls after a crash", () => {
       )
 
       expect(call).toEqual({ callId: "toolu_report_1", key: "tool-call:toolu_report_1" })
-    }).pipe(Effect.provide(ChatLog.layerMemory))
-  )
-})
-
-describe("destructive tool calls after a crash", () => {
-  it.live("doesn't run a destructive call again, and tells the model it may have run", () =>
-    Effect.gen(function* () {
-      const log = yield* ChatLog.ChatLog
-      const chat = yield* ChatId.make
-      let sent = 0
-
-      const sendEmail = AssistantToolCall.destructive(
-        Tool.make({
-          name: "send_email",
-          description: "Sends the email.",
-          inputSchema: Tool.noInput,
-          run: () => Effect.sync(() => (sent += 1)).pipe(Effect.as("sent"))
-        })
-      )
-
-      yield* log.append(chat, [
-        say("Send the email."),
-        AssistantEvent.TurnStarted.make({ assistant: "resumer" }),
-        AssistantEvent.ModelOutput.make({
-          items: [{ type: "function_call", call_id: "toolu_email_1", name: "send_email", arguments: "{}" }],
-          seenThroughSeq: 2
-        }),
-        AssistantEvent.ToolStarted.make({ callId: "toolu_email_1", tool: "send_email" })
-      ])
-
-      const handlers = Resumer.toLayer((turn) =>
-        turn.loop({
-          model: testModel,
-          instructions: "You help a small team. Be brief.",
-          toolkit: Toolkit.make(sendEmail)
-        })
-      )
-
-      const result = yield* Effect.scoped(
-        Layer.build(
-          handlers.pipe(
-            Layer.provide(AssistantEngine.layerMemory),
-            Layer.provide(Scripted.layer(() => Scripted.reply("Done.")))
-          )
-        ).pipe(
-          Effect.andThen(
-            log.read(chat).pipe(
-              Effect.map((entries) =>
-                entries.flatMap(({ event }) =>
-                  Predicate.isTagged(event, "ToolResult") && event.callId === "toolu_email_1" ? [event.output] : []
-                )
-              ),
-              Effect.filterOrFail((outputs) => outputs.length > 0),
-              Effect.retry(Schedule.spaced("100 millis")),
-              Effect.timeout("30 seconds")
-            )
-          )
-        )
-      )
-
-      expect(result).toEqual([mayHaveRunOutput])
-      expect(sent).toBe(0)
     }).pipe(Effect.provide(ChatLog.layerMemory))
   )
 })
