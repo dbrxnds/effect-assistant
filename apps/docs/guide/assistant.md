@@ -85,17 +85,22 @@ Inside the build, `AssistantChat` says which chat it is.
 ```ts
 import { AssistantChat } from "effect-assistant"
 
-const MyAssistantHandlers = MyAssistant.toLayer(Effect.gen(function*() {
-  const { chatId } = yield* AssistantChat.AssistantChat // the chat this build is for
-  const catalog = yield* Catalog // your service, from the layer
-  yield* Effect.addFinalizer(() => Effect.log(`${chatId} went idle`)) // when the chat closes
+const MyAssistantHandlers = MyAssistant.toLayer(
+  Effect.gen(function* () {
+    const { chatId } = yield* AssistantChat.AssistantChat // the chat this build is for
+    const catalog = yield* Catalog // your service, from the layer
+    yield* Effect.addFinalizer(() => Effect.log(`${chatId} went idle`)) // when the chat closes
 
-  return Effect.fn(function*(turn: Assistant.Turn) {
-    const summary = yield* catalog.summary // every turn
+    return Effect.fn(function* (turn: Assistant.Turn) {
+      const summary = yield* catalog.summary // every turn
 
-    return turn.loop({ model: "claude-sonnet-5", instructions: `You help a small marketing team. We sell: ${summary}` })
+      return turn.loop({
+        model: "claude-sonnet-5",
+        instructions: `You help a small marketing team. We sell: ${summary}`
+      })
+    })
   })
-}))
+)
 ```
 
 What the build sets up lives while the chat is active. Anything that must be

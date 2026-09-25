@@ -73,9 +73,9 @@ const finishedText = (
     )
   ]
 
-  return `<specialist name="${finished.specialist}" run="${finished.runId}" status="${finished.status}">\n${
-    lines.join("\n")
-  }\n</specialist>`
+  return `<specialist name="${finished.specialist}" run="${finished.runId}" status="${finished.status}">\n${lines.join(
+    "\n"
+  )}\n</specialist>`
 }
 
 const answerText = (answer: AssistantEvent.BlockAnswer) =>

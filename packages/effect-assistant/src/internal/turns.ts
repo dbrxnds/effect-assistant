@@ -72,10 +72,13 @@ const owesReply = (entries: ReadonlyArray<AssistantEvent.Entry>, throughSeq: num
     if (seq <= throughSeq && AssistantEvent.isInput(event) && AssistantEvent.isClientInput(event)) latestInput = seq
   }
 
-  return latestInput > 0 &&
-    !entries.some(({ event, seq }) =>
-      seq > latestInput && (Predicate.isTagged(event, "AssistantMessage") || Predicate.isTagged(event, "TurnFailed"))
+  return (
+    latestInput > 0 &&
+    !entries.some(
+      ({ event, seq }) =>
+        seq > latestInput && (Predicate.isTagged(event, "AssistantMessage") || Predicate.isTagged(event, "TurnFailed"))
     )
+  )
 }
 
 /** Whether an input arrived after `throughSeq`: another turn will read it. */
@@ -124,12 +127,13 @@ export interface Built {
 export const openHandler = <H>(
   built: { readonly build: Effect.Effect<H, unknown, any>; readonly context: Context.Context<never> },
   chatId: ChatId
-): Effect.Effect<H, never, Scope.Scope> => // SAFETY: the build needs the layer's services, which `context` holds, AssistantChat, and a scope.
-(built.build.pipe(
-  Effect.provideService(AssistantChat, { chatId }),
-  Effect.provide(built.context),
-  Effect.orDie
-) as Effect.Effect<H, never, Scope.Scope>)
+): Effect.Effect<H, never, Scope.Scope> =>
+  // SAFETY: the build needs the layer's services, which `context` holds, AssistantChat, and a scope.
+  built.build.pipe(
+    Effect.provideService(AssistantChat, { chatId }),
+    Effect.provide(built.context),
+    Effect.orDie
+  ) as Effect.Effect<H, never, Scope.Scope>
 
 /** The specialist runs working now, for the prompt: what's in flight, without reading back through the chat. */
 const runningNow = (entries: ReadonlyArray<AssistantEvent.Entry>, now: number): string => {
@@ -139,20 +143,18 @@ const runningNow = (entries: ReadonlyArray<AssistantEvent.Entry>, now: number): 
 
   const minutes = (since: number) => Math.max(0, Math.round((now - since) / 60_000))
 
-  return `\n\nRunning now:\n${
-    runs.map((run) =>
-      `- ${run.specialist} (${run.runId}), started ${minutes(run.since)} min ago${
-        run.goal === undefined ? "" : `: ${run.goal}`
-      }`
-    ).join("\n")
-  }`
+  return `\n\nRunning now:\n${runs
+    .map(
+      (run) =>
+        `- ${run.specialist} (${run.runId}), started ${minutes(run.since)} min ago${
+          run.goal === undefined ? "" : `: ${run.goal}`
+        }`
+    )
+    .join("\n")}`
 }
 
 /** Instructions with their text changed. */
-const mapText = (
-  instructions: string | Instructions.Resolved,
-  f: (text: string) => string
-): Instructions.Resolved =>
+const mapText = (instructions: string | Instructions.Resolved, f: (text: string) => string): Instructions.Resolved =>
   Predicate.isString(instructions) ? { text: f(instructions) } : { ...instructions, text: f(instructions.text) }
 
 /**
@@ -161,20 +163,17 @@ const mapText = (
  *
  * @internal
  */
-export const makeSetup = Effect.fn(function*(definition: Definition, built: Built) {
+export const makeSetup = Effect.fn(function* (definition: Definition, built: Built) {
   // The layers' requirements guarantee the model and the specialists' handlers are here.
   const current = yield* Effect.context<LanguageModel.LanguageModel>()
   const context = Context.merge(current, built.context)
 
-  const specialists = yield* Effect.forEach(
-    definition.specialists,
-    (specialist) =>
-      // SAFETY: only a lookup; the key's own type says what it finds.
-      Option.match(Context.getOption(current as Context.Context<unknown>, specialist.Handler), {
-        onNone: () =>
-          Effect.die(`No handler for the ${specialist.name} specialist: provide ${specialist.name}.toLayer.`),
-        onSome: (handler) => Effect.succeed({ specialist, built: handler })
-      })
+  const specialists = yield* Effect.forEach(definition.specialists, (specialist) =>
+    // SAFETY: only a lookup; the key's own type says what it finds.
+    Option.match(Context.getOption(current as Context.Context<unknown>, specialist.Handler), {
+      onNone: () => Effect.die(`No handler for the ${specialist.name} specialist: provide ${specialist.name}.toLayer.`),
+      onSome: (handler) => Effect.succeed({ specialist, built: handler })
+    })
   )
 
   // The assistant's own tools, next to whatever toolkit a turn's loop gets.
@@ -205,7 +204,7 @@ export interface Registration {
  *
  * @internal
  */
-export const makeTurns = Effect.fn(function*(
+export const makeTurns = Effect.fn(function* (
   definition: Definition,
   setup: Setup,
   handler: Assistant.Handler<any, any, any>,
@@ -214,7 +213,7 @@ export const makeTurns = Effect.fn(function*(
   const log = yield* ChatLog
 
   /** Appends the input unless an input with its id is already stored. */
-  const store = Effect.fn(function*(chatId: ChatId, input: AssistantEvent.Input) {
+  const store = Effect.fn(function* (chatId: ChatId, input: AssistantEvent.Input) {
     const stored = yield* log.read(chatId)
 
     if (!stored.some(({ event }) => AssistantEvent.isInput(event) && event.id === input.id)) {
@@ -223,7 +222,7 @@ export const makeTurns = Effect.fn(function*(
   })
 
   const turn = Effect.fn(
-    function*(chatId: ChatId) {
+    function* (chatId: ChatId) {
       const waking = History.unhandledInputs(yield* log.read(chatId))
       yield* Telemetry.agentInput(waking)
       const started = yield* log.append(chatId, [AssistantEvent.TurnStarted.make({ assistant: definition.name })])
@@ -242,11 +241,13 @@ export const makeTurns = Effect.fn(function*(
       )
 
       const record = (event: AssistantLoop.Event) =>
-        log.append(chatId, [
-          Predicate.isTagged(event, "ModelOutput")
-            ? AssistantEvent.ModelOutput.make({ items: event.items, seenThroughSeq: throughSeq })
-            : event
-        ]).pipe(Effect.asVoid)
+        log
+          .append(chatId, [
+            Predicate.isTagged(event, "ModelOutput")
+              ? AssistantEvent.ModelOutput.make({ items: event.items, seenThroughSeq: throughSeq })
+              : event
+          ])
+          .pipe(Effect.asVoid)
 
       // Only send_user_message, and the call is forced: the reply pass can only reply.
       const replyOnly = Toolkit.fromArray(
@@ -262,22 +263,24 @@ export const makeTurns = Effect.fn(function*(
       const unmarkedHistory = log.read(chatId).pipe(Effect.map((entries) => History.fromEntries(entries)))
 
       const replyIfOwed = (options: Assistant.ReplyOptions) =>
-        Stream.unwrap(Effect.gen(function*() {
-          const entries = yield* log.read(chatId)
+        Stream.unwrap(
+          Effect.gen(function* () {
+            const entries = yield* log.read(chatId)
 
-          // Something arrived after the loop's last read: the next turn reads it with the full loop, and replies.
-          if (unreadAfter(entries, throughSeq) || !owesReply(entries, throughSeq)) return Stream.empty
+            // Something arrived after the loop's last read: the next turn reads it with the full loop, and replies.
+            if (unreadAfter(entries, throughSeq) || !owesReply(entries, throughSeq)) return Stream.empty
 
-          return AssistantLoop.stream({
-            model: options.model,
-            instructions: mapText(options.instructions, (text) => `${preamble}\n\n${text}\n\n${replyNudge}`),
-            toolkit: replyOnly,
-            history: unmarkedHistory,
-            maxSteps: 1,
-            // Named, not just required: a model used to calling wait would otherwise call a tool that isn't there.
-            toolChoice: { type: "function", name: "send_user_message" }
+            return AssistantLoop.stream({
+              model: options.model,
+              instructions: mapText(options.instructions, (text) => `${preamble}\n\n${text}\n\n${replyNudge}`),
+              toolkit: replyOnly,
+              history: unmarkedHistory,
+              maxSteps: 1,
+              // Named, not just required: a model used to calling wait would otherwise call a tool that isn't there.
+              toolChoice: { type: "function", name: "send_user_message" }
+            })
           })
-        }))
+        )
 
       const decode = (entry: AssistantEvent.Entry): Assistant.Entry<any> => {
         if (!Predicate.isTagged(entry.event, "Custom")) return entry
@@ -302,10 +305,13 @@ export const makeTurns = Effect.fn(function*(
           return schema === undefined
             ? Effect.die(`${event._tag} isn't one of the ${definition.name} assistant's events.`)
             : Schema.encodeUnknownEffect(schema)(event).pipe(
-              Effect.orDie,
-              Effect.map((value) => AssistantEvent.Custom.make({ name: event._tag, value }))
-            )
-        }).pipe(Effect.flatMap((custom) => log.append(chatId, custom)), Effect.asVoid)
+                Effect.orDie,
+                Effect.map((value) => AssistantEvent.Custom.make({ name: event._tag, value }))
+              )
+        }).pipe(
+          Effect.flatMap((custom) => log.append(chatId, custom)),
+          Effect.asVoid
+        )
 
       const turnApi: Assistant.Turn<any> = {
         chatId,
@@ -327,21 +333,23 @@ export const makeTurns = Effect.fn(function*(
         loop: (options) => {
           const skills = options.skills ?? []
 
-          const loop = Stream.unwrap(Effect.gen(function*() {
-            // Fails on a tool name used twice, like a tool named after a built-in.
-            const toolkit = yield* Toolkit.compose(setup.builtins, Skill.toolkit(skills), options.toolkit ?? {}).pipe(
-              Effect.orDie
-            )
+          const loop = Stream.unwrap(
+            Effect.gen(function* () {
+              // Fails on a tool name used twice, like a tool named after a built-in.
+              const toolkit = yield* Toolkit.compose(setup.builtins, Skill.toolkit(skills), options.toolkit ?? {}).pipe(
+                Effect.orDie
+              )
 
-            return AssistantLoop.stream({
-              model: options.model,
-              instructions: mapText(instructions(options.instructions), (text) => Skill.withCatalog(text, skills)),
-              toolkit,
-              history,
-              maxSteps: options.maxSteps ?? 16,
-              toolChoice: "required"
+              return AssistantLoop.stream({
+                model: options.model,
+                instructions: mapText(instructions(options.instructions), (text) => Skill.withCatalog(text, skills)),
+                toolkit,
+                history,
+                maxSteps: options.maxSteps ?? 16,
+                toolChoice: "required"
+              })
             })
-          }))
+          )
 
           return loop.pipe(Stream.concat(replyIfOwed({ model: options.model, instructions: options.instructions })))
         }
@@ -349,19 +357,19 @@ export const makeTurns = Effect.fn(function*(
 
       // Calls this turn made that have no result: the handler's stream ended between a step's output and its
       // tools, or while they ran. An interrupted turn (a shutdown) leaves them open: the next turn runs them again.
-      const closeOpenCalls = Effect.gen(function*() {
+      const closeOpenCalls = Effect.gen(function* () {
         const entries = (yield* log.read(chatId)).filter(({ seq }) => seq > startSeq)
 
         const started = new Set(
-          entries.flatMap(({ event }) => Predicate.isTagged(event, "ToolStarted") ? [event.callId] : [])
+          entries.flatMap(({ event }) => (Predicate.isTagged(event, "ToolStarted") ? [event.callId] : []))
         )
 
         const items = entries.flatMap(({ event }) =>
           Predicate.isTagged(event, "ModelOutput")
             ? event.items
             : Predicate.isTagged(event, "ToolResult")
-            ? [Items.toolCallOutput(event.callId, event.output)]
-            : []
+              ? [Items.toolCallOutput(event.callId, event.output)]
+              : []
         )
 
         const open = HistoryCheck.findUnansweredCalls(items)
@@ -389,28 +397,27 @@ export const makeTurns = Effect.fn(function*(
           : result
 
         // SAFETY: the handler's requirements are the layer's context and the turn services.
-        return (events.pipe(
-          Stream.runForEach(record),
-          Effect.onExit((exit) => Exit.hasInterrupts(exit) ? Effect.void : closeOpenCalls)
-        ) as Effect.Effect<
-          void,
-          unknown,
-          LanguageModel.LanguageModel | Assistant.TurnServices
-        >).pipe(
+        return (
+          events.pipe(
+            Stream.runForEach(record),
+            Effect.onExit((exit) => (Exit.hasInterrupts(exit) ? Effect.void : closeOpenCalls))
+          ) as Effect.Effect<void, unknown, LanguageModel.LanguageModel | Assistant.TurnServices>
+        ).pipe(
           Effect.provideService(AssistantTurn, assistantTurn),
           Effect.provide(services),
           Effect.provide(setup.context)
         )
       }
 
-      const finishTurn = Effect.fn(function*() {
+      const finishTurn = Effect.fn(function* () {
         const read = throughSeq
         const entries = yield* log.read(chatId)
 
         // An input that arrived after the loop's last read gets the next turn, which replies: no failure to show.
-        const end = owesReply(entries, read) && !unreadAfter(entries, read)
-          ? AssistantEvent.TurnFailed.make({ throughSeq: read, message: silentTurnMessage })
-          : AssistantEvent.TurnCompleted.make({ throughSeq: read })
+        const end =
+          owesReply(entries, read) && !unreadAfter(entries, read)
+            ? AssistantEvent.TurnFailed.make({ throughSeq: read, message: silentTurnMessage })
+            : AssistantEvent.TurnCompleted.make({ throughSeq: read })
 
         yield* log.append(chatId, [end])
       })
@@ -418,7 +425,7 @@ export const makeTurns = Effect.fn(function*(
       yield* runHandler().pipe(
         Effect.matchCauseEffect({
           onSuccess: () => finishTurn(),
-          onFailure: Effect.fn(function*(cause: Cause.Cause<unknown>) {
+          onFailure: Effect.fn(function* (cause: Cause.Cause<unknown>) {
             yield* Effect.logError("assistant turn failed", cause)
             // Mark everything stored so far as handled, so a failing input is not retried forever.
             const last = (yield* log.read(chatId)).at(-1)?.seq ?? throughSeq
@@ -442,7 +449,7 @@ export const makeTurns = Effect.fn(function*(
   )
 
   /** Runs turns until no input is left unhandled. */
-  const drain = Effect.fn(function*(chatId: ChatId) {
+  const drain = Effect.fn(function* (chatId: ChatId) {
     while (History.needsTurn(yield* log.read(chatId))) yield* turn(chatId)
   })
 
@@ -465,12 +472,16 @@ export const makeTurns = Effect.fn(function*(
  *
  * @internal
  */
-export const makeChat = Effect.fn(function*(options: {
+export const makeChat = Effect.fn(function* (options: {
   readonly registration: Registration
   readonly chatId: ChatId
   readonly keepAlive: (enabled: boolean) => Effect.Effect<void>
 }) {
-  const { chatId, registration: { definition, setup } } = options
+  const {
+    chatId,
+    registration: { definition, setup }
+  } = options
+
   const stored = yield* ChatLog
   const fibers = yield* FiberSet.make()
   const lock = Semaphore.makeUnsafe(1)
@@ -488,31 +499,31 @@ export const makeChat = Effect.fn(function*(options: {
       id !== chatId
         ? stored.append(id, events)
         : stored.append(id, events).pipe(
-          Effect.tap((entries) => PubSub.publishAll(channel, entries)),
-          Semaphore.withPermit(writes)
-        ),
+            Effect.tap((entries) => PubSub.publishAll(channel, entries)),
+            Semaphore.withPermit(writes)
+          ),
     unfinished: stored.unfinished
   })
 
   // The handlers' builds run now, in the chat's scope: what they set up lives while the chat does.
   const handler = yield* openHandler({ build: setup.build, context: setup.context }, chatId)
 
-  const specialists = yield* Effect.forEach(
-    setup.specialists,
-    ({ specialist, built }) =>
-      Effect.map(openHandler(built, chatId), (opened) => ({
-        specialist,
-        built: { handler: opened, context: built.context }
-      }))
+  const specialists = yield* Effect.forEach(setup.specialists, ({ specialist, built }) =>
+    Effect.map(openHandler(built, chatId), (opened) => ({
+      specialist,
+      built: { handler: opened, context: built.context }
+    }))
   )
 
   const hold = (enabled: boolean) =>
     Effect.suspend(() => {
       holds += enabled ? 1 : -1
 
-      return enabled && holds === 1 ? options.keepAlive(true) : !enabled && holds === 0
-        ? options.keepAlive(false)
-        : Effect.void
+      return enabled && holds === 1
+        ? options.keepAlive(true)
+        : !enabled && holds === 0
+          ? options.keepAlive(false)
+          : Effect.void
     })
 
   /** Works in the background, holding the keep-alive; an interruption keeps the hold. */
@@ -521,7 +532,7 @@ export const makeChat = Effect.fn(function*(options: {
       fibers,
       hold(true).pipe(
         Effect.andThen(effect),
-        Effect.onExit((exit) => Exit.hasInterrupts(exit) ? Effect.void : hold(false))
+        Effect.onExit((exit) => (Exit.hasInterrupts(exit) ? Effect.void : hold(false)))
       )
     ).pipe(Effect.asVoid)
 
@@ -536,10 +547,9 @@ export const makeChat = Effect.fn(function*(options: {
     keepAlive: hold
   })
 
-  const services: Context.Context<Specialist.Runner | ChatLog> = Context.make(
-    SpecialistService.Runner,
-    runner
-  ).pipe(Context.add(ChatLog, log))
+  const services: Context.Context<Specialist.Runner | ChatLog> = Context.make(SpecialistService.Runner, runner).pipe(
+    Context.add(ChatLog, log)
+  )
 
   const turns = yield* makeTurns(definition, setup, handler, services).pipe(Effect.provideService(ChatLog, log))
 
@@ -550,20 +560,22 @@ export const makeChat = Effect.fn(function*(options: {
     submitInBackground: (input: AssistantEvent.Input) =>
       turns.store(chatId, input).pipe(Effect.andThen(inBackground(drain))),
     /** Runs turns in the background for inputs no turn has read, like an answer stored during a shutdown. */
-    resume: Effect.gen(function*() {
+    resume: Effect.gen(function* () {
       if (History.needsTurn(yield* log.read(chatId))) yield* inBackground(drain)
     }),
     /** The chat's stored entries, then new ones as they're appended. It subscribes before it reads. */
-    stream: Stream.unwrap(Effect.gen(function*() {
-      const subscription = yield* PubSub.subscribe(channel)
-      const entries = yield* log.read(chatId)
-      const after = entries.at(-1)?.seq ?? 0
+    stream: Stream.unwrap(
+      Effect.gen(function* () {
+        const subscription = yield* PubSub.subscribe(channel)
+        const entries = yield* log.read(chatId)
+        const after = entries.at(-1)?.seq ?? 0
 
-      return Stream.concat(
-        Stream.fromIterable(entries),
-        Stream.fromSubscription(subscription).pipe(Stream.filter((entry) => entry.seq > after))
-      )
-    }))
+        return Stream.concat(
+          Stream.fromIterable(entries),
+          Stream.fromSubscription(subscription).pipe(Stream.filter((entry) => entry.seq > after))
+        )
+      })
+    )
   }
 })
 

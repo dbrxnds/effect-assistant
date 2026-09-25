@@ -96,9 +96,8 @@ const docsFile = (root: string, pathname: string): { readonly file: string; read
 
   const rootResolved = path.resolve(root)
 
-  const candidates = relative === ""
-    ? ["index.html"]
-    : [relative, `${relative}.html`, path.join(relative, "index.html")]
+  const candidates =
+    relative === "" ? ["index.html"] : [relative, `${relative}.html`, path.join(relative, "index.html")]
 
   for (const candidate of candidates) {
     const file = safeFileUnderRoot(rootResolved, path.resolve(rootResolved, candidate))
@@ -150,7 +149,7 @@ const fileFor = (
   return file === undefined ? undefined : { file, status: 200 }
 }
 
-const siteResponse = Effect.fn(function*(override: Option.Option<string>, requestUrl: string) {
+const siteResponse = Effect.fn(function* (override: Option.Option<string>, requestUrl: string) {
   const found = fileFor(override, requestUrl)
 
   if (found === undefined) return undefined
@@ -176,21 +175,23 @@ const siteResponse = Effect.fn(function*(override: Option.Option<string>, reques
  * @category layers
  * @since 0.1.0
  */
-export const layer = Layer.unwrap(Effect.gen(function*() {
-  const override = yield* Config.option(Config.NonEmptyString("ACME_WEB_DIST"))
+export const layer = Layer.unwrap(
+  Effect.gen(function* () {
+    const override = yield* Config.option(Config.NonEmptyString("ACME_WEB_DIST"))
 
-  // An arrow, not Effect.fn: the router types `httpEffect`, and a generator would lose that.
-  return HttpRouter.middleware(
-    (httpEffect) =>
-      Effect.gen(function*() {
-        const request = yield* HttpServerRequest.HttpServerRequest
+    // An arrow, not Effect.fn: the router types `httpEffect`, and a generator would lose that.
+    return HttpRouter.middleware(
+      (httpEffect) =>
+        Effect.gen(function* () {
+          const request = yield* HttpServerRequest.HttpServerRequest
 
-        if (request.method !== "GET" && request.method !== "HEAD") return yield* httpEffect
+          if (request.method !== "GET" && request.method !== "HEAD") return yield* httpEffect
 
-        const response = yield* siteResponse(override, request.url)
+          const response = yield* siteResponse(override, request.url)
 
-        return response ?? (yield* httpEffect)
-      }),
-    { global: true }
-  )
-}))
+          return response ?? (yield* httpEffect)
+        }),
+      { global: true }
+    )
+  })
+)

@@ -39,14 +39,15 @@ export const orderHistory = Tool.make({
   description:
     "Recent product and campaign orders, newest first, including the ones placed through you. Optionally for one office or one kind.",
   inputSchema: OrderHistoryInput,
-  run: Effect.fn(function*({ office, kind, limit }: typeof OrderHistoryInput.Type) {
+  run: Effect.fn(function* ({ office, kind, limit }: typeof OrderHistoryInput.Type) {
     const location = office === undefined ? undefined : Locations.findByName(office)
 
     if (office !== undefined && location === undefined) return yield* Tool.fail(`No office named ${office}`)
 
-    const live = (yield* (yield* LiveOrders.LiveOrders).list).filter((order) =>
-      (location === undefined || order.locationId === location.locationId) &&
-      (kind === undefined || order.kind === kind)
+    const live = (yield* (yield* LiveOrders.LiveOrders).list).filter(
+      (order) =>
+        (location === undefined || order.locationId === location.locationId) &&
+        (kind === undefined || order.kind === kind)
     )
 
     const history = Orders.list({ locationId: location?.locationId, kind, limit: Math.min(limit ?? 10, 30) })
@@ -69,7 +70,7 @@ export const orderStatus = Tool.make({
   name: "order_status",
   description: "Where one order is now: status, tracking, and what it contains.",
   inputSchema: StatusInput,
-  run: Effect.fn(function*({ order }: typeof StatusInput.Type) {
+  run: Effect.fn(function* ({ order }: typeof StatusInput.Type) {
     const live = yield* (yield* LiveOrders.LiveOrders).get(order)
 
     if (live !== undefined) return live
@@ -95,7 +96,7 @@ export const offices = Tool.make({
   description:
     "Acme offices: address, locale, contact, and default ship-to. Use for 'where is the X office', office addresses, or listing all offices. Pass a city or office name to get one; omit name to list all.",
   inputSchema: OfficesInput,
-  run: Effect.fn(function*({ name }: typeof OfficesInput.Type) {
+  run: Effect.fn(function* ({ name }: typeof OfficesInput.Type) {
     if (name === undefined) return Locations.all
 
     const location = Locations.findByName(name)
@@ -119,7 +120,7 @@ export const officeBudget = Tool.make({
   description:
     "An office's marketing budget this quarter: total, spent (including orders placed through you), and left.",
   inputSchema: BudgetInput,
-  run: Effect.fn(function*({ office }: typeof BudgetInput.Type) {
+  run: Effect.fn(function* ({ office }: typeof BudgetInput.Type) {
     const location = Locations.findByName(office)
 
     if (location === undefined) return yield* Tool.fail(`No office named ${office}`)
@@ -145,7 +146,7 @@ const allCampaigns = Tool.make({
 })
 
 /** How long one campaign lookup takes, so a report builds up over time: `DEMO_LOOKUP_SECONDS`, default 3. */
-const lookupDelay = Effect.gen(function*() {
+const lookupDelay = Effect.gen(function* () {
   return Duration.seconds(yield* Config.Int("DEMO_LOOKUP_SECONDS").pipe(Config.withDefault(3)))
 }).pipe(Effect.orDie)
 
@@ -158,7 +159,7 @@ const campaignPerformance = Tool.make({
   description:
     "How one campaign performed: spend, impressions, clicks, conversions, CTR, and cost per conversion. Slow: a few seconds per campaign, so call it for several campaigns in one step.",
   inputSchema: PerformanceInput,
-  run: Effect.fn(function*({ campaign }: typeof PerformanceInput.Type) {
+  run: Effect.fn(function* ({ campaign }: typeof PerformanceInput.Type) {
     yield* Effect.sleep(yield* lookupDelay)
     const results = Performance.forCampaign(campaign) ?? Performance.forCampaign(`order:${campaign}`)
 
@@ -176,17 +177,19 @@ const campaignPerformance = Tool.make({
  * @since 0.1.0
  */
 export const layerResearch = (model: Config.Config<string>) =>
-  Research.toLayer(Effect.gen(function*() {
-    const prompts = yield* Prompts.Prompts
-    const name = yield* model
-    const toolkit = Toolkit.make(similarCampaigns, allCampaigns, campaignPerformance, orderHistory, officeBudget)
+  Research.toLayer(
+    Effect.gen(function* () {
+      const prompts = yield* Prompts.Prompts
+      const name = yield* model
+      const toolkit = Toolkit.make(similarCampaigns, allCampaigns, campaignPerformance, orderHistory, officeBudget)
 
-    return Effect.fn(function*(run) {
-      return run.loop({
-        model: name,
-        instructions: yield* prompts.get("acme-specialist-research"),
-        toolkit,
-        maxSteps: 24
+      return Effect.fn(function* (run) {
+        return run.loop({
+          model: name,
+          instructions: yield* prompts.get("acme-specialist-research"),
+          toolkit,
+          maxSteps: 24
+        })
       })
     })
-  }))
+  )

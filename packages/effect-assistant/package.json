@@ -1,30 +1,62 @@
 {
   "name": "effect-assistant",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
+  "version": "0.0.0",
   "description": "A colleague assistant on Effect: an append-only event log per chat, an interruptible agent loop, specialists, skills, and UI blocks",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dbrxnds/effect-assistant.git",
+    "directory": "packages/effect-assistant"
+  },
+  "files": [
+    "src/**/*.ts",
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map"
+  ],
+  "type": "module",
+  "sideEffects": [],
   "exports": {
     "./package.json": "./package.json",
     ".": "./src/index.ts",
     "./*": "./src/*.ts",
     "./internal/*": null
   },
-  "dependencies": {
-    "@effect-uai/core": "0.17.0",
-    "effect": "4.0.0-rc.117",
-    "nanoid": "^6.0.1"
+  "publishConfig": {
+    "exports": {
+      "./package.json": "./package.json",
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./*": {
+        "types": "./dist/*.d.ts",
+        "default": "./dist/*.js"
+      },
+      "./internal/*": null
+    },
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
-    "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "build": "vp pack",
+    "test": "vp test run"
+  },
+  "dependencies": {
+    "nanoid": "^6.0.1"
   },
   "devDependencies": {
+    "@effect-uai/anthropic": "0.17.0",
+    "@effect-uai/core": "0.17.0",
     "@effect/vitest": "4.0.0-rc.117",
     "@types/node": "^22.15.3",
+    "effect": "4.0.0-rc.117",
     "typescript": "7.0.2",
-    "vitest": "5.0.1",
-    "@effect-uai/anthropic": "0.17.0"
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
   },
-  "sideEffects": []
+  "peerDependencies": {
+    "@effect-uai/core": "^0.17.0",
+    "effect": "^4.0.0-rc.117"
+  }
 }

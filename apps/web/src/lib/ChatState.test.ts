@@ -3,7 +3,7 @@ import * as ChatId from "effect-assistant/ChatId"
 import * as InputId from "effect-assistant/InputId"
 import * as RunId from "effect-assistant/RunId"
 import assert from "node:assert/strict"
-import test from "node:test"
+import { test } from "vite-plus/test"
 import * as ChatState from "./ChatState.ts"
 
 const chatId = ChatId.make()
@@ -64,7 +64,10 @@ test("a block answer shows in its block, not as a message", () => {
     AssistantEvent.BlockAnswer.make({ id: InputId.make(), messageId: "m1", kind: "choose_one", value: { choice: "a" } })
   ])
 
-  assert.deepEqual(state.messages.map((message) => message.role), ["assistant"])
+  assert.deepEqual(
+    state.messages.map((message) => message.role),
+    ["assistant"]
+  )
   assert.equal(state.blocks.get("m1")?.open, false)
   assert.equal(state.working, true)
 })

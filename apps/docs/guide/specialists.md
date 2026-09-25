@@ -97,22 +97,26 @@ const Analyst = Specialist.make("analyst", {
   description: "Writes reports on spend, budgets, and campaigns."
 })
 
-const AnalystLive = Analyst.toLayer(Effect.gen(function*() {
-  const permits = yield* Semaphore.make(3) // once, for every run
+const AnalystLive = Analyst.toLayer(
+  Effect.gen(function* () {
+    const permits = yield* Semaphore.make(3) // once, for every run
 
-  return (run) =>
-    Stream.unwrap(Effect.gen(function*() {
-      // Held until the run's stream ends; waits while three runs are going.
-      yield* Effect.acquireRelease(permits.take(1), () => permits.release(1))
+    return (run) =>
+      Stream.unwrap(
+        Effect.gen(function* () {
+          // Held until the run's stream ends; waits while three runs are going.
+          yield* Effect.acquireRelease(permits.take(1), () => permits.release(1))
 
-      return run.loop({
-        model: "claude-haiku-4-5", // any model the LanguageModel layer serves
-        instructions: "Write the report the colleague asked for, with the numbers.",
-        toolkit: Toolkit.make(spendReport),
-        maxSteps: 12 // model calls per brief; default 8
-      })
-    }))
-}))
+          return run.loop({
+            model: "claude-haiku-4-5", // any model the LanguageModel layer serves
+            instructions: "Write the report the colleague asked for, with the numbers.",
+            toolkit: Toolkit.make(spendReport),
+            maxSteps: 12 // model calls per brief; default 8
+          })
+        })
+      )
+  })
+)
 ```
 
 - `run.loop` takes `model`, `instructions`, `toolkit`, `skills` (its own

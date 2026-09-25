@@ -120,7 +120,7 @@ const Approval = DurableDeferred.make("CampaignApproval", {
 })
 
 const step = (payload: Payload, status: string, details: Steps.Step["details"] = {}) =>
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     yield* Steps.report({
       source: "workflow:CreateCampaign",
       runId: payload.runId,
@@ -154,34 +154,36 @@ const firstResults = (payload: Payload) => {
  * @category layers
  * @since 0.1.0
  */
-export const layerWorkflow = CreateCampaign.toLayer(Effect.fn(function*(payload: Payload) {
-  // The token rides along in the fact; `decide_campaign` reads it from the log.
-  const token = yield* DurableDeferred.token(Approval)
-  yield* step(payload, "awaiting_approval", {
-    approvalToken: token,
-    audience: payload.audience,
-    budget: payload.budget,
-    channels: payload.channels.join(", ")
+export const layerWorkflow = CreateCampaign.toLayer(
+  Effect.fn(function* (payload: Payload) {
+    // The token rides along in the fact; `decide_campaign` reads it from the log.
+    const token = yield* DurableDeferred.token(Approval)
+    yield* step(payload, "awaiting_approval", {
+      approvalToken: token,
+      audience: payload.audience,
+      budget: payload.budget,
+      channels: payload.channels.join(", ")
+    })
+
+    const { decision } = yield* DurableDeferred.await(Approval)
+
+    if (decision === "deny") {
+      yield* step(payload, "denied")
+
+      return yield* CampaignFailed.make({ reason: "Approval denied" })
+    }
+
+    yield* step(payload, "creative_in_progress")
+    yield* Steps.wait("Creative", 2)
+    yield* step(payload, "scheduled", { channels: payload.channels.join(", ") })
+    yield* Steps.wait("Scheduling", 1)
+    yield* step(payload, "live")
+    yield* Steps.wait("FirstResults", 3)
+    yield* step(payload, "first_results", firstResults(payload))
+
+    return { reference: payload.reference }
   })
-
-  const { decision } = yield* DurableDeferred.await(Approval)
-
-  if (decision === "deny") {
-    yield* step(payload, "denied")
-
-    return yield* CampaignFailed.make({ reason: "Approval denied" })
-  }
-
-  yield* step(payload, "creative_in_progress")
-  yield* Steps.wait("Creative", 2)
-  yield* step(payload, "scheduled", { channels: payload.channels.join(", ") })
-  yield* Steps.wait("Scheduling", 1)
-  yield* step(payload, "live")
-  yield* Steps.wait("FirstResults", 3)
-  yield* step(payload, "first_results", firstResults(payload))
-
-  return { reference: payload.reference }
-}))
+)
 
 /**
  * Completes a run's approval.
@@ -199,8 +201,9 @@ const approvalToken = (entries: ReadonlyArray<AssistantEvent.Entry>, runId: stri
   Option.fromUndefinedOr(
     entries
       .map(({ event }) => event)
-      .find((event): event is AssistantEvent.Fact =>
-        Predicate.isTagged(event, "Fact") && event.id === `${runId}:awaiting_approval`
+      .find(
+        (event): event is AssistantEvent.Fact =>
+          Predicate.isTagged(event, "Fact") && event.id === `${runId}:awaiting_approval`
       )
   ).pipe(
     Option.flatMap((fact) => Schema.decodeUnknownOption(ApprovalRequest)(fact.payload)),
@@ -220,7 +223,7 @@ export const decideCampaign = Tool.make({
   description:
     "Approve or deny a campaign run that is awaiting approval, once the user has decided. Only call it after the user answered.",
   inputSchema: DecideInput,
-  run: Effect.fn(function*({ runId, decision }: typeof DecideInput.Type) {
+  run: Effect.fn(function* ({ runId, decision }: typeof DecideInput.Type) {
     const turn = yield* AssistantTurn.AssistantTurn
     const log = yield* ChatLog.ChatLog
     const token = approvalToken(yield* log.read(turn.chatId), runId)
@@ -264,7 +267,7 @@ export const startCampaign = Tool.make({
   description:
     "Order a campaign. Needs the product id, the office paying, who it should reach, and the budget in USD. Ask the user for anything missing first. Checks the office's budget; the run then waits for the user's approval and reports each stage back as a fact.",
   inputSchema: StartInput,
-  run: Effect.fn(function*({ campaignId, office, audience, budget }: typeof StartInput.Type) {
+  run: Effect.fn(function* ({ campaignId, office, audience, budget }: typeof StartInput.Type) {
     // The same run for every time this call runs: after a crash it runs again, and finds its order.
     const runId = RunId.fromKey(yield* AssistantToolCall.idempotencyKey)
     const reference = Steps.reference(runId)
@@ -309,16 +312,19 @@ export const startCampaign = Tool.make({
         updatedAt: Date.now()
       })
     )
-    yield* CreateCampaign.execute({
-      runId,
-      chatId: turn.chatId,
-      reference,
-      campaignName: product.name,
-      office: location.name,
-      audience,
-      budget,
-      channels: product.channels
-    }, { discard: true })
+    yield* CreateCampaign.execute(
+      {
+        runId,
+        chatId: turn.chatId,
+        reference,
+        campaignName: product.name,
+        office: location.name,
+        audience,
+        budget,
+        channels: product.channels
+      },
+      { discard: true }
+    )
 
     return { runId, reference, status: "started" }
   })

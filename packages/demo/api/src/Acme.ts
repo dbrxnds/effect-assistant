@@ -55,24 +55,26 @@ export const model = Config.String("ACME_MODEL").pipe(Config.withDefault("claude
  * @category layers
  * @since 0.1.0
  */
-export const layer = AcmeAssistant.toLayer(Effect.gen(function*() {
-  const prompts = yield* Prompts.Prompts
-  const name = yield* model
+export const layer = AcmeAssistant.toLayer(
+  Effect.gen(function* () {
+    const prompts = yield* Prompts.Prompts
+    const name = yield* model
 
-  return Effect.fn(function*(turn) {
-    const prompt = yield* prompts.get("acme")
+    return Effect.fn(function* (turn) {
+      const prompt = yield* prompts.get("acme")
 
-    // A block the user moved on from (three messages later) stops taking answers.
-    yield* BlockKit.closeStale({ messages: 3 })
+      // A block the user moved on from (three messages later) stops taking answers.
+      yield* BlockKit.closeStale({ messages: 3 })
 
-    return turn.loop({
-      model: name,
-      instructions: { ...prompt, text: `${prompt.text}\n\nToday is ${new Date().toDateString()}.` },
-      toolkit,
-      skills: [orderingCampaigns, orderingProducts]
+      return turn.loop({
+        model: name,
+        instructions: { ...prompt, text: `${prompt.text}\n\nToday is ${new Date().toDateString()}.` },
+        toolkit,
+        skills: [orderingCampaigns, orderingProducts]
+      })
     })
   })
-})).pipe(Layer.provide(Tools.layerResearch(model)))
+).pipe(Layer.provide(Tools.layerResearch(model)))
 
 /**
  * Layer for the model API: Anthropic with `ANTHROPIC_API_KEY`, and prompt
@@ -82,9 +84,11 @@ export const layer = AcmeAssistant.toLayer(Effect.gen(function*() {
  * @category layers
  * @since 0.1.0
  */
-export const layerModel = Layer.unwrap(Effect.gen(function*() {
-  const apiKey = yield* Config.Redacted("ANTHROPIC_API_KEY")
-  yield* Effect.logInfo(`model: ${yield* model}`)
+export const layerModel = Layer.unwrap(
+  Effect.gen(function* () {
+    const apiKey = yield* Config.Redacted("ANTHROPIC_API_KEY")
+    yield* Effect.logInfo(`model: ${yield* model}`)
 
-  return Anthropic.layer({ apiKey, promptCaching: true }).pipe(Layer.provide(FetchHttpClient.layer))
-}))
+    return Anthropic.layer({ apiKey, promptCaching: true }).pipe(Layer.provide(FetchHttpClient.layer))
+  })
+)

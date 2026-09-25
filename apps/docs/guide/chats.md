@@ -20,7 +20,7 @@ import { ChatId } from "effect-assistant"
 import * as Effect from "effect/Effect"
 
 const startChat = (userId: string) =>
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const chatId = ChatId.make()
     yield* chats.insert({ chatId, ownerId: userId, title: "Spring campaign" })
 
@@ -41,7 +41,7 @@ import type { AssistantEvent, ChatId } from "effect-assistant"
 import * as Effect from "effect/Effect"
 
 const send = (userId: string, chatId: ChatId.ChatId, input: AssistantEvent.ClientInput) =>
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const chat = yield* chats.get(chatId)
 
     if (chat?.ownerId !== userId) return yield* Effect.fail("not_found" as const)
@@ -74,9 +74,12 @@ interface User {
 export class CurrentUser extends Context.Service<CurrentUser, User>()("app/CurrentUser") {}
 
 /** Whose chat is it: a lookup in your chat table. */
-export class ChatUsers extends Context.Service<ChatUsers, {
-  readonly forChat: (chatId: ChatId.ChatId) => Effect.Effect<User>
-}>()("app/ChatUsers") {}
+export class ChatUsers extends Context.Service<
+  ChatUsers,
+  {
+    readonly forChat: (chatId: ChatId.ChatId) => Effect.Effect<User>
+  }
+>()("app/ChatUsers") {}
 
 const greet = Tool.make({
   name: "greet",
@@ -85,17 +88,24 @@ const greet = Tool.make({
   run: () => Effect.map(CurrentUser, (user) => `hi ${user.name}`)
 })
 
-const MyAssistantLive = MyAssistant.toLayer(Effect.gen(function*() {
-  const users = yield* ChatUsers
+const MyAssistantLive = MyAssistant.toLayer(
+  Effect.gen(function* () {
+    const users = yield* ChatUsers
 
-  return (turn) =>
-    Stream.unwrap(Effect.map(users.forChat(turn.chatId), (user) =>
-      turn.loop({
-        model: "claude-sonnet-5",
-        instructions: `You help ${user.name}.`,
-        toolkit: Toolkit.make(greet)
-      }).pipe(Stream.provideService(CurrentUser, user))))
-}))
+    return (turn) =>
+      Stream.unwrap(
+        Effect.map(users.forChat(turn.chatId), (user) =>
+          turn
+            .loop({
+              model: "claude-sonnet-5",
+              instructions: `You help ${user.name}.`,
+              toolkit: Toolkit.make(greet)
+            })
+            .pipe(Stream.provideService(CurrentUser, user))
+        )
+      )
+  })
+)
 ```
 
 This works for every turn, however it started: a user's message, a
@@ -119,17 +129,24 @@ The handler runs every turn with the user in hand, so which tools a turn
 gets is plain code:
 
 ```ts
-const MyAssistantLive = MyAssistant.toLayer(Effect.gen(function*() {
-  const users = yield* ChatUsers
+const MyAssistantLive = MyAssistant.toLayer(
+  Effect.gen(function* () {
+    const users = yield* ChatUsers
 
-  return (turn) =>
-    Stream.unwrap(Effect.map(users.forChat(turn.chatId), (user) =>
-      turn.loop({
-        model: "claude-sonnet-5",
-        instructions,
-        toolkit: user.admin ? Toolkit.make(adminReport, greet) : Toolkit.make(greet)
-      }).pipe(Stream.provideService(CurrentUser, user))))
-}))
+    return (turn) =>
+      Stream.unwrap(
+        Effect.map(users.forChat(turn.chatId), (user) =>
+          turn
+            .loop({
+              model: "claude-sonnet-5",
+              instructions,
+              toolkit: user.admin ? Toolkit.make(adminReport, greet) : Toolkit.make(greet)
+            })
+            .pipe(Stream.provideService(CurrentUser, user))
+        )
+      )
+  })
+)
 ```
 
 The model only sees the tools the turn got, so it can't call one the user
@@ -144,17 +161,24 @@ A [specialist](./specialists) run works in the chat that spawned it. Its
 handler does the same lookup from `run.chatId`:
 
 ```ts
-const ResearchLive = Research.toLayer(Effect.gen(function*() {
-  const users = yield* ChatUsers
+const ResearchLive = Research.toLayer(
+  Effect.gen(function* () {
+    const users = yield* ChatUsers
 
-  return (run) =>
-    Stream.unwrap(Effect.map(users.forChat(run.chatId), (user) =>
-      run.loop({
-        model: "claude-sonnet-5",
-        instructions: "Answer with the findings and numbers the colleague needs, in a few short lines.",
-        toolkit: Toolkit.make(orderHistory)
-      }).pipe(Stream.provideService(CurrentUser, user))))
-}))
+    return (run) =>
+      Stream.unwrap(
+        Effect.map(users.forChat(run.chatId), (user) =>
+          run
+            .loop({
+              model: "claude-sonnet-5",
+              instructions: "Answer with the findings and numbers the colleague needs, in a few short lines.",
+              toolkit: Toolkit.make(orderHistory)
+            })
+            .pipe(Stream.provideService(CurrentUser, user))
+        )
+      )
+  })
+)
 ```
 
 The turn for its answer is in the same chat, so it finds the same user.

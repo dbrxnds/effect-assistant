@@ -33,7 +33,7 @@ export const wait = Tool.make({
 
 const description = "Send a chat message to the user. This is the only way the user sees anything you write."
 
-const append = Effect.fn(function*(message: AssistantEvent.AssistantMessage) {
+const append = Effect.fn(function* (message: AssistantEvent.AssistantMessage) {
   const turn = yield* AssistantTurn
   const log = yield* ChatLog
   yield* log.append(turn.chatId, [message])
@@ -73,10 +73,12 @@ export const sendUserMessage = (kit: BlockKit.BlockKit | undefined) => {
 
   const Input = Schema.Struct({
     text: Schema.String,
-    block: Schema.optional(Schema.Struct({
-      kind: Schema.Literals(kinds),
-      props: propsSchemas.length === 1 ? propsSchemas[0] : Schema.Union(propsSchemas)
-    })),
+    block: Schema.optional(
+      Schema.Struct({
+        kind: Schema.Literals(kinds),
+        props: propsSchemas.length === 1 ? propsSchemas[0] : Schema.Union(propsSchemas)
+      })
+    ),
     closes: Schema.optional(Schema.Array(Schema.String)).annotate({
       description:
         "Ids of your earlier messages whose block the user just answered by typing instead of using it. Those blocks close. Leave it out otherwise: a block stays open when the user talks about something else."
@@ -98,7 +100,7 @@ You can add a block to show UI with the message, e.g. a few options to pick from
 Blocks:
 ${catalog}`,
     inputSchema: Input,
-    run: Effect.fn(function*({ text, block, closes }: typeof Input.Type) {
+    run: Effect.fn(function* ({ text, block, closes }: typeof Input.Type) {
       const id = nanoid()
       const closed = closes === undefined || closes.length === 0 ? {} : { closes }
 

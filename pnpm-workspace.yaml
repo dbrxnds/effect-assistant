@@ -2,3 +2,18 @@ packages:
   - "apps/*"
   - "packages/effect-assistant"
   - "packages/demo/*"
+catalog:
+  vite-plus: 1.0.0-rc.0
+  vitest: 5.0.1
+overrides:
+  # VitePress runs on its own Vite 5.
+  vitepress>vite: 5.4.21
+  vite: npm:@voidzero-dev/vite-plus-core@1.0.0-rc.0
+  vitest: 5.0.1
+  effect: 4.0.0-rc.117
+  typescript: 7.0.2
+peerDependencyRules:
+  allowAny:
+    - vite
+  allowedVersions:
+    vite: "*"

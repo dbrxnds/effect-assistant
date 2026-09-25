@@ -57,8 +57,8 @@ export const briefText = (brief: Specialist.Brief): string =>
 /** The last text the model wrote. */
 const finalText = (items: ReadonlyArray<Items.HistoryItem>): string =>
   items
-    .flatMap((item) => Items.isMessage(item) && item.role === "assistant" ? item.content : [])
-    .flatMap((content) => Items.isOutputText(content) ? [content.text] : [])
+    .flatMap((item) => (Items.isMessage(item) && item.role === "assistant" ? item.content : []))
+    .flatMap((content) => (Items.isOutputText(content) ? [content.text] : []))
     .join("")
     .trim()
 
@@ -85,7 +85,7 @@ const withSkills = (
  * @internal
  */
 export const run = Effect.fn(
-  function*(
+  function* (
     _specialist: Specialist.Any,
     built: Opened,
     options: {
@@ -145,9 +145,7 @@ export const run = Effect.fn(
     const events = Effect.isEffect(result) ? Stream.unwrap(result) : result
 
     // SAFETY: the handler's layer context provides what it needs beyond the run services.
-    yield* (events.pipe(Stream.runForEach(record)) as Effect.Effect<void, unknown>).pipe(
-      Effect.provide(built.context)
-    )
+    yield* (events.pipe(Stream.runForEach(record)) as Effect.Effect<void, unknown>).pipe(Effect.provide(built.context))
     yield* Telemetry.agentOutput(answer)
 
     return answer
@@ -201,10 +199,9 @@ export const toolkit = (specialists: ReadonlyArray<Specialist.Any>): Toolkit.Too
 
   const spawn = Tool.make({
     name: "spawn_specialist",
-    description:
-      `Start a specialist on a job. It works in the background and its report arrives as a <specialist> input, often within seconds. Write a self-contained brief: it can't see this chat. For a quick question, just call wait; for slow work, tell the user in one line first.\n${catalog}`,
+    description: `Start a specialist on a job. It works in the background and its report arrives as a <specialist> input, often within seconds. Write a self-contained brief: it can't see this chat. For a quick question, just call wait; for slow work, tell the user in one line first.\n${catalog}`,
     inputSchema: SpawnInput,
-    run: Effect.fn(function*({ kind, ...brief }: typeof SpawnInput.Type) {
+    run: Effect.fn(function* ({ kind, ...brief }: typeof SpawnInput.Type) {
       const turn = yield* AssistantTurn
       const runner = yield* Specialist.Runner
       const runId = yield* fail(runner.spawn({ turn, kind, brief }))
@@ -220,7 +217,7 @@ export const toolkit = (specialists: ReadonlyArray<Specialist.Any>): Toolkit.Too
     description:
       "Send more to one of your specialists: new instructions for a running one (it reads them at its next step), or a follow-up for a finished one (it continues with what it already found).",
     inputSchema: MessageInput,
-    run: Effect.fn(function*({ runId, message }: typeof MessageInput.Type) {
+    run: Effect.fn(function* ({ runId, message }: typeof MessageInput.Type) {
       const runner = yield* Specialist.Runner
 
       return { runId, status: yield* fail(runner.message(runId, message)) }
@@ -234,7 +231,7 @@ export const toolkit = (specialists: ReadonlyArray<Specialist.Any>): Toolkit.Too
     description:
       "Stop one of your running specialists, for example when the user changed their mind. It posts no answer.",
     inputSchema: StopInput,
-    run: Effect.fn(function*({ runId }: typeof StopInput.Type) {
+    run: Effect.fn(function* ({ runId }: typeof StopInput.Type) {
       const runner = yield* Specialist.Runner
       yield* fail(runner.stop(runId))
 
@@ -288,16 +285,13 @@ interface Run {
  *
  * @internal
  */
-export const makeRunner = Effect.fn(function*(options: {
+export const makeRunner = Effect.fn(function* (options: {
   readonly specialists: ReadonlyArray<{ readonly specialist: Specialist.Any; readonly built: Opened }>
   readonly context: () => Context.Context<never>
   /** Stores a run's answer in the chat, and runs a turn for it. */
   readonly answer: (chatId: ChatId, finished: AssistantEvent.SpecialistFinished) => Effect.Effect<void>
   /** Appends a run's start or end to the chat's log. */
-  readonly record: (
-    chatId: ChatId,
-    event: AssistantEvent.SpecialistStarted
-  ) => Effect.Effect<void>
+  readonly record: (chatId: ChatId, event: AssistantEvent.SpecialistStarted) => Effect.Effect<void>
   /** Keeps the chat up while runs work. */
   readonly keepAlive: (enabled: boolean) => Effect.Effect<void>
 }) {
@@ -315,7 +309,7 @@ export const makeRunner = Effect.fn(function*(options: {
 
   /** Works until the inbox is empty, then posts the answer. */
   const work = Effect.fn(
-    function*(runId: RunId.RunId, entry: Run) {
+    function* (runId: RunId.RunId, entry: Run) {
       // SAFETY: `context` provides the model and the turn services.
       const provided = run(entry.specialist, entry.built, {
         runId,
@@ -323,10 +317,10 @@ export const makeRunner = Effect.fn(function*(options: {
         history: entry.history,
         inbox: entry.inbox,
         chatId: entry.turn.chatId
-      }).pipe(
-        Effect.provideService(AssistantTurn, entry.turn),
-        Effect.provide(options.context())
-      ) as Effect.Effect<string, unknown>
+      }).pipe(Effect.provideService(AssistantTurn, entry.turn), Effect.provide(options.context())) as Effect.Effect<
+        string,
+        unknown
+      >
 
       const once = provided.pipe(
         Effect.match({
@@ -348,7 +342,7 @@ export const makeRunner = Effect.fn(function*(options: {
     (effect, runId, entry) =>
       effect.pipe(
         Effect.onExit((exit) =>
-          Effect.gen(function*() {
+          Effect.gen(function* () {
             entry.fiber = undefined
             entry.lastUsed = Date.now()
             const chatId = entry.turn.chatId
@@ -372,7 +366,7 @@ export const makeRunner = Effect.fn(function*(options: {
       )
   )
 
-  const launch = Effect.fn(function*(runId: RunId.RunId, entry: Run) {
+  const launch = Effect.fn(function* (runId: RunId.RunId, entry: Run) {
     entry.stopping = false
     yield* options.record(
       entry.turn.chatId,
@@ -386,7 +380,7 @@ export const makeRunner = Effect.fn(function*(options: {
   })
 
   return Specialist.Runner.of({
-    spawn: Effect.fn(function*(request: Specialist.SpawnRequest) {
+    spawn: Effect.fn(function* (request: Specialist.SpawnRequest) {
       forgetOld()
       const found = byName.get(request.kind)
 
@@ -415,7 +409,7 @@ export const makeRunner = Effect.fn(function*(options: {
 
       return runId
     }),
-    message: Effect.fn(function*(runId: string, text: string) {
+    message: Effect.fn(function* (runId: string, text: string) {
       forgetOld()
       const entry = runs.get(runId)
 
@@ -439,7 +433,7 @@ export const makeRunner = Effect.fn(function*(options: {
 
       return "continued" as const
     }),
-    stop: Effect.fn(function*(runId: string) {
+    stop: Effect.fn(function* (runId: string) {
       const entry = runs.get(runId)
 
       if (entry?.fiber === undefined) {

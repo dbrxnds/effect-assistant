@@ -39,6 +39,9 @@ import type { ChatId } from "./ChatId.ts"
  * @category services
  * @since 0.1.0
  */
-export class AssistantChat extends Context.Service<AssistantChat, {
-  readonly chatId: ChatId
-}>()("effect-assistant/AssistantChat") {}
+export class AssistantChat extends Context.Service<
+  AssistantChat,
+  {
+    readonly chatId: ChatId
+  }
+>()("effect-assistant/AssistantChat") {}

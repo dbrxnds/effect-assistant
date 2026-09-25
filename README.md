@@ -19,7 +19,7 @@ research in the background, and messages you when there's news.
 pnpm install
 pnpm dev            # API on :8787 (in memory, or Postgres with DATABASE_URL), web on :3000
 pnpm docs:dev       # effect-assistant docs on :5173
-pnpm check          # typecheck, lint, format check
+pnpm check          # vp check: format, lint, and type check
 pnpm test           # effect-assistant tests call the real model (ANTHROPIC_API_KEY in .env.local)
 ```
 

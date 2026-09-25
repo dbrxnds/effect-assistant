@@ -57,17 +57,19 @@ const blockMessages = (entries: Entries, kind: string): ReadonlyArray<AssistantE
   )
 
 const failures = (entries: Entries) =>
-  entries.flatMap(({ event }) => Predicate.isTagged(event, "TurnFailed") ? [event.message] : [])
+  entries.flatMap(({ event }) => (Predicate.isTagged(event, "TurnFailed") ? [event.message] : []))
 
 const idle = (entries: Entries) =>
   entries.at(-1) !== undefined && Predicate.isTagged(entries.at(-1)!.event, "TurnCompleted")
 
 /** The seq of the first fact from a source (with a status, if given). */
 const factSeq = (entries: Entries, source: string, status?: string) =>
-  entries.find(({ event }) =>
-    Predicate.isTagged(event, "Fact") && event.source.startsWith(source) &&
-    (status === undefined ||
-      Option.exists(Schema.decodeUnknownOption(Status)(event.payload), (payload) => payload.status === status))
+  entries.find(
+    ({ event }) =>
+      Predicate.isTagged(event, "Fact") &&
+      event.source.startsWith(source) &&
+      (status === undefined ||
+        Option.exists(Schema.decodeUnknownOption(Status)(event.payload), (payload) => payload.status === status))
   )?.seq
 
 /** Where a specialist's report arrived, if it has. */
@@ -76,28 +78,32 @@ const finishedSeq = (entries: Entries) =>
 
 /** One line per entry, for a timeout message. */
 const trace = (entries: Entries) =>
-  entries.map(({ seq, event }) => {
-    const detail = Predicate.isTagged(event, "UserMessage") || Predicate.isTagged(event, "AssistantMessage")
-      ? event.text.slice(0, 120)
-      : Predicate.isTagged(event, "ModelOutput")
-      ? event.items.flatMap((item) => item.type === "function_call" ? [item.name] : []).join(",")
-      : Predicate.isTagged(event, "ToolResult")
-      ? `${event.tool}: ${event.output.slice(0, 100)}`
-      : Predicate.isTagged(event, "Fact")
-      ? JSON.stringify(event.payload).slice(0, 120)
-      : ""
+  entries
+    .map(({ seq, event }) => {
+      const detail =
+        Predicate.isTagged(event, "UserMessage") || Predicate.isTagged(event, "AssistantMessage")
+          ? event.text.slice(0, 120)
+          : Predicate.isTagged(event, "ModelOutput")
+            ? event.items.flatMap((item) => (item.type === "function_call" ? [item.name] : [])).join(",")
+            : Predicate.isTagged(event, "ToolResult")
+              ? `${event.tool}: ${event.output.slice(0, 100)}`
+              : Predicate.isTagged(event, "Fact")
+                ? JSON.stringify(event.payload).slice(0, 120)
+                : ""
 
-    return `  ${seq} ${event._tag} ${detail}`
-  }).join("\n")
+      return `  ${seq} ${event._tag} ${detail}`
+    })
+    .join("\n")
 
 /** Whether the assistant said something after an entry, and is done. */
 const answeredAfter = (entries: Entries, seq: number | undefined) =>
-  seq !== undefined && idle(entries) &&
+  seq !== undefined &&
+  idle(entries) &&
   entries.some((entry) => entry.seq > seq && Predicate.isTagged(entry.event, "AssistantMessage"))
 
 const oneLine = (text: string | undefined) => (text ?? "").replaceAll("\n", " ").slice(0, 160)
 
-const program = Effect.gen(function*() {
+const program = Effect.gen(function* () {
   const client = yield* RpcClient.make(AcmeRpcs)
   const created = yield* Ref.make<ReadonlyArray<ChatId.ChatId>>([])
 
@@ -105,7 +111,7 @@ const program = Effect.gen(function*() {
 
   if (!health.ok) return yield* Effect.fail(`health ${health.status}`)
 
-  const newChat = Effect.gen(function*() {
+  const newChat = Effect.gen(function* () {
     const { chatId } = yield* client.CreateChat()
     yield* Ref.update(created, (all) => [...all, chatId])
 
@@ -123,7 +129,10 @@ const program = Effect.gen(function*() {
     let seen: Entries = []
 
     return client.Subscribe({ chatId }).pipe(
-      Stream.scan((): Entries => [], (acc, entry) => [...acc, entry]),
+      Stream.scan(
+        (): Entries => [],
+        (acc, entry) => [...acc, entry]
+      ),
       Stream.tap((entries) => Effect.sync(() => (seen = entries))),
       Stream.takeUntil((entries) => until(entries) || failures(entries).length > 0),
       Stream.runLast,
@@ -158,7 +167,7 @@ const program = Effect.gen(function*() {
       })
     })
 
-  const timed = Effect.fn(function*<A, E, R>(label: string, effect: Effect.Effect<A, E, R>) {
+  const timed = Effect.fn(function* <A, E, R>(label: string, effect: Effect.Effect<A, E, R>) {
     const start = Date.now()
     const result = yield* effect
     console.log(`ok   ${label} (${((Date.now() - start) / 1000).toFixed(1)}s)`)
@@ -168,7 +177,7 @@ const program = Effect.gen(function*() {
 
   const greeting = timed(
     "greeting",
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const chatId = yield* newChat
       yield* send(chatId, "hey! quick hello")
       const entries = yield* waitFor(chatId, "greeting", (es) => messages(es).length >= 1)
@@ -178,7 +187,7 @@ const program = Effect.gen(function*() {
 
   const choice = timed(
     "choice: options, then a pick",
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const chatId = yield* newChat
       yield* send(chatId, "I want to order one of the summer campaigns, which ones are there?")
       const shown = yield* waitFor(chatId, "options", (es) => messages(es).length > 0 && idle(es))
@@ -199,7 +208,7 @@ const program = Effect.gen(function*() {
 
   const interrupt = timed(
     "interrupt mid-turn",
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const chatId = yield* newChat
       yield* send(chatId, "What did the Amsterdam office order recently?")
       yield* waitFor(chatId, "first step", (es) => es.some(({ event }) => Predicate.isTagged(event, "ModelOutput")))
@@ -217,7 +226,7 @@ const program = Effect.gen(function*() {
 
   const campaign = timed(
     "campaign: approval, live, first results",
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const chatId = yield* newChat
       yield* send(
         chatId,
@@ -248,7 +257,7 @@ const program = Effect.gen(function*() {
 
   const products = timed(
     "products: order, shipped, delivered",
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const chatId = yield* newChat
       yield* send(chatId, "Please order 300 cotton tote bags for the Berlin office.")
 
@@ -274,7 +283,7 @@ const program = Effect.gen(function*() {
 
   const research = timed(
     "research: a report in the background",
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const chatId = yield* newChat
       yield* send(
         chatId,

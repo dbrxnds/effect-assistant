@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import test from "node:test"
+import { test } from "vite-plus/test"
 import * as Budgets from "./Budgets.ts"
 import * as Locations from "./Locations.ts"
 import * as Orders from "./Orders.ts"

@@ -67,13 +67,15 @@ export type Services<S> = S extends Skill<infer R> ? R : never
  * @since 0.1.0
  */
 export const withCatalog = <R>(prompt: string, skills: ReadonlyArray<Skill<R>>): string =>
-  skills.length === 0 ? prompt : [
-    prompt,
-    "",
-    "## Skills",
-    "Playbooks for common tasks. When one matches what you're doing, load it with load_skill and follow it.",
-    ...skills.map((skill) => `- ${skill.name}: ${skill.description}`)
-  ].join("\n")
+  skills.length === 0
+    ? prompt
+    : [
+        prompt,
+        "",
+        "## Skills",
+        "Playbooks for common tasks. When one matches what you're doing, load it with load_skill and follow it.",
+        ...skills.map((skill) => `- ${skill.name}: ${skill.description}`)
+      ].join("\n")
 
 /**
  * Returns the `load_skill` tool for these skills, or an empty toolkit when
@@ -89,11 +91,13 @@ export const toolkit = <R>(skills: ReadonlyArray<Skill<R>>): Toolkit.Toolkit => 
   const names = skills.map((skill) => skill.name) as [string, ...Array<string>]
   const byName = new Map(skills.map((skill) => [skill.name, skill]))
 
-  return Toolkit.make(Tool.make({
-    name: "load_skill",
-    description: "Load a skill's instructions by name. Follow them for the rest of the task.",
-    inputSchema: Schema.Struct({ name: Schema.Literals(names) }),
-    run: ({ name }) =>
-      Instructions.resolve(byName.get(name)!.instructions).pipe(Effect.map((resolved) => resolved.text))
-  }))
+  return Toolkit.make(
+    Tool.make({
+      name: "load_skill",
+      description: "Load a skill's instructions by name. Follow them for the rest of the task.",
+      inputSchema: Schema.Struct({ name: Schema.Literals(names) }),
+      run: ({ name }) =>
+        Instructions.resolve(byName.get(name)!.instructions).pipe(Effect.map((resolved) => resolved.text))
+    })
+  )
 }

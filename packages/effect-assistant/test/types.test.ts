@@ -63,17 +63,20 @@ describe("types", () => {
       run: () => Effect.map(CurrentUser, (user) => `hi ${user.name}`)
     })
 
-    const handlers = WithClerk.toLayer(Effect.gen(function*() {
-      const users = yield* ChatUsers
+    const handlers = WithClerk.toLayer(
+      Effect.gen(function* () {
+        const users = yield* ChatUsers
 
-      return (turn: Assistant.Turn) =>
-        Stream.unwrap(
-          Effect.map(users.forChat(turn.chatId), (user) =>
-            turn.loop({ model: "claude-haiku-4-5", instructions: "Help.", toolkit: Toolkit.make(greet) }).pipe(
-              Stream.provideService(CurrentUser, user)
-            ))
-        )
-    }))
+        return (turn: Assistant.Turn) =>
+          Stream.unwrap(
+            Effect.map(users.forChat(turn.chatId), (user) =>
+              turn
+                .loop({ model: "claude-haiku-4-5", instructions: "Help.", toolkit: Toolkit.make(greet) })
+                .pipe(Stream.provideService(CurrentUser, user))
+            )
+          )
+      })
+    )
 
     expectTypeOf(handlers).toEqualTypeOf<Registered<ChatUsers>>()
 
@@ -87,40 +90,48 @@ describe("types", () => {
   })
 
   it("lets a handler use what its build Effect required, and nothing else", () => {
-    const clerk = Clerk.toLayer(Effect.gen(function*() {
-      const prompts = yield* Prompts // build time: a requirement of the layer
+    const clerk = Clerk.toLayer(
+      Effect.gen(function* () {
+        const prompts = yield* Prompts // build time: a requirement of the layer
 
-      return (run: Specialist.Run) =>
-        Stream.unwrap(Effect.gen(function*() {
-          return run.loop({ model: "claude-haiku-4-5", instructions: `${yield* prompts.get} for ${run.chatId}` })
-        }))
-    }))
+        return (run: Specialist.Run) =>
+          Stream.unwrap(
+            Effect.gen(function* () {
+              return run.loop({ model: "claude-haiku-4-5", instructions: `${yield* prompts.get} for ${run.chatId}` })
+            })
+          )
+      })
+    )
 
     expectTypeOf(clerk).toEqualTypeOf<Layer.Layer<Specialist.SpecialistHandler<"clerk">, never, Prompts>>()
 
     const usesPrompts = (run: Specialist.Run) =>
-      Stream.unwrap(Effect.gen(function*() {
-        yield* Prompts
+      Stream.unwrap(
+        Effect.gen(function* () {
+          yield* Prompts
 
-        return run.loop({ model: "claude-haiku-4-5", instructions: "File it." })
-      }))
+          return run.loop({ model: "claude-haiku-4-5", instructions: "File it." })
+        })
+      )
 
     // @ts-expect-error: Prompts isn't required by the build Effect
     const reachesForPrompts = () => Clerk.toLayer(usesPrompts)
 
     expectTypeOf(reachesForPrompts).toBeFunction()
 
-    const assistant = WithClerk.toLayer(Effect.gen(function*() {
-      const prompts = yield* Prompts
+    const assistant = WithClerk.toLayer(
+      Effect.gen(function* () {
+        const prompts = yield* Prompts
 
-      return Effect.fn(function*(turn: Assistant.Turn) {
-        return turn.loop({ model: "claude-haiku-4-5", instructions: `${yield* prompts.get} for ${turn.chatId}` })
+        return Effect.fn(function* (turn: Assistant.Turn) {
+          return turn.loop({ model: "claude-haiku-4-5", instructions: `${yield* prompts.get} for ${turn.chatId}` })
+        })
       })
-    }))
+    )
 
     expectTypeOf(assistant).toEqualTypeOf<Registered<Prompts>>()
 
-    const usesUser = Effect.fn(function*(turn: Assistant.Turn) {
+    const usesUser = Effect.fn(function* (turn: Assistant.Turn) {
       const user = yield* CurrentUser
 
       return turn.loop({ model: "claude-haiku-4-5", instructions: `Help ${user.name}.` })
@@ -134,25 +145,29 @@ describe("types", () => {
 
   it("compiles the docs' examples", () => {
     // guide/specialists.md: a semaphore, a user looked up from the chat, another model.
-    const analyst = Clerk.toLayer(Effect.gen(function*() {
-      const users = yield* ChatUsers
-      const permits = yield* Semaphore.make(3)
+    const analyst = Clerk.toLayer(
+      Effect.gen(function* () {
+        const users = yield* ChatUsers
+        const permits = yield* Semaphore.make(3)
 
-      return (run) =>
-        Stream.unwrap(Effect.gen(function*() {
-          yield* Effect.acquireRelease(permits.take(1), () => permits.release(1))
-          const user = yield* users.forChat(run.chatId)
+        return (run) =>
+          Stream.unwrap(
+            Effect.gen(function* () {
+              yield* Effect.acquireRelease(permits.take(1), () => permits.release(1))
+              const user = yield* users.forChat(run.chatId)
 
-          return run.loop({ model: "claude-haiku-4-5", instructions: `Research for ${user.name}.`, maxSteps: 12 })
-        }))
-    }))
+              return run.loop({ model: "claude-haiku-4-5", instructions: `Research for ${user.name}.`, maxSteps: 12 })
+            })
+          )
+      })
+    )
 
     expectTypeOf(analyst).toEqualTypeOf<Layer.Layer<Specialist.SpecialistHandler<"clerk">, never, ChatUsers>>()
 
     // guide/loops.md: the latest part of the history, from a user message.
     const recent = (items: ReadonlyArray<Items.HistoryItem>, max: number) => {
-      const from = items.findIndex((item, i) =>
-        i >= items.length - max && Items.isMessage(item) && item.role === "user"
+      const from = items.findIndex(
+        (item, i) => i >= items.length - max && Items.isMessage(item) && item.role === "user"
       )
 
       return from === -1 ? items : items.slice(from)
@@ -183,12 +198,14 @@ describe("types", () => {
       run: () => Effect.flatMap(Orders, (orders) => orders.recent)
     })
 
-    const handlers = WithClerk.toLayer(Effect.gen(function*() {
-      yield* Effect.context<Orders>()
+    const handlers = WithClerk.toLayer(
+      Effect.gen(function* () {
+        yield* Effect.context<Orders>()
 
-      return (turn: Assistant.Turn) =>
-        turn.loop({ model: "claude-haiku-4-5", instructions: "Help.", toolkit: Toolkit.make(orderHistory) })
-    }))
+        return (turn: Assistant.Turn) =>
+          turn.loop({ model: "claude-haiku-4-5", instructions: "Help.", toolkit: Toolkit.make(orderHistory) })
+      })
+    )
 
     expectTypeOf(handlers).toEqualTypeOf<Registered<Orders>>()
 

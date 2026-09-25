@@ -10,9 +10,7 @@ every model call.
 import * as Console from "effect/Console"
 import * as Stream from "effect/Stream"
 
-MyAssistant.subscribe(chatId).pipe(
-  Stream.runForEach(({ seq, event }) => Console.log(seq, event._tag))
-)
+MyAssistant.subscribe(chatId).pipe(Stream.runForEach(({ seq, event }) => Console.log(seq, event._tag)))
 // 1 UserMessage
 // 2 TurnStarted
 // 3 ModelOutput

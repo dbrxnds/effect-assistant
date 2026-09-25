@@ -25,10 +25,7 @@ export function ThreadList(props: {
       </div>
       <div className="chat-list" aria-label="Threads">
         {props.chats.map((thread) => (
-          <div
-            key={thread.chatId}
-            className={thread.chatId === props.activeChatId ? "chat-row on" : "chat-row"}
-          >
+          <div key={thread.chatId} className={thread.chatId === props.activeChatId ? "chat-row on" : "chat-row"}>
             <button
               type="button"
               className="chat-pick"

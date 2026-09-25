@@ -86,12 +86,7 @@ function TextInput(props: {
 
 const render = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
   choose_one: ({ props, open, answer, respond }) => (
-    <ChooseOne
-      options={props.options}
-      open={open}
-      picked={answer?.choice}
-      onPick={(choice) => respond({ choice })}
-    />
+    <ChooseOne options={props.options} open={open} picked={answer?.choice} onPick={(choice) => respond({ choice })} />
   ),
   confirm: ({ props, open, answer, respond }) => (
     <ChooseOne

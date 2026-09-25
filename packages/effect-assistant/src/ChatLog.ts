@@ -25,17 +25,20 @@ import { ChatId } from "./ChatId.ts"
  * @category services
  * @since 0.1.0
  */
-export class ChatLog extends Context.Service<ChatLog, {
-  /** Appends events to a chat and returns them as stored entries. */
-  readonly append: (
-    chatId: ChatId,
-    events: ReadonlyArray<AssistantEvent.AssistantEvent>
-  ) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
-  /** Reads every stored entry of a chat, in order. */
-  readonly read: (chatId: ChatId) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
-  /** Chats whose last entry doesn't end a turn: the ones that may still owe one, after a restart. */
-  readonly unfinished: Effect.Effect<ReadonlyArray<ChatId>>
-}>()("effect-assistant/ChatLog") {}
+export class ChatLog extends Context.Service<
+  ChatLog,
+  {
+    /** Appends events to a chat and returns them as stored entries. */
+    readonly append: (
+      chatId: ChatId,
+      events: ReadonlyArray<AssistantEvent.AssistantEvent>
+    ) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
+    /** Reads every stored entry of a chat, in order. */
+    readonly read: (chatId: ChatId) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
+    /** Chats whose last entry doesn't end a turn: the ones that may still owe one, after a restart. */
+    readonly unfinished: Effect.Effect<ReadonlyArray<ChatId>>
+  }
+>()("effect-assistant/ChatLog") {}
 
 /**
  * The storage a `ChatLog` is built on: read a chat, find its last `seq`,
@@ -72,7 +75,7 @@ export interface Storage {
 export const make = (storage: Storage): ChatLog["Service"] =>
   ChatLog.of({
     read: storage.read,
-    append: Effect.fn(function*(chatId: ChatId, events: ReadonlyArray<AssistantEvent.AssistantEvent>) {
+    append: Effect.fn(function* (chatId: ChatId, events: ReadonlyArray<AssistantEvent.AssistantEvent>) {
       if (events.length === 0) return []
 
       const seq = yield* storage.lastSeq(chatId)
@@ -83,7 +86,7 @@ export const make = (storage: Storage): ChatLog["Service"] =>
       return entries
     }),
     unfinished: storage.lastEntries.pipe(
-      Effect.map((last) => last.flatMap((entry) => AssistantEvent.isTurnEnd(entry.event) ? [] : [entry.chatId]))
+      Effect.map((last) => last.flatMap((entry) => (AssistantEvent.isTurnEnd(entry.event) ? [] : [entry.chatId])))
     )
   })
 
@@ -95,7 +98,7 @@ export const make = (storage: Storage): ChatLog["Service"] =>
  */
 export const layerMemory: Layer.Layer<ChatLog> = Layer.effect(
   ChatLog,
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const chats = yield* Ref.make(new Map<ChatId, ReadonlyArray<AssistantEvent.Entry>>())
 
     return make({
@@ -124,7 +127,7 @@ const EventJson = Schema.fromJsonString(AssistantEvent.AssistantEvent)
  */
 export const layerSql: Layer.Layer<ChatLog, never, SqlClient.SqlClient> = Layer.effect(
   ChatLog,
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const sql = (yield* SqlClient.SqlClient).withoutTransforms()
 
     yield* sql`
@@ -153,48 +156,43 @@ export const layerSql: Layer.Layer<ChatLog, never, SqlClient.SqlClient> = Layer.
                 Effect.map((event) =>
                   AssistantEvent.Entry.make({ chatId, seq: Number(row.seq), at: Number(row.at), event })
                 )
-              ))
+              )
+            )
           ),
           Effect.orDie
         ),
       lastSeq: (chatId) =>
-        sql<
-          { readonly seq: string | number | null }
-        >`SELECT MAX(seq) AS seq FROM chat_log WHERE chat_id = ${chatId}`
-          .pipe(
-            Effect.map((rows) => Number(rows[0]?.seq ?? 0)),
-            Effect.orDie
-          ),
+        sql<{
+          readonly seq: string | number | null
+        }>`SELECT MAX(seq) AS seq FROM chat_log WHERE chat_id = ${chatId}`.pipe(
+          Effect.map((rows) => Number(rows[0]?.seq ?? 0)),
+          Effect.orDie
+        ),
       write: (chatId, entries) =>
         Effect.forEach(entries, (entry) =>
-          encode(entry.event).pipe(
-            Effect.map((event) => ({ chat_id: chatId, seq: entry.seq, at: entry.at, event }))
-          )).pipe(
-            Effect.flatMap((rows) => sql`INSERT INTO chat_log ${sql.insert(rows)}`),
-            Effect.asVoid,
-            Effect.orDie
-          ),
-      lastEntries: sql<
-        {
-          readonly chat_id: string
-          readonly seq: string | number
-          readonly at: string | number
-          readonly event: string
-        }
-      >`
+          encode(entry.event).pipe(Effect.map((event) => ({ chat_id: chatId, seq: entry.seq, at: entry.at, event })))
+        ).pipe(
+          Effect.flatMap((rows) => sql`INSERT INTO chat_log ${sql.insert(rows)}`),
+          Effect.asVoid,
+          Effect.orDie
+        ),
+      lastEntries: sql<{
+        readonly chat_id: string
+        readonly seq: string | number
+        readonly at: string | number
+        readonly event: string
+      }>`
         SELECT e.chat_id, e.seq, e.at, e.event FROM chat_log e
         JOIN (SELECT chat_id, MAX(seq) AS seq FROM chat_log GROUP BY chat_id) last
           ON last.chat_id = e.chat_id AND last.seq = e.seq
       `.pipe(
         Effect.flatMap((rows) =>
-          Effect.forEach(
-            rows,
-            (row) =>
-              Effect.all({ chatId: decodeChatId(row.chat_id), event: decode(row.event) }).pipe(
-                Effect.map(({ chatId, event }) =>
-                  AssistantEvent.Entry.make({ chatId, seq: Number(row.seq), at: Number(row.at), event })
-                )
+          Effect.forEach(rows, (row) =>
+            Effect.all({ chatId: decodeChatId(row.chat_id), event: decode(row.event) }).pipe(
+              Effect.map(({ chatId, event }) =>
+                AssistantEvent.Entry.make({ chatId, seq: Number(row.seq), at: Number(row.at), event })
               )
+            )
           )
         ),
         Effect.orDie

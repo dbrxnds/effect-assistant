@@ -35,15 +35,13 @@ import * as Observability from "./Observability.ts"
  * @since 0.1.0
  */
 export const defaults = {
-  acme:
-    `You are Acme, a colleague on a small marketing team with eight offices (Amsterdam, New York, London, Paris, Berlin, Singapore, Madrid, Toronto).
+  acme: `You are Acme, a colleague on a small marketing team with eight offices (Amsterdam, New York, London, Paris, Berlin, Singapore, Madrid, Toronto).
 You can order campaigns and branded products (pens, totes, banners, ...), track orders, check each office's budget this quarter, look up offices (addresses and contacts with the offices tool), and have the research specialist dig into past campaigns and their results.
 Use your tools for anything about orders, offices, budgets, or campaigns; don't answer those from memory, and never invent an order, date, audience, budget, or number.
 When someone asks where an office is, what offices you have, or for an office address or contact, call offices (with the city or office name when they mean one office).
 Orders run in the background and report back as facts. Tell the user what matters (approvals, going live, shipped with tracking, delivered, results, problems); keep routine steps to yourself.
 Voice: warm, direct, short. First sentence answers the question. No filler like "Certainly" or "Great question".`,
-  "acme-skill-ordering":
-    `1. Pick the product with list_campaign_products. If it's unclear which one, ask with a choose_one block of the product names.
+  "acme-skill-ordering": `1. Pick the product with list_campaign_products. If it's unclear which one, ask with a choose_one block of the product names.
 2. You need which office pays, who it should reach, and a budget in USD. Ask for what's missing, one short question at a time. Check office_budget if the budget might not fit. If they want a suggestion, delegate to the research specialist and keep chatting.
 3. When you have everything, call start_campaign right away. Don't ask them to confirm yet; the approval step is the confirmation.
 4. Facts from workflow:CreateCampaign tell you how the run goes:
@@ -51,8 +49,7 @@ Voice: warm, direct, short. First sentence answers the question. No filler like 
    - creative_in_progress and scheduled are routine: keep them to yourself.
    - live: tell them, with the reference.
    - first_results: share the key numbers in one or two lines (spend, clicks, conversions, cost per conversion).`,
-  "acme-skill-products":
-    `1. Find the product with product_catalog. If it's unclear which one, ask with a choose_one block of a few product names.
+  "acme-skill-products": `1. Find the product with product_catalog. If it's unclear which one, ask with a choose_one block of a few product names.
 2. You need the office and a quantity. Ask for what's missing. Quantities round up to whole packs and the minimum; say so if it changes the number.
 3. Call order_products. If the budget doesn't cover it, say how much is left and suggest a smaller quantity.
 4. Tell the user the reference, total, and budget left, in one line.
@@ -76,9 +73,12 @@ export type Name = keyof typeof defaults
  * @category services
  * @since 0.1.0
  */
-export class Prompts extends Context.Service<Prompts, {
-  readonly get: (name: Name) => Effect.Effect<Instructions.Resolved>
-}>()("acme/Prompts") {}
+export class Prompts extends Context.Service<
+  Prompts,
+  {
+    readonly get: (name: Name) => Effect.Effect<Instructions.Resolved>
+  }
+>()("acme/Prompts") {}
 
 /**
  * Returns a prompt as instructions for an assistant, specialist, or skill.
@@ -86,13 +86,13 @@ export class Prompts extends Context.Service<Prompts, {
  * @category constructors
  * @since 0.1.0
  */
-export const instructions: (name: Name) => Effect.Effect<Instructions.Resolved, never, Prompts> = Effect.fn(
-  function*(name: Name) {
-    const prompts = yield* Prompts
+export const instructions: (name: Name) => Effect.Effect<Instructions.Resolved, never, Prompts> = Effect.fn(function* (
+  name: Name
+) {
+  const prompts = yield* Prompts
 
-    return yield* prompts.get(name)
-  }
-)
+  return yield* prompts.get(name)
+})
 
 /**
  * Layer that always uses the prompts in code.
@@ -118,7 +118,7 @@ export const layerLangfuse = (options: {
 }): Layer.Layer<Prompts, Config.ConfigError> =>
   Layer.effect(
     Prompts,
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const client = new LangfuseClient(options)
       const label = yield* Config.String("ACME_PROMPT_LABEL").pipe(Config.withDefault("production"))
 
@@ -128,13 +128,15 @@ export const layerLangfuse = (options: {
             client.prompt.get(name, { label, cacheTtlSeconds: 60, fallback: defaults[name], fetchTimeoutMs: 3000 })
           ).pipe(
             Effect.map((prompt): Instructions.Resolved =>
-              prompt.isFallback ? { text: prompt.prompt } : {
-                text: prompt.prompt,
-                attributes: {
-                  "langfuse.observation.prompt.name": prompt.name,
-                  "langfuse.observation.prompt.version": prompt.version
-                }
-              }
+              prompt.isFallback
+                ? { text: prompt.prompt }
+                : {
+                    text: prompt.prompt,
+                    attributes: {
+                      "langfuse.observation.prompt.name": prompt.name,
+                      "langfuse.observation.prompt.version": prompt.version
+                    }
+                  }
             ),
             Effect.orElseSucceed(() => ({ text: defaults[name] }))
           )
@@ -148,8 +150,10 @@ export const layerLangfuse = (options: {
  * @category layers
  * @since 0.1.0
  */
-export const layer: Layer.Layer<Prompts, Config.ConfigError> = Layer.unwrap(Effect.gen(function*() {
-  const credentials = yield* Observability.langfuse
+export const layer: Layer.Layer<Prompts, Config.ConfigError> = Layer.unwrap(
+  Effect.gen(function* () {
+    const credentials = yield* Observability.langfuse
 
-  return Option.isSome(credentials) ? layerLangfuse(Observability.clientOptions(credentials.value)) : layerDefaults
-}))
+    return Option.isSome(credentials) ? layerLangfuse(Observability.clientOptions(credentials.value)) : layerDefaults
+  })
+)

@@ -48,8 +48,9 @@ const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
         history: turn.history,
         toolChoice: "required"
       },
-      (result) => result.done || state.steps >= 12 ? Loop.stop() : Loop.next({ steps: state.steps + 1 })
-    )).pipe(Stream.concat(turn.replyIfOwed({ model: "claude-sonnet-5", instructions })))
+      (result) => (result.done || state.steps >= 12 ? Loop.stop() : Loop.next({ steps: state.steps + 1 }))
+    )
+  ).pipe(Stream.concat(turn.replyIfOwed({ model: "claude-sonnet-5", instructions })))
 )
 ```
 
@@ -88,7 +89,7 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 
 const lastTurns = (entries: ReadonlyArray<Assistant.Entry>, turns: number) => {
-  const starts = entries.flatMap((entry, i) => AssistantEvent.isTurnEnd(entry.event) ? [i + 1] : [])
+  const starts = entries.flatMap((entry, i) => (AssistantEvent.isTurnEnd(entry.event) ? [i + 1] : []))
 
   return entries.slice(starts.at(-turns) ?? 0)
 }
@@ -142,7 +143,7 @@ import * as Stream from "effect/Stream"
 
 /** The last summary, and the entries after it. */
 const sinceSummary = (entries: ReadonlyArray<Assistant.Entry<Summary>>) => {
-  const summary = entries.flatMap(({ event }) => event instanceof Summary ? [event] : []).at(-1)
+  const summary = entries.flatMap(({ event }) => (event instanceof Summary ? [event] : [])).at(-1)
 
   return { summary, since: entries.filter((entry) => entry.seq > (summary?.throughSeq ?? 0)) }
 }
@@ -155,28 +156,30 @@ const historyOf = (entries: ReadonlyArray<Assistant.Entry<Summary>>) => {
   })
 }
 
-const MyAssistantHandlers = MyAssistant.toLayer(Effect.gen(function*() {
-  const summarizer = yield* Summarizer // your service: summarizes a history
+const MyAssistantHandlers = MyAssistant.toLayer(
+  Effect.gen(function* () {
+    const summarizer = yield* Summarizer // your service: summarizes a history
 
-  return Effect.fn(function*(turn: Assistant.Turn<Summary>) {
-    const entries = yield* turn.entries
-    const { since } = sinceSummary(entries)
-    const lastEnd = since.filter(({ event }) => !(event instanceof Summary) && AssistantEvent.isTurnEnd(event)).at(-1)
+    return Effect.fn(function* (turn: Assistant.Turn<Summary>) {
+      const entries = yield* turn.entries
+      const { since } = sinceSummary(entries)
+      const lastEnd = since.filter(({ event }) => !(event instanceof Summary) && AssistantEvent.isTurnEnd(event)).at(-1)
 
-    if (lastEnd !== undefined && AssistantHistory.fromEntries(since).length > 200) {
-      const text = yield* summarizer.summarize(historyOf(entries.filter((entry) => entry.seq <= lastEnd.seq)))
-      yield* turn.append(Summary.make({ throughSeq: lastEnd.seq, text }))
-    }
+      if (lastEnd !== undefined && AssistantHistory.fromEntries(since).length > 200) {
+        const text = yield* summarizer.summarize(historyOf(entries.filter((entry) => entry.seq <= lastEnd.seq)))
+        yield* turn.append(Summary.make({ throughSeq: lastEnd.seq, text }))
+      }
 
-    return AssistantLoop.stream({
-      model: "claude-sonnet-5",
-      instructions: turn.instructions(instructions),
-      toolkit: turn.tools,
-      history: turn.entries.pipe(Effect.map(historyOf)),
-      toolChoice: "required"
-    }).pipe(Stream.concat(turn.replyIfOwed({ model: "claude-sonnet-5", instructions })))
+      return AssistantLoop.stream({
+        model: "claude-sonnet-5",
+        instructions: turn.instructions(instructions),
+        toolkit: turn.tools,
+        history: turn.entries.pipe(Effect.map(historyOf)),
+        toolChoice: "required"
+      }).pipe(Stream.concat(turn.replyIfOwed({ model: "claude-sonnet-5", instructions })))
+    })
   })
-}))
+)
 ```
 
 The summary of a summarized chat includes the earlier summary, since

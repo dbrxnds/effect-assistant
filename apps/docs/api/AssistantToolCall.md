@@ -64,12 +64,15 @@ Service for the tool call a tool runs for. The agent loop provides it to
 every call.
 
 ```ts
-class AssistantToolCall extends Context.Service<AssistantToolCall, {
-  /** The call's id, as the model wrote it. The same when the call runs again after a crash. */
-  readonly callId: string
-  /** The tool's name. */
-  readonly tool: string
-}>()("effect-assistant/AssistantToolCall")
+class AssistantToolCall extends Context.Service<
+  AssistantToolCall,
+  {
+    /** The call's id, as the model wrote it. The same when the call runs again after a crash. */
+    readonly callId: string
+    /** The tool's name. */
+    readonly tool: string
+  }
+>()("effect-assistant/AssistantToolCall")
 ```
 
 <small>Since 0.1.0</small>

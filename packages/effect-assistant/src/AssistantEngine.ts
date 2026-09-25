@@ -55,18 +55,17 @@ import * as Turns from "./internal/turns.ts"
  * @category services
  * @since 0.1.0
  */
-export class AssistantEngine extends Context.Service<AssistantEngine, {
-  /** Registers an assistant, for as long as the scope is open. */
-  readonly register: (registration: Turns.Registration) => Effect.Effect<void, never, Scope.Scope>
-  /** Stores an input in a chat of the assistant, which works on it in the background. */
-  readonly submit: (
-    assistant: string,
-    chatId: ChatId,
-    input: AssistantEvent.Input
-  ) => Effect.Effect<void>
-  /** Streams the chat's stored events, then live ones. */
-  readonly subscribe: (assistant: string, chatId: ChatId) => Stream.Stream<AssistantEvent.Entry>
-}>()("effect-assistant/AssistantEngine") {}
+export class AssistantEngine extends Context.Service<
+  AssistantEngine,
+  {
+    /** Registers an assistant, for as long as the scope is open. */
+    readonly register: (registration: Turns.Registration) => Effect.Effect<void, never, Scope.Scope>
+    /** Stores an input in a chat of the assistant, which works on it in the background. */
+    readonly submit: (assistant: string, chatId: ChatId, input: AssistantEvent.Input) => Effect.Effect<void>
+    /** Streams the chat's stored events, then live ones. */
+    readonly subscribe: (assistant: string, chatId: ChatId) => Stream.Stream<AssistantEvent.Entry>
+  }
+>()("effect-assistant/AssistantEngine") {}
 
 const notRegistered = (assistant: string) =>
   Effect.die(`The ${assistant} assistant isn't registered: provide its toLayer.`)
@@ -86,13 +85,9 @@ const notRegistered = (assistant: string) =>
  * @category layers
  * @since 0.1.0
  */
-export const layerMemory: Layer.Layer<
+export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.effect(
   AssistantEngine,
-  never,
-  ChatLog
-> = Layer.effect(
-  AssistantEngine,
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const context = yield* Effect.context<ChatLog>()
     const log = yield* ChatLog
     const registered = new Map<string, Turns.Registration>()
@@ -104,7 +99,7 @@ export const layerMemory: Layer.Layer<
     // One entry per open chat, like a cluster entity: opened when used, closed five minutes after the last use.
     const chats: RcMap.RcMap<string, Turns.Chat> = yield* RcMap.make({
       lookup: (key: string) =>
-        Effect.gen(function*() {
+        Effect.gen(function* () {
           const [assistant = "", chatId] = key.split("\n")
           const registration = registered.get(assistant)
 
@@ -122,26 +117,26 @@ export const layerMemory: Layer.Layer<
 
     const keepAlive = (key: string, enabled: boolean): Effect.Effect<void> =>
       enabled
-        ? Effect.gen(function*() {
-          const scope = yield* Scope.make()
-          yield* RcMap.get(chats, key).pipe(Effect.provideService(Scope.Scope, scope))
-          held.set(key, scope)
-        })
+        ? Effect.gen(function* () {
+            const scope = yield* Scope.make()
+            yield* RcMap.get(chats, key).pipe(Effect.provideService(Scope.Scope, scope))
+            held.set(key, scope)
+          })
         : Effect.suspend(() => {
-          const scope = held.get(key)
-          held.delete(key)
+            const scope = held.get(key)
+            held.delete(key)
 
-          return scope === undefined ? Effect.void : Scope.close(scope, Exit.void)
-        })
+            return scope === undefined ? Effect.void : Scope.close(scope, Exit.void)
+          })
 
     const withChat = <A>(assistant: string, chatId: ChatId, f: (chat: Turns.Chat) => Effect.Effect<A>) =>
       Effect.scoped(RcMap.get(chats, keyOf(assistant, chatId)).pipe(Effect.flatMap(f)))
 
     /** Runs turns for the assistant's chats that owe one: its last turn was cut off, or an input came after. */
-    const resumeAll = Effect.fn(function*(assistant: string) {
+    const resumeAll = Effect.fn(function* (assistant: string) {
       for (const chatId of yield* log.unfinished) {
         const entries = yield* log.read(chatId)
-        const turns = entries.flatMap(({ event }) => event instanceof AssistantEvent.TurnStarted ? [event] : [])
+        const turns = entries.flatMap(({ event }) => (event instanceof AssistantEvent.TurnStarted ? [event] : []))
         const lastTurn = turns.at(-1)
 
         if (lastTurn?.assistant === assistant && History.needsTurn(entries)) {
@@ -152,7 +147,7 @@ export const layerMemory: Layer.Layer<
 
     return AssistantEngine.of({
       register: (registration) =>
-        Effect.gen(function*() {
+        Effect.gen(function* () {
           registered.set(registration.definition.name, registration)
           // Chats this assistant was working on when the process stopped: pick them up again.
           yield* resumeAll(registration.definition.name).pipe(Effect.forkScoped)
@@ -191,21 +186,17 @@ const Subscribe = Rpc.make("Subscribe", { success: AssistantEvent.Entry, stream:
  * @category layers
  * @since 0.1.0
  */
-export const layerCluster: Layer.Layer<
+export const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Sharding.Sharding> = Layer.effect(
   AssistantEngine,
-  never,
-  ChatLog | Sharding.Sharding
-> = Layer.effect(
-  AssistantEngine,
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const context = yield* Effect.context<ChatLog | Sharding.Sharding>()
     const sharding = yield* Sharding.Sharding
     const clients = new Map<string, EntityClient>()
 
-    const register = Effect.fn(function*(registration: Turns.Registration) {
+    const register = Effect.fn(function* (registration: Turns.Registration) {
       const ChatEntity = Entity.make(`Assistant/${registration.definition.name}`, [Submit, Subscribe])
 
-      const handlers = Effect.gen(function*() {
+      const handlers = Effect.gen(function* () {
         const address = yield* Entity.CurrentAddress
         const chatId = yield* Schema.decodeUnknownEffect(ChatId)(address.entityId).pipe(Effect.orDie)
         // The entity's own: `Entity.keepAlive` needs its address and keep-alive latch, which is in there too.

@@ -108,16 +108,14 @@ export function AcmeChatPage() {
     <AssistantRuntimeProvider runtime={runtime}>
       <BlockContext.Provider value={blocks}>
         <div className="shell">
-          {drawer
-            ? (
-              <button
-                type="button"
-                className="sidebar-backdrop"
-                aria-label="Close threads"
-                onClick={() => setDrawer(false)}
-              />
-            )
-            : null}
+          {drawer ? (
+            <button
+              type="button"
+              className="sidebar-backdrop"
+              aria-label="Close threads"
+              onClick={() => setDrawer(false)}
+            />
+          ) : null}
           <ThreadList
             chats={chats}
             notice={notice}

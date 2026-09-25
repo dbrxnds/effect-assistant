@@ -16,33 +16,43 @@ const Research = Specialist.make("research", { description: "Researches past cam
 export const MyAssistant = Assistant.make("my-assistant", { blocks: Blocks, specialists: [Research] })
 
 // Handlers: the build Effect runs once per chat activation; the function runs every turn (or brief).
-const MyAssistantLive = MyAssistant.toLayer(Effect.gen(function*() {
-  const prompts = yield* Prompts // from the layer
-  const users = yield* ChatUsers // the app's chat table: whose chat is it
+const MyAssistantLive = MyAssistant.toLayer(
+  Effect.gen(function* () {
+    const prompts = yield* Prompts // from the layer
+    const users = yield* ChatUsers // the app's chat table: whose chat is it
 
-  return (turn) =>
-    Stream.unwrap(Effect.gen(function*() {
-      const user = yield* users.forChat(turn.chatId)
+    return (turn) =>
+      Stream.unwrap(
+        Effect.gen(function* () {
+          const user = yield* users.forChat(turn.chatId)
 
-      return turn.loop({
-        model: "claude-sonnet-5",
-        instructions: yield* prompts.get(user),
-        toolkit,
-        skills: [orderingCampaigns]
-      }).pipe(Stream.provideService(CurrentUser, user)) // for the tools
-    }))
-}))
+          return turn
+            .loop({
+              model: "claude-sonnet-5",
+              instructions: yield* prompts.get(user),
+              toolkit,
+              skills: [orderingCampaigns]
+            })
+            .pipe(Stream.provideService(CurrentUser, user)) // for the tools
+        })
+      )
+  })
+)
 
-const ResearchLive = Research.toLayer(Effect.gen(function*() {
-  const users = yield* ChatUsers
+const ResearchLive = Research.toLayer(
+  Effect.gen(function* () {
+    const users = yield* ChatUsers
 
-  return (run) =>
-    Stream.unwrap(
-      Effect.map(users.forChat(run.chatId), (user) =>
-        run.loop({ model: "claude-sonnet-5", instructions: "Answer in a few lines.", toolkit: researchTools })
-          .pipe(Stream.provideService(CurrentUser, user)))
-    )
-}))
+    return (run) =>
+      Stream.unwrap(
+        Effect.map(users.forChat(run.chatId), (user) =>
+          run
+            .loop({ model: "claude-sonnet-5", instructions: "Answer in a few lines.", toolkit: researchTools })
+            .pipe(Stream.provideService(CurrentUser, user))
+        )
+      )
+  })
+)
 
 // One engine for the app: each chat is a cluster entity. Or in the process: AssistantEngine.layerMemory.
 export const AppLive = MyAssistantLive.pipe(
@@ -63,5 +73,5 @@ JSDoc.
 
 ```bash
 pnpm --filter effect-assistant test        # calls the real model (ANTHROPIC_API_KEY in .env.local)
-pnpm --filter effect-assistant typecheck
+pnpm --filter effect-assistant build       # vp pack: dist, with declarations and source maps
 ```

@@ -51,11 +51,7 @@ last one recorded. Run it in one process only: two would run the same
 chat's turns and write its log at once.
 
 ```ts
-const layerMemory: Layer.Layer<
-  AssistantEngine,
-  never,
-  ChatLog
->
+const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog>
 ```
 
 <small>Since 0.1.0</small>
@@ -75,11 +71,7 @@ an entity starts, it runs a turn for any input no turn has read. An entity
 with no work and no subscribers stops after 5 minutes.
 
 ```ts
-const layerCluster: Layer.Layer<
-  AssistantEngine,
-  never,
-  ChatLog | Sharding.Sharding
->
+const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Sharding.Sharding>
 ```
 
 <small>Since 0.1.0</small>
@@ -92,18 +84,17 @@ Service that runs assistants' chats. `toLayer` registers an assistant with
 it; the assistant's `submit` and `subscribe` use it.
 
 ```ts
-class AssistantEngine extends Context.Service<AssistantEngine, {
-  /** Registers an assistant, for as long as the scope is open. */
-  readonly register: (registration: Turns.Registration) => Effect.Effect<void, never, Scope.Scope>
-  /** Stores an input in a chat of the assistant, which works on it in the background. */
-  readonly submit: (
-    assistant: string,
-    chatId: ChatId,
-    input: AssistantEvent.Input
-  ) => Effect.Effect<void>
-  /** Streams the chat's stored events, then live ones. */
-  readonly subscribe: (assistant: string, chatId: ChatId) => Stream.Stream<AssistantEvent.Entry>
-}>()("effect-assistant/AssistantEngine")
+class AssistantEngine extends Context.Service<
+  AssistantEngine,
+  {
+    /** Registers an assistant, for as long as the scope is open. */
+    readonly register: (registration: Turns.Registration) => Effect.Effect<void, never, Scope.Scope>
+    /** Stores an input in a chat of the assistant, which works on it in the background. */
+    readonly submit: (assistant: string, chatId: ChatId, input: AssistantEvent.Input) => Effect.Effect<void>
+    /** Streams the chat's stored events, then live ones. */
+    readonly subscribe: (assistant: string, chatId: ChatId) => Stream.Stream<AssistantEvent.Entry>
+  }
+>()("effect-assistant/AssistantEngine")
 ```
 
 <small>Since 0.1.0</small>

@@ -137,7 +137,7 @@ export const staleBlocks = (
   entries: ReadonlyArray<AssistantEvent.Entry>,
   options: { readonly messages: number }
 ): ReadonlyArray<string> => {
-  const open = [...blockStates(entries)].flatMap(([id, state]) => state.open ? [id] : [])
+  const open = [...blockStates(entries)].flatMap(([id, state]) => (state.open ? [id] : []))
 
   return open.filter((id) => {
     const shown = entries.findIndex(({ event }) => Predicate.isTagged(event, "AssistantMessage") && event.id === id)
@@ -168,7 +168,7 @@ export const staleBlocks = (
 export const closeStale = (options: {
   readonly messages: number
 }): Effect.Effect<void, never, AssistantTurn | ChatLog> =>
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const { chatId } = yield* AssistantTurn
     const log = yield* ChatLog
     const stale = staleBlocks(yield* log.read(chatId), options)
@@ -272,9 +272,10 @@ export const toClient =
 
     const given = options.state?.answer
 
-    const answer = given === undefined || block.answer === undefined
-      ? Option.none()
-      : Schema.decodeUnknownOption(jsonCodec(block.answer))(given.value)
+    const answer =
+      given === undefined || block.answer === undefined
+        ? Option.none()
+        : Schema.decodeUnknownOption(jsonCodec(block.answer))(given.value)
 
     return render({
       text: message.text,

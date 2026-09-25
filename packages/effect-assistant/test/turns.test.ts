@@ -38,7 +38,7 @@ const waitCall = (id: string) => ({ type: "function_call" as const, call_id: id,
 const lateFact = () => {
   let turns = 0
 
-  return Effect.fn(function*(turn: Assistant.Turn) {
+  return Effect.fn(function* (turn: Assistant.Turn) {
     turns += 1
     yield* turn.history
 
@@ -59,11 +59,11 @@ const lateFact = () => {
 }
 
 const lastTurnEnd = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
-  entries.flatMap(({ event }) => AssistantEvent.isTurnEnd(event) ? [event] : []).at(-1)
+  entries.flatMap(({ event }) => (AssistantEvent.isTurnEnd(event) ? [event] : [])).at(-1)
 
 describe("turn completion", () => {
   it.live("records TurnFailed when client input gets no assistant message", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const assistant = TestAssistant
       const chat = yield* newChat()
       yield* assistant.submit(chat, say("hello?"))
@@ -75,10 +75,11 @@ describe("turn completion", () => {
       expect(Predicate.isTagged(end!, "TurnFailed")).toBe(true)
       expect(Predicate.isTagged(end!, "TurnFailed") ? end!.message : "").toBe(silentTurnMessage)
       expect(AssistantEvent.assistantTexts(entries)).toEqual([])
-    }).pipe(Effect.provide(layer)))
+    }).pipe(Effect.provide(layer))
+  )
 
   it.live("still allows a silent TurnCompleted for fact-only turns", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const assistant = TestAssistant
       const chat = yield* newChat()
       yield* assistant.submit(
@@ -92,21 +93,23 @@ describe("turn completion", () => {
       expect(end).toBeDefined()
       expect(Predicate.isTagged(end!, "TurnCompleted")).toBe(true)
       expect(AssistantEvent.assistantTexts(entries)).toEqual([])
-    }).pipe(Effect.provide(layer)))
+    }).pipe(Effect.provide(layer))
+  )
 
   it.live("gives a call the handler never ran a result", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const assistant = TestAssistant
       const chat = yield* newChat()
       yield* assistant.submit(chat, say("hello?"))
       const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 1)
-      const results = entries.flatMap(({ event }) => Predicate.isTagged(event, "ToolResult") ? [event] : [])
+      const results = entries.flatMap(({ event }) => (Predicate.isTagged(event, "ToolResult") ? [event] : []))
 
       expect(results.map((result) => [result.callId, result.output])).toEqual([["lookup-1", notRunOutput]])
-    }).pipe(Effect.provide(stopsEarlyLayer)))
+    }).pipe(Effect.provide(stopsEarlyLayer))
+  )
 
   it.live("tells the model a call whose stream stopped while it ran may have done its work", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       // The call started, then the handler's stream ended before its result.
       const stopsMidCall = memoryAssistant(() =>
         Stream.make(
@@ -117,34 +120,36 @@ describe("turn completion", () => {
         )
       )
 
-      const entries = yield* Effect.gen(function*() {
+      const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat()
         yield* TestAssistant.submit(chat, say("send it"))
 
         return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
       }).pipe(Effect.provide(stopsMidCall))
 
-      const results = entries.flatMap(({ event }) => Predicate.isTagged(event, "ToolResult") ? [event] : [])
+      const results = entries.flatMap(({ event }) => (Predicate.isTagged(event, "ToolResult") ? [event] : []))
 
       expect(results.map((result) => [result.callId, result.output])).toEqual([["send-1", mayHaveRunOutput]])
-    }))
+    })
+  )
 
   it.live("leaves an input that arrived after the loop's last read to the next turn, without failing this one", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const assistant = TestAssistant
       const chat = yield* newChat()
       yield* assistant.submit(chat, say("which province is Ottawa in?"))
       const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 2)
 
       expect(AssistantEvent.assistantTexts(entries)).toEqual(["It's in Ontario."])
-      expect(entries.flatMap(({ event }) => AssistantEvent.isTurnEnd(event) ? [event._tag] : [])).toEqual([
+      expect(entries.flatMap(({ event }) => (AssistantEvent.isTurnEnd(event) ? [event._tag] : []))).toEqual([
         "TurnCompleted",
         "TurnCompleted"
       ])
-    }).pipe(Effect.provide(memoryAssistant(lateFact()))))
+    }).pipe(Effect.provide(memoryAssistant(lateFact())))
+  )
 
   it.live("replyIfOwed makes the real model reply to a turn that only waited", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       // The loop only calls wait, as a model might after answering a workflow's question; the reply pass runs
       // the real model, with wait still in its history.
       const layer = memoryAssistant((turn) =>
@@ -153,7 +158,7 @@ describe("turn completion", () => {
         )
       )
 
-      const entries = yield* Effect.gen(function*() {
+      const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat()
         yield* TestAssistant.submit(chat, say("Thanks, that's all I needed."))
 
@@ -164,19 +169,22 @@ describe("turn completion", () => {
 
       expect(Predicate.isTagged(end!, "TurnCompleted")).toBe(true)
       expect(AssistantEvent.assistantTexts(entries).length).toBe(1)
-    }))
+    })
+  )
 })
 
 describe("BlockKit.closeStale", () => {
   it.live("closes, from a turn, the blocks the user moved on from", () =>
-    Effect.gen(function*() {
-      const layer = memoryAssistant(Effect.fn(function*() {
-        yield* BlockKit.closeStale({ messages: 2 })
+    Effect.gen(function* () {
+      const layer = memoryAssistant(
+        Effect.fn(function* () {
+          yield* BlockKit.closeStale({ messages: 2 })
 
-        return Stream.empty
-      }))
+          return Stream.empty
+        })
+      )
 
-      const entries = yield* Effect.gen(function*() {
+      const entries = yield* Effect.gen(function* () {
         const log = yield* ChatLog.ChatLog
         const chat = yield* newChat()
         yield* log.append(chat, [
@@ -192,8 +200,10 @@ describe("BlockKit.closeStale", () => {
         return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
       }).pipe(Effect.provide(layer))
 
-      expect(entries.flatMap(({ event }) => Predicate.isTagged(event, "BlocksClosed") ? event.messageIds : []))
-        .toEqual(["m1"])
+      expect(
+        entries.flatMap(({ event }) => (Predicate.isTagged(event, "BlocksClosed") ? event.messageIds : []))
+      ).toEqual(["m1"])
       expect(BlockKit.blockStates(entries).get("m1")?.open).toBe(false)
-    }))
+    })
+  )
 })

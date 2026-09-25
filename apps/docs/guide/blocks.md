@@ -65,8 +65,12 @@ const render = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
     )),
   confirm: ({ props, open, respond }) => (
     <>
-      <button disabled={!open} onClick={() => respond({ confirmed: true })}>{props.confirmLabel}</button>
-      <button disabled={!open} onClick={() => respond({ confirmed: false })}>{props.denyLabel}</button>
+      <button disabled={!open} onClick={() => respond({ confirmed: true })}>
+        {props.confirmLabel}
+      </button>
+      <button disabled={!open} onClick={() => respond({ confirmed: false })}>
+        {props.denyLabel}
+      </button>
     </>
   )
 })

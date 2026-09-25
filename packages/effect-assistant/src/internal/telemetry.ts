@@ -63,43 +63,40 @@ export const agentOutput = (output: Traced) => Effect.annotateCurrentSpan("outpu
  *
  * @internal
  */
-export const chatSpan = (
-  model: string,
-  input: ReadonlyArray<Items.HistoryItem>,
-  attributes: SpanAttributes | undefined
-) =>
-<E, R>(self: Effect.Effect<Turn.Turn, E, R>): Effect.Effect<Turn.Turn, E, R> =>
-  self.pipe(
-    Effect.tap((turn) =>
-      Effect.currentSpan.pipe(
-        Effect.tap((span) =>
-          Effect.sync(() => {
-            Telemetry.addGenAIAnnotations(span, {
-              operation: { name: "chat" },
-              request: { model },
-              response: { finishReasons: [turn.stop_reason] },
-              usage: { inputTokens: turn.usage.input_tokens, outputTokens: turn.usage.output_tokens }
+export const chatSpan =
+  (model: string, input: ReadonlyArray<Items.HistoryItem>, attributes: SpanAttributes | undefined) =>
+  <E, R>(self: Effect.Effect<Turn.Turn, E, R>): Effect.Effect<Turn.Turn, E, R> =>
+    self.pipe(
+      Effect.tap((turn) =>
+        Effect.currentSpan.pipe(
+          Effect.tap((span) =>
+            Effect.sync(() => {
+              Telemetry.addGenAIAnnotations(span, {
+                operation: { name: "chat" },
+                request: { model },
+                response: { finishReasons: [turn.stop_reason] },
+                usage: { inputTokens: turn.usage.input_tokens, outputTokens: turn.usage.output_tokens }
+              })
+              span.attribute("gen_ai.completion", json(turn.items))
+              const details = turn.usage.input_tokens_details
+
+              if (details?.cached_tokens !== undefined) {
+                span.attribute("gen_ai.usage.cache_read_input_tokens", details.cached_tokens)
+              }
+
+              if (details?.cache_write_tokens !== undefined) {
+                span.attribute("gen_ai.usage.cache_creation_input_tokens", details.cache_write_tokens)
+              }
             })
-            span.attribute("gen_ai.completion", json(turn.items))
-            const details = turn.usage.input_tokens_details
-
-            if (details?.cached_tokens !== undefined) {
-              span.attribute("gen_ai.usage.cache_read_input_tokens", details.cached_tokens)
-            }
-
-            if (details?.cache_write_tokens !== undefined) {
-              span.attribute("gen_ai.usage.cache_creation_input_tokens", details.cache_write_tokens)
-            }
-          })
-        ),
-        Effect.ignore
-      )
-    ),
-    Effect.withSpan(`chat ${model}`, {
-      kind: "client",
-      attributes: { "gen_ai.prompt": json(input), ...attributes }
-    })
-  )
+          ),
+          Effect.ignore
+        )
+      ),
+      Effect.withSpan(`chat ${model}`, {
+        kind: "client",
+        attributes: { "gen_ai.prompt": json(input), ...attributes }
+      })
+    )
 
 /**
  * Wraps one tool call in an `execute_tool` span.

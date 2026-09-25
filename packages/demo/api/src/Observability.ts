@@ -44,9 +44,7 @@ export const clientOptions = (credentials: Option.Option.Value<Config.Success<ty
 /** local / preview / eval, so runs don't mix in the Langfuse UI. */
 const environment = Config.String("LANGFUSE_TRACING_ENVIRONMENT").pipe(
   Config.orElse(() =>
-    Config.option(Config.String("RENDER")).pipe(
-      Config.map((render) => Option.isSome(render) ? "preview" : "local")
-    )
+    Config.option(Config.String("RENDER")).pipe(Config.map((render) => (Option.isSome(render) ? "preview" : "local")))
   )
 )
 
@@ -56,20 +54,22 @@ const environment = Config.String("LANGFUSE_TRACING_ENVIRONMENT").pipe(
  * @category layers
  * @since 0.1.0
  */
-export const layer = Layer.unwrap(Effect.gen(function*() {
-  const credentials = yield* langfuse
+export const layer = Layer.unwrap(
+  Effect.gen(function* () {
+    const credentials = yield* langfuse
 
-  if (Option.isNone(credentials)) {
-    yield* Effect.logInfo("tracing off: no Langfuse keys")
+    if (Option.isNone(credentials)) {
+      yield* Effect.logInfo("tracing off: no Langfuse keys")
 
-    return Layer.empty
-  }
+      return Layer.empty
+    }
 
-  const env = yield* environment
-  yield* Effect.logInfo(`tracing to Langfuse (${env})`)
+    const env = yield* environment
+    yield* Effect.logInfo(`tracing to Langfuse (${env})`)
 
-  return NodeSdk.layer(() => ({
-    resource: { serviceName: "acme-demo" },
-    spanProcessor: new LangfuseSpanProcessor({ ...clientOptions(credentials.value), environment: env })
-  }))
-}))
+    return NodeSdk.layer(() => ({
+      resource: { serviceName: "acme-demo" },
+      spanProcessor: new LangfuseSpanProcessor({ ...clientOptions(credentials.value), environment: env })
+    }))
+  })
+)

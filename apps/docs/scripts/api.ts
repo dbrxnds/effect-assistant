@@ -80,7 +80,7 @@ const scanTo = (text: string, start: number, stop: (text: string, at: number) =>
       continue
     }
 
-    if (char === "\"" || char === "'" || char === "`") {
+    if (char === '"' || char === "'" || char === "`") {
       quote = char
       continue
     }
@@ -118,11 +118,17 @@ const signatureAt = (source: string, start: number): string => {
 
   if (kind === "interface" || kind === "type" || kind === "class") {
     // Up to the end of the declaration: `{}` for classes, the closing brace or end of statement otherwise.
-    const end = kind === "class"
-      ? source.indexOf("{}", after) + 2
-      : scanTo(source, after, (text, at) => (text[at] === "\n" && text[at + 1] !== " " && text[at + 1] !== "}" ? 1 : 0))
+    const end =
+      kind === "class"
+        ? source.indexOf("{}", after) + 2
+        : scanTo(source, after, (text, at) =>
+            text[at] === "\n" && text[at + 1] !== " " && text[at + 1] !== "}" ? 1 : 0
+          )
 
-    return source.slice(start + "export ".length, end).trim().replace(/\s*\{\}$/, "")
+    return source
+      .slice(start + "export ".length, end)
+      .trim()
+      .replace(/\s*\{\}$/, "")
   }
 
   const rest = source.slice(after)
@@ -184,19 +190,21 @@ const page = (module: string, source: string): string => {
   })
 
   const sections = categories.map((category) => {
-    const items = byCategory.get(category)!.map((declaration) =>
-      [
-        `### ${declaration.name}`,
-        "",
-        links(declaration.doc.description),
-        "",
-        "```ts",
-        declaration.signature,
-        "```",
-        "",
-        `<small>Since ${declaration.doc.tags.get("since") ?? "0.1.0"}</small>`
-      ].join("\n")
-    )
+    const items = byCategory
+      .get(category)!
+      .map((declaration) =>
+        [
+          `### ${declaration.name}`,
+          "",
+          links(declaration.doc.description),
+          "",
+          "```ts",
+          declaration.signature,
+          "```",
+          "",
+          `<small>Since ${declaration.doc.tags.get("since") ?? "0.1.0"}</small>`
+        ].join("\n")
+      )
 
     return [`## ${category[0]!.toUpperCase()}${category.slice(1)}`, ...items].join("\n\n")
   })

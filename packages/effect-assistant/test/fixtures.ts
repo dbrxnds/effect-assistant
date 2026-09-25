@@ -57,10 +57,12 @@ export const runEntity = <E, RIn>(handlers: Layer.Layer<never, E, RIn>) =>
   )
 
 /** A handler that runs the turn's loop with these options, on the test model. */
-export const simple = <Tools extends Toolkit.Toolkit = Record<never, never>, R = never>(
-  options: Omit<Assistant.LoopOptions<Tools, R>, "model">
-) =>
-(turn: Assistant.Turn) => turn.loop({ model: testModel, ...options })
+export const simple =
+  <Tools extends Toolkit.Toolkit = Record<never, never>, R = never>(
+    options: Omit<Assistant.LoopOptions<Tools, R>, "model">
+  ) =>
+  (turn: Assistant.Turn) =>
+    turn.loop({ model: testModel, ...options })
 
 /** An in-memory `TestAssistant` with this handler, its own event log, and the test model. */
 export const memoryAssistant = (handler: Assistant.Handler<Assistant.TurnServices | LanguageModel.LanguageModel>) =>
@@ -76,19 +78,22 @@ export const fact = (source: string, payload: Record<string, string | number>) =
 
 /** One line per entry, for a failure message. */
 export const traceEntries = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
-  entries.map(({ seq, event }) => {
-    const detail = Predicate.isTagged(event, "UserMessage") || Predicate.isTagged(event, "AssistantMessage")
-      ? event.text
-      : Predicate.isTagged(event, "ModelOutput")
-      ? event.items.flatMap((item) => item.type === "function_call" ? [item.name] : []).join(",")
-      : Predicate.isTagged(event, "ToolResult")
-      ? `${event.tool}: ${event.output.slice(0, 80)}`
-      : Predicate.isTagged(event, "Fact")
-      ? JSON.stringify(event.payload).slice(0, 120)
-      : ""
+  entries
+    .map(({ seq, event }) => {
+      const detail =
+        Predicate.isTagged(event, "UserMessage") || Predicate.isTagged(event, "AssistantMessage")
+          ? event.text
+          : Predicate.isTagged(event, "ModelOutput")
+            ? event.items.flatMap((item) => (item.type === "function_call" ? [item.name] : [])).join(",")
+            : Predicate.isTagged(event, "ToolResult")
+              ? `${event.tool}: ${event.output.slice(0, 80)}`
+              : Predicate.isTagged(event, "Fact")
+                ? JSON.stringify(event.payload).slice(0, 120)
+                : ""
 
-    return `${seq} ${event._tag} ${detail}`
-  }).join("\n")
+      return `${seq} ${event._tag} ${detail}`
+    })
+    .join("\n")
 
 /** Collects a chat's events until `until` holds for them, or fails after `timeout` with what it saw. */
 export const collectUntil = (
@@ -97,11 +102,14 @@ export const collectUntil = (
   until: (entries: ReadonlyArray<AssistantEvent.Entry>) => boolean,
   timeout = "90 seconds" as const
 ) =>
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     let seen: ReadonlyArray<AssistantEvent.Entry> = []
 
     return yield* assistant.subscribe(chatId).pipe(
-      Stream.scan((): ReadonlyArray<AssistantEvent.Entry> => [], (acc, entry) => [...acc, entry]),
+      Stream.scan(
+        (): ReadonlyArray<AssistantEvent.Entry> => [],
+        (acc, entry) => [...acc, entry]
+      ),
       Stream.tap((entries) => Effect.sync(() => (seen = entries))),
       Stream.takeUntil(until),
       Stream.runLast,
@@ -116,18 +124,18 @@ export const turnsDone = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
   entries.filter(({ event }) => AssistantEvent.isTurnEnd(event)).length
 
 export const failures = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
-  entries.flatMap(({ event }) => Predicate.isTagged(event, "TurnFailed") ? [event.message] : [])
+  entries.flatMap(({ event }) => (Predicate.isTagged(event, "TurnFailed") ? [event.message] : []))
 
 /** The names of the tools that ran, in order. */
 export const toolsRun = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
-  entries.flatMap(({ event }) => Predicate.isTagged(event, "ToolResult") ? [event.tool] : [])
+  entries.flatMap(({ event }) => (Predicate.isTagged(event, "ToolResult") ? [event.tool] : []))
 
 /** The specialist runs' reports, in order. */
 export const finished = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
-  entries.flatMap(({ event }) => Predicate.isTagged(event, "SpecialistFinished") ? [event] : [])
+  entries.flatMap(({ event }) => (Predicate.isTagged(event, "SpecialistFinished") ? [event] : []))
 
 export const facts = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
-  entries.flatMap(({ event }) => Predicate.isTagged(event, "Fact") ? [event] : [])
+  entries.flatMap(({ event }) => (Predicate.isTagged(event, "Fact") ? [event] : []))
 
 /** Whether the last entry ends a turn: the assistant is idle. */
 export const idle = (entries: ReadonlyArray<AssistantEvent.Entry>) =>

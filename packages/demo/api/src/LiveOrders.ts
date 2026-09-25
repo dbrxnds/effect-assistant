@@ -42,14 +42,17 @@ export class LiveOrder extends Schema.Class<LiveOrder>("acme/LiveOrder")({
  * @category services
  * @since 0.1.0
  */
-export class LiveOrders extends Context.Service<LiveOrders, {
-  readonly put: (order: LiveOrder) => Effect.Effect<void>
-  readonly get: (reference: string) => Effect.Effect<LiveOrder | undefined>
-  /** Newest first. */
-  readonly list: Effect.Effect<ReadonlyArray<LiveOrder>>
-  /** Deletes the orders placed from a chat. */
-  readonly removeChat: (chatId: ChatId.ChatId) => Effect.Effect<void>
-}>()("acme/LiveOrders") {}
+export class LiveOrders extends Context.Service<
+  LiveOrders,
+  {
+    readonly put: (order: LiveOrder) => Effect.Effect<void>
+    readonly get: (reference: string) => Effect.Effect<LiveOrder | undefined>
+    /** Newest first. */
+    readonly list: Effect.Effect<ReadonlyArray<LiveOrder>>
+    /** Deletes the orders placed from a chat. */
+    readonly removeChat: (chatId: ChatId.ChatId) => Effect.Effect<void>
+  }
+>()("acme/LiveOrders") {}
 
 /**
  * Updates an order's status (and tracking number, when there is one).
@@ -57,7 +60,7 @@ export class LiveOrders extends Context.Service<LiveOrders, {
  * @category constructors
  * @since 0.1.0
  */
-export const setStatus = Effect.fn(function*(reference: string, status: string, trackingNumber?: string) {
+export const setStatus = Effect.fn(function* (reference: string, status: string, trackingNumber?: string) {
   const orders = yield* LiveOrders
   const order = yield* orders.get(reference)
 
@@ -76,7 +79,7 @@ export const setStatus = Effect.fn(function*(reference: string, status: string, 
  */
 export const layerMemory: Layer.Layer<LiveOrders> = Layer.effect(
   LiveOrders,
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const orders = yield* Ref.make(new Map<string, LiveOrder>())
 
     return LiveOrders.of({
@@ -99,7 +102,7 @@ const OrderJson = Schema.fromJsonString(LiveOrder)
  */
 export const layerSql: Layer.Layer<LiveOrders, never, SqlClient.SqlClient> = Layer.effect(
   LiveOrders,
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const sql = (yield* SqlClient.SqlClient).withoutTransforms()
 
     yield* sql`
@@ -117,7 +120,7 @@ export const layerSql: Layer.Layer<LiveOrders, never, SqlClient.SqlClient> = Lay
     const encode = Schema.encodeEffect(OrderJson)
 
     return LiveOrders.of({
-      put: Effect.fn(function*(order: LiveOrder) {
+      put: Effect.fn(function* (order: LiveOrder) {
         const body = yield* encode(order)
 
         yield* sql`
@@ -126,7 +129,7 @@ export const layerSql: Layer.Layer<LiveOrders, never, SqlClient.SqlClient> = Lay
           ON CONFLICT (reference) DO UPDATE SET updated_at = EXCLUDED.updated_at, body = EXCLUDED.body
         `
       }, Effect.orDie),
-      get: Effect.fn(function*(reference: string) {
+      get: Effect.fn(function* (reference: string) {
         const rows = yield* sql<{ readonly body: string }>`
           SELECT body FROM demo_live_orders WHERE reference = ${reference.toUpperCase()}
         `

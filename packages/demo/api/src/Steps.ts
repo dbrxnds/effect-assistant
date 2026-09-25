@@ -32,7 +32,7 @@ export const stepSeconds = Config.Int("DEMO_STEP_SECONDS").pipe(Config.withDefau
  * @category combinators
  * @since 0.1.0
  */
-export const wait = Effect.fn(function*(name: string, steps: number) {
+export const wait = Effect.fn(function* (name: string, steps: number) {
   const seconds = yield* stepSeconds.pipe(Effect.orDie)
 
   yield* DurableClock.sleep({ name, duration: Duration.seconds(seconds * steps), inMemoryThreshold: Duration.zero })
@@ -62,7 +62,7 @@ export interface Step {
 export const report = (step: Step) =>
   Activity.make({
     name: `Report:${step.status}`,
-    execute: Effect.gen(function*() {
+    execute: Effect.gen(function* () {
       yield* AcmeAssistant.submit(
         step.chatId,
         AssistantEvent.Fact.make({
@@ -82,4 +82,8 @@ export const report = (step: Step) =>
  * @since 0.1.0
  */
 export const reference = (runId: RunId.RunId): string =>
-  `ACM-${runId.slice(4).replace(/[^A-Za-z0-9]/g, "").slice(0, 6).toUpperCase()}`
+  `ACM-${runId
+    .slice(4)
+    .replace(/[^A-Za-z0-9]/g, "")
+    .slice(0, 6)
+    .toUpperCase()}`

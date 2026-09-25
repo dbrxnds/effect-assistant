@@ -87,13 +87,8 @@ export const apply = (state: ChatState, entry: AssistantEvent.Entry): ChatState 
 export const pendingSends = Atom.family((_chatId: ChatId.ChatId) => Atom.make<ReadonlyArray<ChatMessage>>([]))
 
 /** Server messages plus this tab's unconfirmed sends. */
-export const withPendingSends = (
-  state: ChatState,
-  pending: ReadonlyArray<ChatMessage>
-): ChatState => {
+export const withPendingSends = (state: ChatState, pending: ReadonlyArray<ChatMessage>): ChatState => {
   const unconfirmed = pending.filter((p) => !state.messages.some((m) => m.id === p.id))
 
-  return unconfirmed.length === 0
-    ? state
-    : { ...state, working: true, messages: [...state.messages, ...unconfirmed] }
+  return unconfirmed.length === 0 ? state : { ...state, working: true, messages: [...state.messages, ...unconfirmed] }
 }

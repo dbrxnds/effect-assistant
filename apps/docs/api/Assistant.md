@@ -108,11 +108,12 @@ const make: <
   // The build runs per chat activation, in the chat; here it only keeps the layer's services for it.
   const toLayer = (build: Handler<any, any, any> | Effect.Effect<Handler<any, any, any>, any, any>) =>
     Layer.effectDiscard(
-      Effect.gen(function*() {
+      Effect.gen(function* () {
         const setup = yield* Turns.makeSetup(definition, {
           build: Effect.isEffect(build) ? build : Effect.succeed(build),
           context: yield* Effect.context<never>()
         })
+
         const engine = yield* AssistantEngine
 
         yield* engine.register({ definition, setup })
@@ -317,9 +318,8 @@ export interface Assistant<Name extends string = string, Specs extends Specialis
    * and each specialist's handler (`Research.toLayer(...)`).
    */
   readonly toLayer: <R = never, RE = never, E = never, RX = never>(
-    build:
-      & (Handler<R, RE, Events> | Effect.Effect<Handler<R, RE, Events>, E, RX>)
-      & Specialist.CheckServices<Exclude<HandlerServices<R | RE>, RX>>
+    build: (Handler<R, RE, Events> | Effect.Effect<Handler<R, RE, Events>, E, RX>) &
+      Specialist.CheckServices<Exclude<HandlerServices<R | RE>, RX>>
   ) => Layer.Layer<
     never,
     never,
@@ -396,11 +396,12 @@ export const make = <
   // The build runs per chat activation, in the chat; here it only keeps the layer's services for it.
   const toLayer = (build: Handler<any, any, any> | Effect.Effect<Handler<any, any, any>, any, any>) =>
     Layer.effectDiscard(
-      Effect.gen(function*() {
+      Effect.gen(function* () {
         const setup = yield* Turns.makeSetup(definition, {
           build: Effect.isEffect(build) ? build : Effect.succeed(build),
           context: yield* Effect.context<never>()
         })
+
         const engine = yield* AssistantEngine
 
         yield* engine.register({ definition, setup })
@@ -525,9 +526,8 @@ interface Assistant<Name extends string = string, Specs extends Specialist.Any =
    * and each specialist's handler (`Research.toLayer(...)`).
    */
   readonly toLayer: <R = never, RE = never, E = never, RX = never>(
-    build:
-      & (Handler<R, RE, Events> | Effect.Effect<Handler<R, RE, Events>, E, RX>)
-      & Specialist.CheckServices<Exclude<HandlerServices<R | RE>, RX>>
+    build: (Handler<R, RE, Events> | Effect.Effect<Handler<R, RE, Events>, E, RX>) &
+      Specialist.CheckServices<Exclude<HandlerServices<R | RE>, RX>>
   ) => Layer.Layer<
     never,
     never,
