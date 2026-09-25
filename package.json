@@ -6,7 +6,7 @@
     "dev": "pnpm --parallel --filter @acme/demo-api --filter @acme/demo-web dev",
     "build": "pnpm -r build",
     "lint": "vp lint",
-    "test": "vp run -r test",
+    "test": "pnpm -r test",
     "start:node": "pnpm --filter @acme/demo-api start:node",
     "prepare": "effect-tsgo patch --typescript --no-oxlint",
     "lint-fix": "vp check --fix",

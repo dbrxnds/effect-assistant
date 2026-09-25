@@ -19,8 +19,8 @@ jobs:
           node-version: "24"
           cache: true
       - run: vp check
-      - run: vp run -r build
+      - run: pnpm build
       # The tests call the real model.
-      - run: vp run -r test
+      - run: pnpm test
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
