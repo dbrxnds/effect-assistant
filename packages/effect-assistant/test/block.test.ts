@@ -1,0 +1,140 @@
+import { describe, expect, it } from "@effect/vitest"
+import * as Schema from "effect/Schema"
+import { AssistantEvent, Block, BlockKit, ChatId, InputId } from "../src/index.ts"
+import { say } from "./fixtures.ts"
+
+const Choose = Block.make("choose_one", {
+  description: "Let the user pick one option.",
+  props: Schema.Struct({ options: Schema.Array(Schema.String) }),
+  answer: Schema.Struct({ choice: Schema.String })
+})
+
+const PickDate = Block.make("pick_date", {
+  description: "Let the user pick a date.",
+  props: Schema.Struct({ label: Schema.String }),
+  answer: Schema.Struct({ date: Schema.Date })
+})
+
+const kit = BlockKit.make([Choose, PickDate])
+
+const message = (id: string, block?: AssistantEvent.MessageBlock) =>
+  block === undefined
+    ? AssistantEvent.AssistantMessage.make({ id, text: "Pick one" })
+    : AssistantEvent.AssistantMessage.make({ id, text: "Pick one", block })
+
+const choice = (options: ReadonlyArray<string>) =>
+  AssistantEvent.MessageBlock.make({ kind: "choose_one", props: { options } })
+
+const answer = (messageId: string, value: string) =>
+  AssistantEvent.BlockAnswer.make({ id: InputId.make(), messageId, kind: "choose_one", value: { choice: value } })
+
+describe("BlockKit.toClient", () => {
+  const render = BlockKit.toClient(kit, {
+    choose_one: ({ text, props, answer, respond }) => {
+      if (answer === undefined) respond({ choice: props.options[1]! })
+
+      return answer === undefined ? `${text}: ${props.options.join("/")}` : `picked ${answer.choice}`
+    },
+    pick_date: ({ props, respond }) => {
+      respond({ date: new Date("2026-10-01T00:00:00Z") })
+
+      return `date: ${props.label}`
+    }
+  })
+
+  it("renders a block and sends its answer", () => {
+    const sent: Array<AssistantEvent.BlockAnswer> = []
+    const out = render(message("m1", choice(["red", "blue"])), { respond: (a) => sent.push(a) })
+
+    expect(out).toBe("Pick one: red/blue")
+    expect(sent[0]).toBeInstanceOf(AssistantEvent.BlockAnswer)
+    expect(sent[0]).toMatchObject({ messageId: "m1", kind: "choose_one", value: { choice: "blue" } })
+  })
+
+  it("encodes answers in their JSON form and decodes them back", () => {
+    const sent: Array<AssistantEvent.BlockAnswer> = []
+    render(message("m2", AssistantEvent.MessageBlock.make({ kind: "pick_date", props: { label: "Launch" } })), {
+      respond: (a) => sent.push(a)
+    })
+
+    expect(sent[0]!.value).toEqual({ date: "2026-10-01T00:00:00.000Z" })
+  })
+
+  it("passes the answer once there is one", () => {
+    const out = render(message("m1", choice(["red", "blue"])), {
+      state: { open: false, answer: answer("m1", "red") },
+      respond: () => {}
+    })
+
+    expect(out).toBe("picked red")
+  })
+
+  it("returns undefined for no block, unknown kinds, and bad props", () => {
+    const respond = () => undefined
+
+    expect(render(message("m3"), { respond })).toBeUndefined()
+    expect(render(message("m4", AssistantEvent.MessageBlock.make({ kind: "mystery", props: {} })), { respond }))
+      .toBeUndefined()
+    expect(
+      render(message("m5", AssistantEvent.MessageBlock.make({ kind: "choose_one", props: { options: 1 } })), {
+        respond
+      })
+    )
+      .toBeUndefined()
+  })
+})
+
+describe("BlockKit.blockStates", () => {
+  it("closes a block on its answer, or when the assistant says it was answered in words", () => {
+    const chatId = ChatId.make()
+
+    const events = [
+      message("m1", choice(["red", "blue"])),
+      answer("m1", "red"),
+      answer("m1", "blue"), // a second answer changes nothing
+      message("m2", choice(["a", "b"])),
+      say("neither, make it green"),
+      AssistantEvent.AssistantMessage.make({ id: "m3", text: "Green it is.", closes: ["m2"] }),
+      message("m4", choice(["x", "y"])),
+      say("what time is it?"), // about something else: m4 stays open
+      message("m5", choice(["p", "q"])),
+      answer("m5", "p"), // another block's answer leaves m4 open too
+      message("m6") // a later assistant message doesn't close it
+    ]
+
+    const states = BlockKit.blockStates(
+      events.map((event, i) => AssistantEvent.Entry.make({ chatId, seq: i + 1, at: 0, event }))
+    )
+
+    expect(states.get("m1")).toMatchObject({ open: false, answer: { value: { choice: "red" } } })
+    expect(states.get("m2")).toEqual({ open: false, answer: undefined })
+    expect(states.has("m3")).toBe(false)
+    expect(states.get("m4")).toEqual({ open: true, answer: undefined })
+    expect(states.get("m5")).toMatchObject({ open: false, answer: { value: { choice: "p" } } })
+    expect(states.has("m6")).toBe(false)
+  })
+
+  it("finds the blocks the user moved on from, and closes them with BlocksClosed", () => {
+    const chatId = ChatId.make()
+
+    const events = [
+      message("m1", choice(["red", "blue"])),
+      say("hmm"),
+      say("let me think"),
+      message("m2", choice(["a", "b"])),
+      say("blue") // answered in words, and the assistant didn't close it
+    ]
+
+    const entry = (event: AssistantEvent.AssistantEvent, i: number) =>
+      AssistantEvent.Entry.make({ chatId, seq: i + 1, at: 0, event })
+
+    const entries = events.map(entry)
+
+    expect(BlockKit.staleBlocks(entries, { messages: 3 })).toEqual(["m1"])
+
+    const closed = [...entries, entry(AssistantEvent.BlocksClosed.make({ messageIds: ["m1"] }), entries.length)]
+
+    expect(BlockKit.blockStates(closed).get("m1")).toEqual({ open: false, answer: undefined })
+    expect(BlockKit.blockStates(closed).get("m2")?.open).toBe(true)
+  })
+})

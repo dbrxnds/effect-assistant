@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "effect-uai": {
+      "source": "betalyra/effect-uai",
+      "sourceType": "github",
+      "skillPath": "skills/effect-uai/SKILL.md",
+      "computedHash": "68cf8049ae50ce4c65a861efe7f8a1029db25c17f9cc97f05340574c907fa5bd"
+    },
+    "install-anti-slop": {
+      "source": "dmmulroy/anti-slop",
+      "sourceType": "github",
+      "skillPath": "skills/install-anti-slop/SKILL.md",
+      "computedHash": "4031728fbe75bdcad6ee3208fd52b5d66e167b056fefee1fa9758e9a6cb9c0c8"
+    }
+  }
+}

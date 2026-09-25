@@ -1,0 +1,12 @@
+node_modules
+dist
+.output
+.tanstack
+.vinxi
+.data
+.env
+.env.local
+.alchemy
+*.sqlite
+*.sqlite-journal
+.DS_Store

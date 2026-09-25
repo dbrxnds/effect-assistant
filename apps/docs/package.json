@@ -1,0 +1,16 @@
+{
+  "name": "@effect-assistant/docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "api": "tsx scripts/api.ts",
+    "dev": "pnpm api && vitepress dev",
+    "build": "pnpm api && vitepress build",
+    "preview": "vitepress preview"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.5",
+    "vitepress": "1.6.4"
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "name": "@acme/demo-api",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-production.mjs",
+    "dev": "tsx watch --env-file-if-exists=../../../.env.local src/main.ts",
+    "start:node": "tsx src/main.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "smoke": "tsx scripts/smoke.ts",
+    "prompts:push": "tsx --env-file-if-exists=../../../.env.local scripts/push-prompts.ts"
+  },
+  "dependencies": {
+    "@effect-uai/anthropic": "0.12.0",
+    "@effect-uai/core": "0.12.0",
+    "@effect/opentelemetry": "4.0.0-rc.117",
+    "@effect/platform-node": "4.0.0-rc.117",
+    "@effect/sql-pg": "4.0.0-rc.117",
+    "@langfuse/client": "^5.11.1",
+    "@langfuse/otel": "^5.11.1",
+    "@acme/demo-shared": "workspace:*",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/core": "^2.11.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.222.0",
+    "@opentelemetry/resources": "^2.11.0",
+    "@opentelemetry/sdk-trace-base": "^2.11.0",
+    "@opentelemetry/sdk-trace-node": "^2.11.0",
+    "@opentelemetry/semantic-conventions": "^1.43.0",
+    "effect": "4.0.0-rc.117",
+    "effect-assistant": "workspace:*"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.0.0-rc.117",
+    "@types/node": "^22.15.3",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.20.5",
+    "typescript": "7.0.2",
+    "vitest": "5.0.1"
+  }
+}

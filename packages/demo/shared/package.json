@@ -1,0 +1,23 @@
+{
+  "name": "@acme/demo-shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "test": "tsx --test src/Orders.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "effect-assistant": "workspace:*",
+    "effect": "4.0.0-rc.117"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "tsx": "^4.20.5",
+    "typescript": "7.0.2"
+  }
+}
