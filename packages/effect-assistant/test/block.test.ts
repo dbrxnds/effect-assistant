@@ -73,14 +73,14 @@ describe("BlockKit.toClient", () => {
     const respond = () => undefined
 
     expect(render(message("m3"), { respond })).toBeUndefined()
-    expect(render(message("m4", AssistantEvent.MessageBlock.make({ kind: "mystery", props: {} })), { respond }))
-      .toBeUndefined()
+    expect(
+      render(message("m4", AssistantEvent.MessageBlock.make({ kind: "mystery", props: {} })), { respond })
+    ).toBeUndefined()
     expect(
       render(message("m5", AssistantEvent.MessageBlock.make({ kind: "choose_one", props: { options: 1 } })), {
         respond
       })
-    )
-      .toBeUndefined()
+    ).toBeUndefined()
   })
 })
 

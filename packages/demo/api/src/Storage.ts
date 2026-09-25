@@ -55,7 +55,8 @@ const layerNodeCrypto = Layer.sync(Crypto.Crypto, () =>
     randomBytes: (size) => randomBytes(size),
     digest: (algorithm, data) =>
       Effect.sync(() => new Uint8Array(createHash(digestName(algorithm)).update(data).digest()))
-  }))
+  })
+)
 
 /** One runner that owns every shard, with SQL storage. */
 const layerSqlRunner = SingleRunner.layer({
@@ -74,8 +75,8 @@ const layerFor = (url: Option.Option<string>, maxConnections: number): Layer.Lay
   Option.isNone(url)
     ? Layer.mergeAll(ChatLog.layerMemory, Chats.layerMemory, LiveOrders.layerMemory, TestRunner.layer)
     : Layer.mergeAll(ChatLog.layerSql, Chats.layerSql, LiveOrders.layerSql, layerSqlRunner).pipe(
-      Layer.provideMerge(layerPg(url.value, maxConnections))
-    )
+        Layer.provideMerge(layerPg(url.value, maxConnections))
+      )
 
 /**
  * Layer that provides the event log, the thread list, and the cluster runner:
@@ -84,10 +85,12 @@ const layerFor = (url: Option.Option<string>, maxConnections: number): Layer.Lay
  * @category layers
  * @since 0.1.0
  */
-export const layer: Layer.Layer<Services, unknown> = Layer.unwrap(Effect.gen(function*() {
-  const url = yield* databaseUrl
-  const maxConnections = yield* Config.Int("ACME_PG_MAX_CONNECTIONS").pipe(Config.withDefault(8))
-  yield* Effect.logInfo(`storage: ${Option.isSome(url) ? "postgres" : "memory"}`)
+export const layer: Layer.Layer<Services, unknown> = Layer.unwrap(
+  Effect.gen(function* () {
+    const url = yield* databaseUrl
+    const maxConnections = yield* Config.Int("ACME_PG_MAX_CONNECTIONS").pipe(Config.withDefault(8))
+    yield* Effect.logInfo(`storage: ${Option.isSome(url) ? "postgres" : "memory"}`)
 
-  return layerFor(url, maxConnections)
-}))
+    return layerFor(url, maxConnections)
+  })
+)

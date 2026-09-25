@@ -38,9 +38,12 @@ Service for the turn a tool runs in. Assistants provide it to every tool call, a
 specialists provide it to theirs.
 
 ```ts
-class AssistantTurn extends Context.Service<AssistantTurn, {
-  readonly chatId: ChatId
-}>()("effect-assistant/AssistantTurn")
+class AssistantTurn extends Context.Service<
+  AssistantTurn,
+  {
+    readonly chatId: ChatId
+  }
+>()("effect-assistant/AssistantTurn")
 ```
 
 <small>Since 0.1.0</small>

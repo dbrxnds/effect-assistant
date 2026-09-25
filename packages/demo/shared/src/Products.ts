@@ -180,11 +180,13 @@ export const search = (query: string): Product | undefined => {
 
   if (needle.length === 0) return undefined
 
-  return all.find((product) => product.sku.toLowerCase() === needle) ??
+  return (
+    all.find((product) => product.sku.toLowerCase() === needle) ??
     all.find((product) => product.name.toLowerCase().includes(needle)) ??
     all.find((product) =>
       needle.split(/\s+/).some((word) => word.length > 3 && product.name.toLowerCase().includes(word))
     )
+  )
 }
 
 /**

@@ -20,13 +20,16 @@ type DeleteError = "unknown_chat" | "protected_chat"
  * @category services
  * @since 0.1.0
  */
-export class Chats extends Context.Service<Chats, {
-  readonly list: Effect.Effect<ReadonlyArray<ChatSummary>>
-  readonly create: Effect.Effect<ChatSummary>
-  readonly delete: (chatId: ChatId.ChatId) => Effect.Effect<void, DeleteError>
-  /** Names a new thread after its first message. */
-  readonly titleFromMessage: (chatId: ChatId.ChatId, text: string) => Effect.Effect<void>
-}>()("acme/Chats") {}
+export class Chats extends Context.Service<
+  Chats,
+  {
+    readonly list: Effect.Effect<ReadonlyArray<ChatSummary>>
+    readonly create: Effect.Effect<ChatSummary>
+    readonly delete: (chatId: ChatId.ChatId) => Effect.Effect<void, DeleteError>
+    /** Names a new thread after its first message. */
+    readonly titleFromMessage: (chatId: ChatId.ChatId, text: string) => Effect.Effect<void>
+  }
+>()("acme/Chats") {}
 
 /**
  * Layer that keeps the thread list in memory.
@@ -36,18 +39,18 @@ export class Chats extends Context.Service<Chats, {
  */
 export const layerMemory: Layer.Layer<Chats> = Layer.effect(
   Chats,
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const store = yield* Ref.make(new Map<ChatId.ChatId, ChatSummary>([[seededChat.chatId, seededChat]]))
 
     return Chats.of({
       list: Ref.get(store).pipe(Effect.map((m) => sortChats([...m.values()]))),
-      create: Effect.gen(function*() {
+      create: Effect.gen(function* () {
         const chat = ChatSummary.make({ chatId: ChatId.make(), title: newChatTitle, createdAt: Date.now() })
         yield* Ref.update(store, (m) => new Map(m).set(chat.chatId, chat))
 
         return chat
       }),
-      delete: Effect.fn(function*(chatId: ChatId.ChatId) {
+      delete: Effect.fn(function* (chatId: ChatId.ChatId) {
         if (chatId === seededChat.chatId) return yield* Effect.fail("protected_chat" as const)
 
         const existed = yield* Ref.modify(store, (m) => {
@@ -78,7 +81,7 @@ export const layerMemory: Layer.Layer<Chats> = Layer.effect(
  */
 export const layerSql: Layer.Layer<Chats, never, SqlClient.SqlClient> = Layer.effect(
   Chats,
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const sql = (yield* SqlClient.SqlClient).withoutTransforms()
     yield* sql`
       CREATE TABLE IF NOT EXISTS demo_chats (
@@ -101,19 +104,17 @@ export const layerSql: Layer.Layer<Chats, never, SqlClient.SqlClient> = Layer.ef
         Effect.map((chats) => sortChats([seededChat, ...chats])),
         Effect.orDie
       ),
-      create: Effect.gen(function*() {
+      create: Effect.gen(function* () {
         const chat = ChatSummary.make({ chatId: ChatId.make(), title: newChatTitle, createdAt: Date.now() })
-        yield* sql`INSERT INTO demo_chats ${
-          sql.insert({
-            chat_id: chat.chatId,
-            title: chat.title,
-            created_at: chat.createdAt
-          })
-        }`
+        yield* sql`INSERT INTO demo_chats ${sql.insert({
+          chat_id: chat.chatId,
+          title: chat.title,
+          created_at: chat.createdAt
+        })}`
 
         return chat
       }).pipe(Effect.orDie),
-      delete: Effect.fn(function*(chatId: ChatId.ChatId) {
+      delete: Effect.fn(function* (chatId: ChatId.ChatId) {
         if (chatId === seededChat.chatId) return yield* Effect.fail("protected_chat" as const)
 
         const deleted = yield* sql<{ chat_id: string }>`

@@ -24,18 +24,20 @@ current version from a prompt manager (a new version goes live without a
 deploy), or a prompt tailored to the chat's [user](./chats):
 
 ```ts
-const MyAssistantHandlers = MyAssistant.toLayer(Effect.gen(function*() {
-  const users = yield* ChatUsers
+const MyAssistantHandlers = MyAssistant.toLayer(
+  Effect.gen(function* () {
+    const users = yield* ChatUsers
 
-  return Effect.fn(function*(turn: Assistant.Turn) {
-    const user = yield* users.forChat(turn.chatId)
+    return Effect.fn(function* (turn: Assistant.Turn) {
+      const user = yield* users.forChat(turn.chatId)
 
-    return turn.loop({
-      model: "claude-sonnet-5",
-      instructions: `You are a colleague of ${user.name} on the marketing team.`
+      return turn.loop({
+        model: "claude-sonnet-5",
+        instructions: `You are a colleague of ${user.name} on the marketing team.`
+      })
     })
   })
-}))
+)
 ```
 
 A resolved prompt can carry **span attributes**, which are added to every
@@ -62,16 +64,19 @@ export const defaults = {
   "skill-ordering": "1. Pick the product…"
 } as const
 
-export class Prompts extends Context.Service<Prompts, {
-  readonly get: (name: keyof typeof defaults) => Effect.Effect<Instructions.Resolved>
-}>()("app/Prompts") {}
-
-export const instructions: (name: keyof typeof defaults) => Instructions.Instructions<Prompts> = Effect.fn(
-  function*(name: keyof typeof defaults) {
-    const prompts = yield* Prompts
-    return yield* prompts.get(name)
+export class Prompts extends Context.Service<
+  Prompts,
+  {
+    readonly get: (name: keyof typeof defaults) => Effect.Effect<Instructions.Resolved>
   }
-)
+>()("app/Prompts") {}
+
+export const instructions: (name: keyof typeof defaults) => Instructions.Instructions<Prompts> = Effect.fn(function* (
+  name: keyof typeof defaults
+) {
+  const prompts = yield* Prompts
+  return yield* prompts.get(name)
+})
 
 export const layerDefaults = Layer.succeed(Prompts, {
   get: (name) => Effect.succeed({ text: defaults[name] })
@@ -106,13 +111,19 @@ const ordering = Skill.make({
   instructions: Prompts.instructions("skill-ordering")
 })
 
-const MyAssistantHandlers = MyAssistant.toLayer(Effect.gen(function*() {
-  const prompts = yield* Prompts
+const MyAssistantHandlers = MyAssistant.toLayer(
+  Effect.gen(function* () {
+    const prompts = yield* Prompts
 
-  return Effect.fn(function*(turn: Assistant.Turn) {
-    return turn.loop({ model: "claude-sonnet-5", instructions: yield* prompts.get("my-assistant"), skills: [ordering] })
+    return Effect.fn(function* (turn: Assistant.Turn) {
+      return turn.loop({
+        model: "claude-sonnet-5",
+        instructions: yield* prompts.get("my-assistant"),
+        skills: [ordering]
+      })
+    })
   })
-}))
+)
 
 // Tests and local dev: the text in code. Production: Langfuse.
 MyAssistantHandlers.pipe(Layer.provide(process.env.LANGFUSE_SECRET_KEY ? layerLangfuse : layerDefaults))

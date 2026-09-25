@@ -29,4 +29,7 @@ const layerApp = Server.layer.pipe(
   Layer.provide(Observability.layer)
 )
 
-Layer.launch(layerApp).pipe(Effect.tapCause((cause) => Effect.logError(cause)), NodeRuntime.runMain)
+Layer.launch(layerApp).pipe(
+  Effect.tapCause((cause) => Effect.logError(cause)),
+  NodeRuntime.runMain
+)

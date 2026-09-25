@@ -42,9 +42,12 @@ Service for the chat a handler's build runs for. The engine provides it to
 every build.
 
 ```ts
-class AssistantChat extends Context.Service<AssistantChat, {
-  readonly chatId: ChatId
-}>()("effect-assistant/AssistantChat")
+class AssistantChat extends Context.Service<
+  AssistantChat,
+  {
+    readonly chatId: ChatId
+  }
+>()("effect-assistant/AssistantChat")
 ```
 
 <small>Since 0.1.0</small>

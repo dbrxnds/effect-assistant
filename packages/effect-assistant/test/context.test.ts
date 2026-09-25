@@ -33,11 +33,10 @@ const chatFor = (user: User) =>
   })
 
 /** The app's lookup: whose chat is it. */
-class ChatUsers
-  extends Context.Service<ChatUsers, { readonly forChat: (chatId: ChatId.ChatId) => Effect.Effect<User> }>()(
-    "test/ChatUsers"
-  )
-{}
+class ChatUsers extends Context.Service<
+  ChatUsers,
+  { readonly forChat: (chatId: ChatId.ChatId) => Effect.Effect<User> }
+>()("test/ChatUsers") {}
 
 const ChatUsersLive = Layer.succeed(ChatUsers)({
   forChat: (chatId) => Effect.sync(() => owners.get(chatId) ?? bob)
@@ -53,16 +52,18 @@ interface Seen {
 const Clerk = Specialist.make("clerk", { description: "Files things." })
 
 const clerkLive = (seen: Queue.Queue<Seen>) =>
-  Clerk.toLayer(Effect.gen(function*() {
-    const users = yield* ChatUsers
+  Clerk.toLayer(
+    Effect.gen(function* () {
+      const users = yield* ChatUsers
 
-    return Effect.fn(function*(run: Specialist.Run) {
-      const user = yield* users.forChat(run.chatId)
-      yield* Queue.offer(seen, { by: "clerk", instructions: `You file for ${user.name}.`, tools: [] })
+      return Effect.fn(function* (run: Specialist.Run) {
+        const user = yield* users.forChat(run.chatId)
+        yield* Queue.offer(seen, { by: "clerk", instructions: `You file for ${user.name}.`, tools: [] })
 
-      return Stream.empty
+        return Stream.empty
+      })
     })
-  }))
+  )
 
 const adminReport = Tool.make({
   name: "admin_report",
@@ -84,13 +85,13 @@ const greet = Tool.make({
  * turn's chat and provides it to the turn, as an app's handler would.
  */
 const recording = (seen: Queue.Queue<Seen>) =>
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const users = yield* ChatUsers
 
-    return Effect.fn(function*(turn: Assistant.Turn) {
+    return Effect.fn(function* (turn: Assistant.Turn) {
       const user = yield* users.forChat(turn.chatId)
 
-      return Effect.gen(function*() {
+      return Effect.gen(function* () {
         const current = yield* CurrentUser
         // This turn's tools: only admins get the report.
         const toolkit = current.admin ? Toolkit.make(adminReport, greet) : Toolkit.make(greet)
@@ -124,10 +125,10 @@ const engines = {
 for (const [name, engine] of Object.entries(engines)) {
   describe(`whom a turn acts for (${name})`, () => {
     it.live("acts for the chat's user", () =>
-      Effect.gen(function*() {
+      Effect.gen(function* () {
         const seen = yield* Queue.unbounded<Seen>()
 
-        yield* Effect.gen(function*() {
+        yield* Effect.gen(function* () {
           yield* Helper.submit(yield* chatFor(alice), say("hi"))
           const first = yield* Queue.take(seen)
           yield* Helper.submit(yield* chatFor(bob), say("hi"))
@@ -139,13 +140,14 @@ for (const [name, engine] of Object.entries(engines)) {
           expect(second.tools).toContain("greet")
           expect(second.tools).not.toContain("admin_report")
         }).pipe(Effect.provide(engine(seen)))
-      }))
+      })
+    )
 
     it.live("runs a specialist, and the turn for its answer, for the chat's user", () =>
-      Effect.gen(function*() {
+      Effect.gen(function* () {
         const seen = yield* Queue.unbounded<Seen>()
 
-        yield* Effect.gen(function*() {
+        yield* Effect.gen(function* () {
           yield* Helper.submit(yield* chatFor(bob), say("file it"))
           yield* Queue.take(seen)
 
@@ -153,17 +155,19 @@ for (const [name, engine] of Object.entries(engines)) {
           // The clerk's answer is a fact in the chat: a turn reads it, for Bob too.
           expect((yield* Queue.take(seen)).instructions).toContain("You help Bob.")
         }).pipe(Effect.provide(engine(seen)))
-      }))
+      })
+    )
 
     it.live("gives a fact's turn the chat's user", () =>
-      Effect.gen(function*() {
+      Effect.gen(function* () {
         const seen = yield* Queue.unbounded<Seen>()
 
-        yield* Effect.gen(function*() {
+        yield* Effect.gen(function* () {
           yield* Helper.submit(yield* chatFor(bob), fact("workflow:Export", { status: "done" }))
 
           expect((yield* Queue.take(seen)).instructions).toContain("You help Bob.")
         }).pipe(Effect.provide(engine(seen)))
-      }))
+      })
+    )
   })
 }

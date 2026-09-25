@@ -40,7 +40,7 @@ const startCampaign = Tool.make({
   name: "start_campaign",
   description: "Order a campaign. The run reports each step back as a fact.",
   inputSchema: StartInput,
-  run: Effect.fn(function*({ campaignId, budget }: typeof StartInput.Type) {
+  run: Effect.fn(function* ({ campaignId, budget }: typeof StartInput.Type) {
     const turn = yield* AssistantTurn.AssistantTurn
     const runId = RunId.make()
     yield* CreateCampaign.execute({ runId, chatId: turn.chatId, campaignId, budget }, { discard: true })

@@ -8,16 +8,15 @@
     "./*": "./src/*.ts"
   },
   "scripts": {
-    "test": "tsx --test src/Orders.test.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "test": "vp test run"
   },
   "dependencies": {
-    "effect-assistant": "workspace:*",
-    "effect": "4.0.0-rc.117"
+    "effect": "4.0.0-rc.117",
+    "effect-assistant": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.15.3",
-    "tsx": "^4.20.5",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "vite-plus": "catalog:"
   }
 }

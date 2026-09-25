@@ -51,7 +51,8 @@ export const chatSessionAtom = Atom.family((chatId: ChatId.ChatId) =>
         Stream.suspend(() => client("Subscribe", { chatId })).pipe(
           Stream.catchCause(() => Stream.empty),
           Stream.repeat(Schedule.spaced("2 seconds"))
-        ))
+        )
+      )
     ).pipe(Stream.scan(() => ChatState.initial(chatId), ChatState.apply)),
     { initialValue: ChatState.initial(chatId) }
   )

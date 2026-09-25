@@ -77,7 +77,10 @@ export default defineConfig({
         }
       ],
       "/api/": [
-        { text: "API reference", items: [{ text: "Overview", link: "/api/" }, ...modules.map((m) => ({ text: m, link: `/api/${m}` }))] }
+        {
+          text: "API reference",
+          items: [{ text: "Overview", link: "/api/" }, ...modules.map((m) => ({ text: m, link: `/api/${m}` }))]
+        }
       ]
     },
     outline: { level: [2, 3] },

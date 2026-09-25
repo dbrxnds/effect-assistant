@@ -45,7 +45,7 @@ export const PrintOrder = Workflow.make("PrintOrder", {
 type Payload = typeof PrintOrder.payloadSchema.Type
 
 const step = (payload: Payload, status: string, details: Steps.Step["details"] = {}) =>
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     yield* Steps.report({
       source: "workflow:PrintOrder",
       runId: payload.runId,
@@ -63,19 +63,21 @@ const step = (payload: Payload, status: string, details: Steps.Step["details"] =
  * @category layers
  * @since 0.1.0
  */
-export const layerWorkflow = PrintOrder.toLayer(Effect.fn(function*(payload: Payload) {
-  yield* step(payload, "confirmed", { office: payload.office })
-  yield* Steps.wait("Proofing", 1)
-  yield* step(payload, "printing")
-  yield* Steps.wait("Printing", 2)
+export const layerWorkflow = PrintOrder.toLayer(
+  Effect.fn(function* (payload: Payload) {
+    yield* step(payload, "confirmed", { office: payload.office })
+    yield* Steps.wait("Proofing", 1)
+    yield* step(payload, "printing")
+    yield* Steps.wait("Printing", 2)
 
-  const trackingNumber = `1Z${payload.reference.slice(4)}${payload.quantity}`
-  yield* step(payload, "shipped", { carrier: "UPS", trackingNumber })
-  yield* Steps.wait("InTransit", 3)
-  yield* step(payload, "delivered", { office: payload.office })
+    const trackingNumber = `1Z${payload.reference.slice(4)}${payload.quantity}`
+    yield* step(payload, "shipped", { carrier: "UPS", trackingNumber })
+    yield* Steps.wait("InTransit", 3)
+    yield* step(payload, "delivered", { office: payload.office })
 
-  return { trackingNumber }
-}))
+    return { trackingNumber }
+  })
+)
 
 const CatalogInput = Schema.Struct({
   category: Schema.optional(Products.Category).annotate({ description: "Only this category." })
@@ -97,7 +99,7 @@ export const productCatalog = Tool.make({
 })
 
 /** What this deployment's orders add to an office's spend this quarter. */
-const sessionSpend = Effect.fn(function*(location: Locations.Location) {
+const sessionSpend = Effect.fn(function* (location: Locations.Location) {
   const orders = yield* LiveOrders.LiveOrders
   const all = yield* orders.list
 
@@ -113,7 +115,7 @@ const sessionSpend = Effect.fn(function*(location: Locations.Location) {
  * @category getters
  * @since 0.1.0
  */
-export const officeBudget = Effect.fn(function*(location: Locations.Location) {
+export const officeBudget = Effect.fn(function* (location: Locations.Location) {
   return Budgets.forOffice(location, yield* sessionSpend(location))
 })
 
@@ -134,7 +136,7 @@ export const orderProducts = Tool.make({
   description:
     "Order branded products for an office. Checks the office's budget, then starts production; progress arrives as facts from workflow:PrintOrder.",
   inputSchema: OrderInput,
-  run: Effect.fn(function*({ office, product, quantity }: typeof OrderInput.Type) {
+  run: Effect.fn(function* ({ office, product, quantity }: typeof OrderInput.Type) {
     // The same run for every time this call runs: after a crash it runs again, and finds its order.
     const runId = RunId.fromKey(yield* AssistantToolCall.idempotencyKey)
     const reference = Steps.reference(runId)

@@ -23,6 +23,8 @@
  *
  * @since 0.1.0
  */
+// The history items' declarations name effect-uai's `ImageSource`: importing its module lets ours name it too.
+import type {} from "@effect-uai/core/Image"
 import * as Items from "@effect-uai/core/Items"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
@@ -336,8 +338,10 @@ export class Entry extends Schema.Class<Entry>("effect-assistant/AssistantEvent/
  * @since 0.1.0
  */
 export const isInput = (event: AssistantEvent): event is Input =>
-  Predicate.isTagged(event, "UserMessage") || Predicate.isTagged(event, "BlockAnswer") ||
-  Predicate.isTagged(event, "Fact") || Predicate.isTagged(event, "SpecialistFinished")
+  Predicate.isTagged(event, "UserMessage") ||
+  Predicate.isTagged(event, "BlockAnswer") ||
+  Predicate.isTagged(event, "Fact") ||
+  Predicate.isTagged(event, "SpecialistFinished")
 
 /**
  * Returns whether an input starts a turn: every one but a run the assistant
@@ -374,4 +378,4 @@ export const isTurnEnd = (event: AssistantEvent): event is TurnCompleted | TurnF
  * @since 0.1.0
  */
 export const assistantTexts = (entries: ReadonlyArray<Entry>): ReadonlyArray<string> =>
-  entries.flatMap(({ event }) => Predicate.isTagged(event, "AssistantMessage") ? [event.text] : [])
+  entries.flatMap(({ event }) => (Predicate.isTagged(event, "AssistantMessage") ? [event.text] : []))

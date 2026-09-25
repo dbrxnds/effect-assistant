@@ -49,12 +49,15 @@ import * as Predicate from "effect/Predicate"
  * @category services
  * @since 0.1.0
  */
-export class AssistantToolCall extends Context.Service<AssistantToolCall, {
-  /** The call's id, as the model wrote it. The same when the call runs again after a crash. */
-  readonly callId: string
-  /** The tool's name. */
-  readonly tool: string
-}>()("effect-assistant/AssistantToolCall") {}
+export class AssistantToolCall extends Context.Service<
+  AssistantToolCall,
+  {
+    /** The call's id, as the model wrote it. The same when the call runs again after a crash. */
+    readonly callId: string
+    /** The tool's name. */
+    readonly tool: string
+  }
+>()("effect-assistant/AssistantToolCall") {}
 
 /**
  * A key for what this call does outside the chat: the same every time the

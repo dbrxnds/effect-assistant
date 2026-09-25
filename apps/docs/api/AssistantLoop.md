@@ -213,24 +213,24 @@ export const stream = <Tools extends Toolkit.Toolkit = Record<never, never>>(
   const toolkit: Toolkit.Toolkit = options.toolkit ?? {}
   const maxSteps = options.maxSteps ?? 16
 
-  const instructions = Predicate.isString(options.instructions)
-    ? { text: options.instructions }
-    : options.instructions
+  const instructions = Predicate.isString(options.instructions) ? { text: options.instructions } : options.instructions
 
   /** Runs the calls: first a `ToolStarted` for each (stored before any runs), then their results. */
   const runCalls = (calls: ReadonlyArray<Items.ToolCall>, then: (results: number) => State) =>
     Stream.fromIterable(
       calls.map((call) => Loop.value(AssistantEvent.ToolStarted.make({ callId: call.call_id, tool: call.name })))
     ).pipe(
-      Stream.concat(Stream.unwrap(
-        Effect.forEach(calls, (call) => runCall(toolkit, call), { concurrency: "unbounded" }).pipe(
-          Effect.map((all) => {
-            const results = all.flat()
+      Stream.concat(
+        Stream.unwrap(
+          Effect.forEach(calls, (call) => runCall(toolkit, call), { concurrency: "unbounded" }).pipe(
+            Effect.map((all) => {
+              const results = all.flat()
 
-            return Stream.fromIterable(results.map(Loop.value)).pipe(Stream.concat(Loop.next(then(results.length))))
-          })
+              return Stream.fromIterable(results.map(Loop.value)).pipe(Stream.concat(Loop.next(then(results.length))))
+            })
+          )
         )
-      ))
+      )
     )
 
   const runTools = (calls: ReadonlyArray<Items.ToolCall>, state: State, seen: number) =>
@@ -239,7 +239,7 @@ export const stream = <Tools extends Toolkit.Toolkit = Record<never, never>>(
       doneAt: calls.some((call) => call.name === waitToolName) ? seen + results : undefined
     }))
 
-  const step = Effect.fn(function*(state: State) {
+  const step = Effect.fn(function* (state: State) {
     const history = yield* options.history
     // Calls a crash cut off, with no result: they run again, with the same ids, before the model goes on.
     // A destructive tool's call doesn't: the model is told it may have run.
@@ -327,11 +327,13 @@ const callValues = (toolkit: Toolkit.Toolkit, calls: ReadonlyArray<Items.ToolCal
   Stream.fromIterable(
     calls.map((call) => Loop.value(AssistantEvent.ToolStarted.make({ callId: call.call_id, tool: call.name })))
   ).pipe(
-    Stream.concat(Stream.unwrap(
-      Effect.forEach(calls, (call) => runCall(toolkit, call), { concurrency: "unbounded" }).pipe(
-        Effect.map((all) => Stream.fromIterable(all.flat().map(Loop.value)))
+    Stream.concat(
+      Stream.unwrap(
+        Effect.forEach(calls, (call) => runCall(toolkit, call), { concurrency: "unbounded" }).pipe(
+          Effect.map((all) => Stream.fromIterable(all.flat().map(Loop.value)))
+        )
       )
-    ))
+    )
   )
 
 /**
@@ -377,11 +379,9 @@ export const step = <Tools extends Toolkit.Toolkit, S, E2 = never, R2 = never>(
 > => {
   const toolkit: Toolkit.Toolkit = options.toolkit ?? {}
 
-  const instructions = Predicate.isString(options.instructions)
-    ? { text: options.instructions }
-    : options.instructions
+  const instructions = Predicate.isString(options.instructions) ? { text: options.instructions } : options.instructions
 
-  const body = Effect.gen(function*() {
+  const body = Effect.gen(function* () {
     const history = yield* options.history
     const cutOff = HistoryCheck.findUnansweredCalls(history)
 
@@ -467,11 +467,13 @@ const callValues = (toolkit: Toolkit.Toolkit, calls: ReadonlyArray<Items.ToolCal
   Stream.fromIterable(
     calls.map((call) => Loop.value(AssistantEvent.ToolStarted.make({ callId: call.call_id, tool: call.name })))
   ).pipe(
-    Stream.concat(Stream.unwrap(
-      Effect.forEach(calls, (call) => runCall(toolkit, call), { concurrency: "unbounded" }).pipe(
-        Effect.map((all) => Stream.fromIterable(all.flat().map(Loop.value)))
+    Stream.concat(
+      Stream.unwrap(
+        Effect.forEach(calls, (call) => runCall(toolkit, call), { concurrency: "unbounded" }).pipe(
+          Effect.map((all) => Stream.fromIterable(all.flat().map(Loop.value)))
+        )
       )
-    ))
+    )
   )
 
 /**
@@ -517,11 +519,9 @@ export const step = <Tools extends Toolkit.Toolkit, S, E2 = never, R2 = never>(
 > => {
   const toolkit: Toolkit.Toolkit = options.toolkit ?? {}
 
-  const instructions = Predicate.isString(options.instructions)
-    ? { text: options.instructions }
-    : options.instructions
+  const instructions = Predicate.isString(options.instructions) ? { text: options.instructions } : options.instructions
 
-  const body = Effect.gen(function*() {
+  const body = Effect.gen(function* () {
     const history = yield* options.history
     const cutOff = HistoryCheck.findUnansweredCalls(history)
 

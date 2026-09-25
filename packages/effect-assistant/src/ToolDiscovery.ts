@@ -30,7 +30,12 @@ import * as Schema from "effect/Schema"
 import { nanoid } from "nanoid"
 
 const words = (text: string): ReadonlySet<string> =>
-  new Set(text.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3))
+  new Set(
+    text
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((word) => word.length >= 3)
+  )
 
 /** How many query words appear in the text, counting prefixes ("ship" matches "shipment"). */
 const score = (query: ReadonlySet<string>, text: string): number => {
@@ -98,7 +103,7 @@ export const make = <Tools extends Toolkit.Toolkit>(toolkit: Tools) => {
     name: "execute_tool",
     description: "Run a tool found with search_tools. Pass its name and an input matching its input schema.",
     inputSchema: ExecuteInput,
-    run: Effect.fn(function*({ name, input }: typeof ExecuteInput.Type) {
+    run: Effect.fn(function* ({ name, input }: typeof ExecuteInput.Type) {
       if (!Object.hasOwn(toolkit, name)) return yield* Tool.fail(`No tool named ${name}. Use search_tools.`)
 
       const call = {

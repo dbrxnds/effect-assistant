@@ -5,7 +5,7 @@ import { say } from "./fixtures.ts"
 
 describe("ChatLog.layerMemory", () => {
   it.effect("numbers entries per chat from 1", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const log = yield* ChatLog.ChatLog
       const [a, b] = [ChatId.make(), ChatId.make()]
       yield* log.append(a, [say("one"), say("two")])
@@ -16,10 +16,11 @@ describe("ChatLog.layerMemory", () => {
       expect((yield* log.read(b)).map((entry) => entry.seq)).toEqual([1])
       expect(third?.chatId).toBe(a)
       expect(yield* log.append(a, [])).toEqual([])
-    }).pipe(Effect.provide(ChatLog.layerMemory)))
+    }).pipe(Effect.provide(ChatLog.layerMemory))
+  )
 
   it.effect("lists the chats whose last entry doesn't end a turn", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const log = yield* ChatLog.ChatLog
       const [done, midTurn, waiting] = [ChatId.make(), ChatId.make(), ChatId.make()]
       yield* log.append(done, [
@@ -31,5 +32,6 @@ describe("ChatLog.layerMemory", () => {
       yield* log.append(waiting, [say("hi")])
 
       expect([...(yield* log.unfinished)].sort()).toEqual([midTurn, waiting].sort())
-    }).pipe(Effect.provide(ChatLog.layerMemory)))
+    }).pipe(Effect.provide(ChatLog.layerMemory))
+  )
 })

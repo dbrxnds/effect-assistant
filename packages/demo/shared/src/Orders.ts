@@ -385,10 +385,15 @@ export const find = (orderId: string): Order | undefined => all.find((row) => ro
  * @category getters
  * @since 0.1.0
  */
-export const cost = (order: Order): number => order.kind === "campaign" ? order.budget : order.total
+export const cost = (order: Order): number => (order.kind === "campaign" ? order.budget : order.total)
 
 const words = (text: string): ReadonlySet<string> =>
-  new Set(text.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3))
+  new Set(
+    text
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((word) => word.length >= 3)
+  )
 
 /**
  * Returns past campaigns similar to a subject, best match first, then newest.

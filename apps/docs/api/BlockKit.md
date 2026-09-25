@@ -201,9 +201,10 @@ export const toClient =
 
     const given = options.state?.answer
 
-    const answer = given === undefined || block.answer === undefined
-      ? Option.none()
-      : Schema.decodeUnknownOption(jsonCodec(block.answer))(given.value)
+    const answer =
+      given === undefined || block.answer === undefined
+        ? Option.none()
+        : Schema.decodeUnknownOption(jsonCodec(block.answer))(given.value)
 
     return render({
       text: message.text,

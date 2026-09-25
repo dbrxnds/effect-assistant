@@ -35,8 +35,7 @@ describe("AssistantActivity", () => {
     expect(AssistantActivity.isWorking(running)).toBe(true)
     expect(
       AssistantActivity.isWorking(activity([say("hi"), TurnStarted.make({}), TurnCompleted.make({ throughSeq: 2 })]))
-    )
-      .toBe(false)
+    ).toBe(false)
   })
 
   it("closes a turn a restart cut off when the resumed turn ends", () => {

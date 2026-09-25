@@ -5,37 +5,34 @@
   "scripts": {
     "dev": "pnpm --parallel --filter @acme/demo-api --filter @acme/demo-web dev",
     "build": "pnpm -r build",
-    "typecheck": "pnpm -r typecheck",
-    "lint": "oxlint",
-    "test": "pnpm --filter effect-assistant test && pnpm --filter @acme/demo-shared test && pnpm --filter @acme/demo-api test && pnpm --filter @acme/demo-web test",
+    "lint": "vp lint",
+    "test": "pnpm -r test",
     "start:node": "pnpm --filter @acme/demo-api start:node",
     "prepare": "effect-tsgo patch --typescript --no-oxlint",
-    "lint-fix": "oxlint --fix && dprint fmt",
-    "format": "dprint fmt",
-    "format:check": "dprint check",
-    "check": "pnpm typecheck && pnpm lint && pnpm format:check",
+    "lint-fix": "vp check --fix",
+    "format": "vp fmt",
+    "format:check": "vp fmt --check",
+    "check": "vp check",
     "docs:dev": "pnpm --filter @effect-assistant/docs dev",
-    "docs:build": "pnpm --filter @effect-assistant/docs build"
+    "docs:build": "pnpm --filter @effect-assistant/docs build",
+    "changeset": "changeset",
+    "release": "pnpm --filter effect-assistant build && changeset publish"
   },
   "devDependencies": {
+    "@changesets/cli": "3.0.3",
     "@effect/tsgo": "0.45.0",
     "@oxlint/plugins": "1.85.0",
-    "dprint": "0.50.2",
     "effect": "4.0.0-rc.117",
-    "oxlint": "1.85.0",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "vite-plus": "catalog:"
   },
-  "packageManager": "pnpm@10.15.0",
   "engines": {
     "node": "24.x"
   },
+  "packageManager": "pnpm@10.23.0",
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild"
-    ],
-    "overrides": {
-      "effect": "4.0.0-rc.117",
-      "typescript": "7.0.2"
-    }
+    ]
   }
 }

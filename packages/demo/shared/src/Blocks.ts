@@ -29,8 +29,8 @@ export const ChooseOne = Block.make("choose_one", {
 export const Confirm = Block.make("confirm", {
   description: "Approve / deny buttons for a yes-or-no decision, e.g. approving a campaign order.",
   props: Schema.Struct({
-    confirmLabel: Schema.String.annotate({ description: "e.g. \"Approve\"" }),
-    denyLabel: Schema.String.annotate({ description: "e.g. \"Deny\"" })
+    confirmLabel: Schema.String.annotate({ description: 'e.g. "Approve"' }),
+    denyLabel: Schema.String.annotate({ description: 'e.g. "Deny"' })
   }),
   answer: Schema.Struct({ confirmed: Schema.Boolean })
 })
@@ -45,7 +45,7 @@ export const TextInput = Block.make("text_input", {
   description:
     "A small input for a short free-form answer, e.g. who a campaign should reach or a budget. One question per input.",
   props: Schema.Struct({
-    placeholder: Schema.String.annotate({ description: "e.g. \"Parents in Austin\"" })
+    placeholder: Schema.String.annotate({ description: 'e.g. "Parents in Austin"' })
   }),
   answer: Schema.Struct({ value: Schema.String })
 })

@@ -18,7 +18,7 @@ const listProducts = Tool.make({
   name: "list_products",
   description: "Products we sell, optionally in one category.",
   inputSchema: ProductsInput,
-  run: Effect.fn(function*({ category }: typeof ProductsInput.Type) {
+  run: Effect.fn(function* ({ category }: typeof ProductsInput.Type) {
     return [{ name: "Flyers", category: category ?? "print" }]
   })
 })
@@ -51,17 +51,19 @@ const orderHistory = Tool.make({
   name: "order_history",
   description: "Recent orders, newest first. Optionally for one office.",
   inputSchema: OrderHistoryInput,
-  run: Effect.fn(function*({ office }: typeof OrderHistoryInput.Type) {
+  run: Effect.fn(function* ({ office }: typeof OrderHistoryInput.Type) {
     const orders = yield* Orders // your service
     return yield* orders.recent(office)
   })
 })
 
-const MyAssistantHandlers = MyAssistant.toLayer(Effect.gen(function*() {
-  yield* Effect.context<Orders>() // the tools use Orders: the layer requires it
+const MyAssistantHandlers = MyAssistant.toLayer(
+  Effect.gen(function* () {
+    yield* Effect.context<Orders>() // the tools use Orders: the layer requires it
 
-  return (turn) => turn.loop({ model: "claude-sonnet-5", instructions, toolkit: Toolkit.make(orderHistory) })
-}))
+    return (turn) => turn.loop({ model: "claude-sonnet-5", instructions, toolkit: Toolkit.make(orderHistory) })
+  })
+)
 ```
 
 Services that depend on the chat's user, like a `CurrentUser`, the handler
@@ -81,7 +83,7 @@ const startExport = Tool.make({
   name: "start_export",
   description: "Export this chat's orders to a spreadsheet.",
   inputSchema: ExportInput,
-  run: Effect.fn(function*({ month }: typeof ExportInput.Type) {
+  run: Effect.fn(function* ({ month }: typeof ExportInput.Type) {
     const turn = yield* AssistantTurn.AssistantTurn
     const exports = yield* Exports // your service
     yield* exports.start({ chatId: turn.chatId, month })
@@ -114,7 +116,7 @@ const placeOrder = Tool.make({
   name: "place_order",
   description: "Places the order the user confirmed.",
   inputSchema: OrderInput,
-  run: Effect.fn(function*(input: typeof OrderInput.Type) {
+  run: Effect.fn(function* (input: typeof OrderInput.Type) {
     // The same run id every time this call runs; the workflow's idempotency key is the run id.
     const runId = RunId.fromKey(yield* AssistantToolCall.idempotencyKey)
     yield* ProductOrder.execute({ runId, ...input }, { discard: true })

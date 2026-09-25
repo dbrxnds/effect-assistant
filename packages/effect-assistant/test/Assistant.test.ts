@@ -70,26 +70,28 @@ const assistantLayer = <Tools extends Toolkit.Toolkit = Record<never, never>>(to
 
 const researchLayer = runMemory(ResearchAssistant.toLayer(simple({ instructions })).pipe(Layer.provide(ResearchLive)))
 
-const SpecialistArgs = Schema.fromJsonString(Schema.Struct({
-  goal: Schema.optional(Schema.String),
-  runId: Schema.optional(Schema.String)
-}))
+const SpecialistArgs = Schema.fromJsonString(
+  Schema.Struct({
+    goal: Schema.optional(Schema.String),
+    runId: Schema.optional(Schema.String)
+  })
+)
 
 /** Calls the assistant made to its specialist tools, with their arguments. */
 const specialistCalls = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
   entries.flatMap(({ event }) =>
     Predicate.isTagged(event, "ModelOutput")
       ? event.items.flatMap((item) =>
-        item.type === "function_call" && item.name.endsWith("_specialist")
-          ? [{ name: item.name, args: Schema.decodeUnknownSync(SpecialistArgs)(item.arguments) }]
-          : []
-      )
+          item.type === "function_call" && item.name.endsWith("_specialist")
+            ? [{ name: item.name, args: Schema.decodeUnknownSync(SpecialistArgs)(item.arguments) }]
+            : []
+        )
       : []
   )
 
 describe("layerMemory", () => {
   it.live("answers a message through send_user_message", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const assistant = TestAssistant
       const chat = yield* newChat()
       yield* assistant.submit(chat, say("Say hi in one short message."))
@@ -97,10 +99,11 @@ describe("layerMemory", () => {
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
       expect(AssistantEvent.assistantTexts(entries).length).toBeGreaterThanOrEqual(1)
-    }).pipe(Effect.provide(assistantLayer())))
+    }).pipe(Effect.provide(assistantLayer()))
+  )
 
   it.live("uses a tool and reports its result", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const assistant = TestAssistant
       const chat = yield* newChat()
       yield* assistant.submit(chat, say("What's the weather in Oslo right now?"))
@@ -109,10 +112,11 @@ describe("layerMemory", () => {
       expect(failures(entries), traceEntries(entries)).toEqual([])
       expect(toolsRun(entries)).toContain("get_weather")
       expect(text(entries)).toContain("hail")
-    }).pipe(Effect.provide(assistantLayer(Toolkit.make(weather)))))
+    }).pipe(Effect.provide(assistantLayer(Toolkit.make(weather))))
+  )
 
   it.live("picks up a message sent while it is working", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const assistant = TestAssistant
       const chat = yield* newChat()
       yield* assistant.submit(chat, say("Can you check order A-17 for me?"))
@@ -120,14 +124,18 @@ describe("layerMemory", () => {
       yield* collectUntil(assistant, chat, (es) => es.some(({ event }) => Predicate.isTagged(event, "ModelOutput")))
       yield* assistant.submit(chat, say("Also, what's 12 times 12?"))
 
-      const entries = yield* collectUntil(assistant, chat, (es) =>
-        text(es).includes("144") && text(es).includes("shipped"))
+      const entries = yield* collectUntil(
+        assistant,
+        chat,
+        (es) => text(es).includes("144") && text(es).includes("shipped")
+      )
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
-    }).pipe(Effect.provide(assistantLayer(Toolkit.make(slowLookup)))))
+    }).pipe(Effect.provide(assistantLayer(Toolkit.make(slowLookup))))
+  )
 
   it.live("background specialist reports back as a fact and the assistant follows up", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const assistant = ResearchAssistant
       const chat = yield* newChat()
       yield* assistant.submit(
@@ -135,15 +143,19 @@ describe("layerMemory", () => {
         say("Start the research specialist in the background: which planet is the largest in our solar system?")
       )
 
-      const entries = yield* collectUntil(assistant, chat, (es) =>
-        finished(es).length > 0 && text(es).includes("jupiter"))
+      const entries = yield* collectUntil(
+        assistant,
+        chat,
+        (es) => finished(es).length > 0 && text(es).includes("jupiter")
+      )
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
       expect(finished(entries).map((run) => [run.specialist, run.status])).toEqual([["research", "answered"]])
-    }).pipe(Effect.provide(researchLayer)))
+    }).pipe(Effect.provide(researchLayer))
+  )
 
   it.live("spawns a specialist for a quick question and relays the answer", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const assistant = ResearchAssistant
       const chat = yield* newChat()
       yield* assistant.submit(chat, say("Quickly ask the research specialist what the capital of Canada is."))
@@ -151,12 +163,13 @@ describe("layerMemory", () => {
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
       expect(toolsRun(entries)).toContain("spawn_specialist")
-    }).pipe(Effect.provide(researchLayer)))
+    }).pipe(Effect.provide(researchLayer))
+  )
 })
 
 describe("specialist briefs and follow-ups", () => {
   it.live("sends a structured brief and follows up on the same run", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const assistant = ResearchAssistant
       const chat = yield* newChat()
       yield* assistant.submit(chat, say("Quickly ask the research specialist what the capital of Canada is."))
@@ -173,7 +186,8 @@ describe("specialist briefs and follow-ups", () => {
       expect(failures(second), traceEntries(second)).toEqual([])
       expect(followUp?.name).toBe("message_specialist")
       expect(followUp?.args.runId).toMatch(/^run:/)
-    }).pipe(Effect.provide(researchLayer)))
+    }).pipe(Effect.provide(researchLayer))
+  )
 })
 
 describe("steering and stopping a running specialist", () => {
@@ -214,7 +228,7 @@ describe("steering and stopping a running specialist", () => {
     )
 
   it.live("steers a running worker with a new brief", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const assistant = ArchiveAssistant
       const chat = yield* newChat()
       yield* assistant.submit(chat, say("Have the archivist find where our 2024 offsite was."))
@@ -229,10 +243,11 @@ describe("steering and stopping a running specialist", () => {
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
       expect(statuses(entries)).toContain("steered")
-    }).pipe(Effect.provide(archiveLayer)))
+    }).pipe(Effect.provide(archiveLayer))
+  )
 
   it.live("stops a running worker", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const assistant = ArchiveAssistant
       const chat = yield* newChat()
       yield* assistant.submit(chat, say("Have the archivist find where our 2024 offsite was."))
@@ -248,10 +263,11 @@ describe("steering and stopping a running specialist", () => {
       // A stopped run reports that it stopped, and nothing else.
       expect(finished(entries).map((run) => run.status)).toEqual(["stopped"])
       expect(AssistantActivity.isWorking(AssistantActivity.fromEntries(entries))).toBe(false)
-    }).pipe(Effect.provide(archiveLayer)))
+    }).pipe(Effect.provide(archiveLayer))
+  )
 
   it.live("closes a run cut off by a shutdown and tells the assistant", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const log = yield* ChatLog.ChatLog
       const chat = yield* newChat()
 
@@ -262,14 +278,16 @@ describe("steering and stopping a running specialist", () => {
         Layer.provide(layerModel)
       )
 
-      yield* Effect.scoped(Effect.gen(function*() {
-        const context = yield* Layer.build(layer)
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const context = yield* Layer.build(layer)
 
-        yield* Effect.gen(function*() {
-          yield* ArchiveAssistant.submit(chat, say("Have the archivist find where our 2024 offsite was."))
-          yield* collectUntil(ArchiveAssistant, chat, (es) => statuses(es).includes("started"))
-        }).pipe(Effect.provide(context))
-      }))
+          yield* Effect.gen(function* () {
+            yield* ArchiveAssistant.submit(chat, say("Have the archivist find where our 2024 offsite was."))
+            yield* collectUntil(ArchiveAssistant, chat, (es) => statuses(es).includes("started"))
+          }).pipe(Effect.provide(context))
+        })
+      )
 
       const entries = yield* log.read(chat)
       const started = entries.filter(({ event }) => Predicate.isTagged(event, "SpecialistStarted"))
@@ -277,7 +295,8 @@ describe("steering and stopping a running specialist", () => {
       expect(started).toHaveLength(1)
       expect(AssistantActivity.fromEntries(entries).specialists.size).toBe(0)
       expect(finished(entries).map((run) => run.status)).toEqual(["cut_off"])
-    }).pipe(Effect.provide(layerStorage)))
+    }).pipe(Effect.provide(layerStorage))
+  )
 })
 
 describe("UI blocks", () => {
@@ -295,9 +314,11 @@ describe("UI blocks", () => {
 
   const BlockAssistant = Assistant.make("blocks", { blocks: BlockKit.make([ChooseOne, Confirm]) })
 
-  const layer = BlockAssistant.toLayer(simple({
-    instructions: "You help a small marketing team. Be brief. Ask for approvals with a confirm block."
-  })).pipe((handlers) => runMemory(handlers))
+  const layer = BlockAssistant.toLayer(
+    simple({
+      instructions: "You help a small marketing team. Be brief. Ask for approvals with a confirm block."
+    })
+  ).pipe((handlers) => runMemory(handlers))
 
   const withBlock = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
     entries.flatMap(({ event }) =>
@@ -305,7 +326,7 @@ describe("UI blocks", () => {
     )[0]
 
   it.live("puts a block in a message, then acts on its answer", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const assistant = BlockAssistant
       const chat = yield* newChat()
       yield* assistant.submit(chat, say("Should the campaign banner be red or blue? Give me buttons to pick."))
@@ -327,10 +348,11 @@ describe("UI blocks", () => {
       const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 2 && text(es).includes("blue"))
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
-    }).pipe(Effect.provide(layer)))
+    }).pipe(Effect.provide(layer))
+  )
 
   it.live("takes a block answered by typing", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const assistant = BlockAssistant
       const chat = yield* newChat()
       yield* assistant.submit(chat, say("Should the campaign banner be red or blue? Give me buttons to pick."))
@@ -349,10 +371,11 @@ describe("UI blocks", () => {
       // The assistant usually closes the block too (`closes`), but may not: `staleAfter` covers that.
       expect(failures(entries), traceEntries(entries)).toEqual([])
       expect(text(entries)).toContain("blue")
-    }).pipe(Effect.provide(layer)))
+    }).pipe(Effect.provide(layer))
+  )
 
   it.live("fills in a block from a fact", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const assistant = BlockAssistant
       const chat = yield* newChat()
       yield* assistant.submit(
@@ -372,12 +395,13 @@ describe("UI blocks", () => {
       expect(failures(entries), traceEntries(entries)).toEqual([])
       expect(message?.block?.kind).toBe("confirm")
       expect(JSON.stringify(message)).toMatch(/4[.,]?8(00|k)/i)
-    }).pipe(Effect.provide(layer)))
+    }).pipe(Effect.provide(layer))
+  )
 })
 
 describe("facts: tell the user or keep it internal", () => {
   it.live("keeps routine progress internal", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const assistant = TestAssistant
       const chat = yield* newChat()
       yield* assistant.submit(
@@ -388,10 +412,11 @@ describe("facts: tell the user or keep it internal", () => {
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
       expect(AssistantEvent.assistantTexts(entries)).toEqual([])
-    }).pipe(Effect.provide(assistantLayer())))
+    }).pipe(Effect.provide(assistantLayer()))
+  )
 
   it.live("tells the user when something needs them", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const assistant = TestAssistant
       const chat = yield* newChat()
       yield* assistant.submit(
@@ -405,7 +430,8 @@ describe("facts: tell the user or keep it internal", () => {
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
       expect(text(entries)).toContain("address")
-    }).pipe(Effect.provide(assistantLayer())))
+    }).pipe(Effect.provide(assistantLayer()))
+  )
 })
 
 const clusterLayer = runEntity(TestAssistant.toLayer(simple({ instructions: "You help a small team. Be brief." })))
@@ -418,7 +444,7 @@ const researchClusterLayer = runEntity(
 
 describe("layerEntity", () => {
   it.live("runs a chat as a cluster entity", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const assistant = TestAssistant
       const chat = yield* newChat()
       yield* assistant.submit(chat, say("Say hi in one short message."))
@@ -426,10 +452,11 @@ describe("layerEntity", () => {
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
       expect(AssistantEvent.assistantTexts(entries).length).toBeGreaterThanOrEqual(1)
-    }).pipe(Effect.provide(clusterLayer)))
+    }).pipe(Effect.provide(clusterLayer))
+  )
 
   it.live("runs a background specialist and reports back once", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const assistant = ResearchAssistant
       const chat = yield* newChat()
       yield* assistant.submit(
@@ -447,7 +474,8 @@ describe("layerEntity", () => {
       expect(failures(entries), traceEntries(entries)).toEqual([])
       expect(finished(entries).map((run) => run.specialist)).toEqual(["research"])
       expect(entries.filter(({ event }) => Predicate.isTagged(event, "SpecialistStarted"))).toHaveLength(1)
-    }).pipe(Effect.provide(researchClusterLayer)))
+    }).pipe(Effect.provide(researchClusterLayer))
+  )
 })
 
 describe("discovery", () => {
@@ -482,7 +510,7 @@ describe("discovery", () => {
   ]
 
   it.live("finds a tool with search_tools and runs it with execute_tool", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const assistant = TestAssistant
       const chat = yield* newChat()
       yield* assistant.submit(chat, say("How many parking spots are free at the Amsterdam office right now?"))
@@ -492,10 +520,11 @@ describe("discovery", () => {
       expect(toolsRun(entries)).toContain("search_tools")
       expect(toolsRun(entries)).toContain("execute_tool")
       expect(text(entries)).toContain("37")
-    }).pipe(Effect.provide(assistantLayer(ToolDiscovery.make(Toolkit.fromArray(catalog))))))
+    }).pipe(Effect.provide(assistantLayer(ToolDiscovery.make(Toolkit.fromArray(catalog)))))
+  )
 
   it.live("loads a skill from its catalog and follows it", () =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const assistant = TestAssistant
       const chat = yield* newChat()
       yield* assistant.submit(chat, say("We have a new hire starting Monday. What's our onboarding process?"))
@@ -506,21 +535,24 @@ describe("discovery", () => {
       expect(text(entries)).toContain("buddy")
     }).pipe(
       Effect.provide(
-        memoryAssistant(simple({
-          instructions: "You help an office team. Be brief.",
-          skills: [
-            Skill.make({
-              name: "Onboarding",
-              description: "Use when someone new is joining the team.",
-              instructions: "1. Send the welcome pack. 2. Book a buddy lunch on day one. 3. Set up their laptop."
-            }),
-            Skill.make({
-              name: "Offboarding",
-              description: "Use when someone is leaving.",
-              instructions: "Collect the laptop."
-            })
-          ]
-        }))
+        memoryAssistant(
+          simple({
+            instructions: "You help an office team. Be brief.",
+            skills: [
+              Skill.make({
+                name: "Onboarding",
+                description: "Use when someone new is joining the team.",
+                instructions: "1. Send the welcome pack. 2. Book a buddy lunch on day one. 3. Set up their laptop."
+              }),
+              Skill.make({
+                name: "Offboarding",
+                description: "Use when someone is leaving.",
+                instructions: "Collect the laptop."
+              })
+            ]
+          })
+        )
       )
-    ))
+    )
+  )
 })

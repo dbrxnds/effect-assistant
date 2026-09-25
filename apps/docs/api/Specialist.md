@@ -95,14 +95,17 @@ follow-ups. The engine provides it to every turn: the specialist tools use
 it, and so can a handler.
 
 ```ts
-class Runner extends Context.Service<Runner, {
-  /** Starts a run and returns its id. */
-  readonly spawn: (request: SpawnRequest) => Effect.Effect<RunId, SpecialistError>
-  /** Steers a running run, or continues a finished one. */
-  readonly message: (runId: string, text: string) => Effect.Effect<"steered" | "continued", SpecialistError>
-  /** Interrupts a running run. */
-  readonly stop: (runId: string) => Effect.Effect<void, SpecialistError>
-}>()("effect-assistant/Specialist/Runner")
+class Runner extends Context.Service<
+  Runner,
+  {
+    /** Starts a run and returns its id. */
+    readonly spawn: (request: SpawnRequest) => Effect.Effect<RunId, SpecialistError>
+    /** Steers a running run, or continues a finished one. */
+    readonly message: (runId: string, text: string) => Effect.Effect<"steered" | "continued", SpecialistError>
+    /** Interrupts a running run. */
+    readonly stop: (runId: string) => Effect.Effect<void, SpecialistError>
+  }
+>()("effect-assistant/Specialist/Runner")
 ```
 
 <small>Since 0.1.0</small>
@@ -127,9 +130,7 @@ interface Specialist<Name extends string = string> {
    * {@link CheckServices}).
    */
   readonly toLayer: <R = never, RE = never, E = never, RX = never>(
-    build:
-      & (Handler<R, RE> | Effect.Effect<Handler<R, RE>, E, RX>)
-      & CheckServices<Exclude<R | RE, RunServices | RX>>
+    build: (Handler<R, RE> | Effect.Effect<Handler<R, RE>, E, RX>) & CheckServices<Exclude<R | RE, RunServices | RX>>
   ) => Layer.Layer<SpecialistHandler<Name>, never, Exclude<RX, Scope.Scope | AssistantChat>>
 }
 ```
@@ -164,11 +165,7 @@ Services a run provides to its handler: the spawning turn, the runner, the
 chat's log, and the model.
 
 ```ts
-type RunServices =
-  | AssistantTurn
-  | Runner
-  | ChatLog.ChatLog
-  | LanguageModel.LanguageModel
+type RunServices = AssistantTurn | Runner | ChatLog.ChatLog | LanguageModel.LanguageModel
 ```
 
 <small>Since 0.1.0</small>
@@ -338,14 +335,17 @@ export class SpecialistError extends Schema.TaggedError<SpecialistError>()("Spec
  * @category services
  * @since 0.1.0
  */
-export class Runner extends Context.Service<Runner, {
-  /** Starts a run and returns its id. */
-  readonly spawn: (request: SpawnRequest) => Effect.Effect<RunId, SpecialistError>
-  /** Steers a running run, or continues a finished one. */
-  readonly message: (runId: string, text: string) => Effect.Effect<"steered" | "continued", SpecialistError>
-  /** Interrupts a running run. */
-  readonly stop: (runId: string) => Effect.Effect<void, SpecialistError>
-}>()("effect-assistant/Specialist/Runner")
+export class Runner extends Context.Service<
+  Runner,
+  {
+    /** Starts a run and returns its id. */
+    readonly spawn: (request: SpawnRequest) => Effect.Effect<RunId, SpecialistError>
+    /** Steers a running run, or continues a finished one. */
+    readonly message: (runId: string, text: string) => Effect.Effect<"steered" | "continued", SpecialistError>
+    /** Interrupts a running run. */
+    readonly stop: (runId: string) => Effect.Effect<void, SpecialistError>
+  }
+>()("effect-assistant/Specialist/Runner")
 ```
 
 <small>Since 0.1.0</small>
@@ -422,14 +422,17 @@ export class SpecialistError extends Schema.TaggedError<SpecialistError>()("Spec
  * @category services
  * @since 0.1.0
  */
-export class Runner extends Context.Service<Runner, {
-  /** Starts a run and returns its id. */
-  readonly spawn: (request: SpawnRequest) => Effect.Effect<RunId, SpecialistError>
-  /** Steers a running run, or continues a finished one. */
-  readonly message: (runId: string, text: string) => Effect.Effect<"steered" | "continued", SpecialistError>
-  /** Interrupts a running run. */
-  readonly stop: (runId: string) => Effect.Effect<void, SpecialistError>
-}>()("effect-assistant/Specialist/Runner")
+export class Runner extends Context.Service<
+  Runner,
+  {
+    /** Starts a run and returns its id. */
+    readonly spawn: (request: SpawnRequest) => Effect.Effect<RunId, SpecialistError>
+    /** Steers a running run, or continues a finished one. */
+    readonly message: (runId: string, text: string) => Effect.Effect<"steered" | "continued", SpecialistError>
+    /** Interrupts a running run. */
+    readonly stop: (runId: string) => Effect.Effect<void, SpecialistError>
+  }
+>()("effect-assistant/Specialist/Runner")
 ```
 
 <small>Since 0.1.0</small>
@@ -478,12 +481,14 @@ reach for a service nothing provides: yield it in the build Effect, or
 provide it to the loop yourself, like a user looked up from the chat.
 
 ```ts
-type CheckServices<Undeclared> = [Undeclared] extends [never] ? unknown : {
-  readonly "~undeclaredServices": {
-    readonly error: "The handler uses services that neither the turn provides nor its build Effect requires"
-    readonly services: Undeclared
-  }
-}
+type CheckServices<Undeclared> = [Undeclared] extends [never]
+  ? unknown
+  : {
+      readonly "~undeclaredServices": {
+        readonly error: "The handler uses services that neither the turn provides nor its build Effect requires"
+        readonly services: Undeclared
+      }
+    }
 ```
 
 <small>Since 0.1.0</small>

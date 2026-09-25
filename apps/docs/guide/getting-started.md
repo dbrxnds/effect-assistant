@@ -5,18 +5,11 @@ Everything runs in one process; all you need is an Anthropic API key.
 
 ## Install
 
-effect-assistant lives in this monorepo as a workspace package. It needs `effect`,
-`@effect-uai/core`, and a model provider, here `@effect-uai/anthropic`.
+`effect` and `@effect-uai/core` are peer dependencies: your app brings its own,
+so there's one copy of each. Add a model provider too, here `@effect-uai/anthropic`.
 
-```json
-{
-  "dependencies": {
-    "effect": "4.0.0-rc.117",
-    "effect-assistant": "workspace:*",
-    "@effect-uai/core": "0.17.0",
-    "@effect-uai/anthropic": "0.17.0"
-  }
-}
+```bash
+pnpm add effect-assistant effect@4.0.0-rc.117 @effect-uai/core@0.17.0 @effect-uai/anthropic@0.17.0
 ```
 
 ## Define an assistant
@@ -40,10 +33,12 @@ const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
 )
 
 // The model API: effect-uai's Anthropic layer provides `LanguageModel`.
-const AnthropicLive = Layer.unwrap(Effect.gen(function*() {
-  const apiKey = yield* Config.Redacted("ANTHROPIC_API_KEY")
-  return Anthropic.layer({ apiKey }).pipe(Layer.provide(FetchHttpClient.layer))
-}))
+const AnthropicLive = Layer.unwrap(
+  Effect.gen(function* () {
+    const apiKey = yield* Config.Redacted("ANTHROPIC_API_KEY")
+    return Anthropic.layer({ apiKey }).pipe(Layer.provide(FetchHttpClient.layer))
+  })
+)
 
 // The handler on an engine, with an event log and the model API. All in memory.
 export const MyAssistantLive = MyAssistantHandlers.pipe(
@@ -78,7 +73,7 @@ import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Stream from "effect/Stream"
 
-const program = Effect.gen(function*() {
+const program = Effect.gen(function* () {
   const chatId = ChatId.make()
 
   yield* MyAssistant.submit(
@@ -127,7 +122,7 @@ const weather = Tool.make({
   name: "get_weather",
   description: "Current weather for a city.",
   inputSchema: WeatherInput,
-  run: Effect.fn(function*({ city }: typeof WeatherInput.Type) {
+  run: Effect.fn(function* ({ city }: typeof WeatherInput.Type) {
     return { city, weather: "sunny, 21°C" }
   })
 })

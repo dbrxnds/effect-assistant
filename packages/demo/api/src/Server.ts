@@ -23,7 +23,7 @@ import * as LiveOrders from "./LiveOrders.ts"
 import * as StaticSite from "./StaticSite.ts"
 
 const layerRpcHandlers = AcmeRpcs.toLayer(
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const engine = yield* AssistantEngine.AssistantEngine
     const chats = yield* Chats.Chats
     const orders = yield* LiveOrders.LiveOrders
@@ -59,10 +59,10 @@ const routes = Layer.mergeAll(
  * @category layers
  * @since 0.1.0
  */
-export const layer = Layer.unwrap(Effect.gen(function*() {
-  const port = yield* Config.Port("PORT").pipe(Config.withDefault(8787))
+export const layer = Layer.unwrap(
+  Effect.gen(function* () {
+    const port = yield* Config.Port("PORT").pipe(Config.withDefault(8787))
 
-  return HttpRouter.serve(routes).pipe(
-    Layer.provide(NodeHttpServer.layer(createServer, { port, host: "0.0.0.0" }))
-  )
-}))
+    return HttpRouter.serve(routes).pipe(Layer.provide(NodeHttpServer.layer(createServer, { port, host: "0.0.0.0" })))
+  })
+)

@@ -31,9 +31,7 @@ process.env.DEMO_STEP_SECONDS = "0"
  * only read what the workflows tell the chat, from its log. The research
  * specialist gets an empty handler too.
  */
-const quietAcme = AcmeAssistant.toLayer(() => Stream.empty).pipe(
-  Layer.provide(Research.toLayer(() => Stream.empty))
-)
+const quietAcme = AcmeAssistant.toLayer(() => Stream.empty).pipe(Layer.provide(Research.toLayer(() => Stream.empty)))
 
 // The runner wants a model API; nothing here calls it.
 const anthropic = Anthropic.layer({ apiKey: Redacted.make(process.env.ANTHROPIC_API_KEY ?? "") }).pipe(
@@ -43,7 +41,7 @@ const anthropic = Anthropic.layer({ apiKey: Redacted.make(process.env.ANTHROPIC_
 /** The inputs stored in a chat so far. */
 const inputsOf = (chatId: ChatId.ChatId) =>
   ChatLog.ChatLog.use((log) => log.read(chatId)).pipe(
-    Effect.map((entries) => entries.flatMap(({ event }) => AssistantEvent.isInput(event) ? [event] : []))
+    Effect.map((entries) => entries.flatMap(({ event }) => (AssistantEvent.isInput(event) ? [event] : [])))
   )
 
 const Step = Schema.Struct({
@@ -76,19 +74,22 @@ const waitFor = (chatId: ChatId.ChatId, status: string) =>
 
 describe("CreateCampaign", () => {
   it.live("waits for approval, then goes live and reports first results", () =>
-    Effect.gen(function*() {
-      yield* Effect.gen(function*() {
+    Effect.gen(function* () {
+      yield* Effect.gen(function* () {
         const chatId = ChatId.make()
-        yield* Campaign.CreateCampaign.execute({
-          runId: RunId.make(),
-          chatId,
-          reference: "ACM-TEST01",
-          campaignName: "Summer Campaign",
-          office: "Acme Amsterdam",
-          audience: "parents in Austin",
-          budget: 6000,
-          channels: ["social", "display"]
-        }, { discard: true })
+        yield* Campaign.CreateCampaign.execute(
+          {
+            runId: RunId.make(),
+            chatId,
+            reference: "ACM-TEST01",
+            campaignName: "Summer Campaign",
+            office: "Acme Amsterdam",
+            audience: "parents in Austin",
+            budget: 6000,
+            channels: ["social", "display"]
+          },
+          { discard: true }
+        )
 
         const parked = yield* waitFor(chatId, "awaiting_approval")
         yield* Campaign.decideApproval(parked.approvalToken!, "approve")
@@ -102,13 +103,14 @@ describe("CreateCampaign", () => {
           "first_results"
         ])
       }).pipe(Effect.provide(layer))
-    }))
+    })
+  )
 })
 
 describe("PrintOrder", () => {
   it.live("reports confirmed, printing, shipped with tracking, and delivered, and updates the order", () =>
-    Effect.gen(function*() {
-      yield* Effect.gen(function*() {
+    Effect.gen(function* () {
+      yield* Effect.gen(function* () {
         const chatId = ChatId.make()
         const orders = yield* LiveOrders.LiveOrders
         yield* orders.put(
@@ -124,14 +126,17 @@ describe("PrintOrder", () => {
             updatedAt: 0
           })
         )
-        yield* PrintOrders.PrintOrder.execute({
-          runId: RunId.make(),
-          chatId,
-          reference: "ACM-TEST02",
-          office: "Acme Amsterdam",
-          productName: "Acme branded pens",
-          quantity: 500
-        }, { discard: true })
+        yield* PrintOrders.PrintOrder.execute(
+          {
+            runId: RunId.make(),
+            chatId,
+            reference: "ACM-TEST02",
+            office: "Acme Amsterdam",
+            productName: "Acme branded pens",
+            quantity: 500
+          },
+          { discard: true }
+        )
 
         const shipped = yield* waitFor(chatId, "shipped")
         yield* waitFor(chatId, "delivered")
@@ -147,5 +152,6 @@ describe("PrintOrder", () => {
         expect(order?.status).toBe("delivered")
         expect(order?.trackingNumber).toBe(shipped.trackingNumber)
       }).pipe(Effect.provide(layer))
-    }))
+    })
+  )
 })

@@ -20,15 +20,16 @@ memory event log. That's all an engine needs. A chat is just a new id,
 ```ts
 import { describe, expect, it } from "@effect/vitest"
 
-const AssistantTest = MyAssistant.toLayer((turn) => turn.loop({ model: "claude-haiku-4-5", instructions, toolkit }))
-  .pipe(
-    Layer.provide(AnthropicLive),
-    Layer.provideMerge(AssistantEngine.layerMemory),
-    Layer.provideMerge(ChatLog.layerMemory)
-  )
+const AssistantTest = MyAssistant.toLayer((turn) =>
+  turn.loop({ model: "claude-haiku-4-5", instructions, toolkit })
+).pipe(
+  Layer.provide(AnthropicLive),
+  Layer.provideMerge(AssistantEngine.layerMemory),
+  Layer.provideMerge(ChatLog.layerMemory)
+)
 
 it.live("uses a tool and reports its result", () =>
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const chatId = ChatId.make()
     yield* MyAssistant.submit(
       chatId,
@@ -41,7 +42,8 @@ it.live("uses a tool and reports its result", () =>
     )
 
     expect(AssistantEvent.assistantTexts(entries).join(" ")).toContain("Oslo")
-  }).pipe(Effect.provide(AssistantTest)))
+  }).pipe(Effect.provide(AssistantTest))
+)
 ```
 
 The cluster engine works in tests too, on Effect's in-process cluster: use
@@ -69,7 +71,7 @@ const QuietAssistant = MyAssistant.toLayer(() => Stream.empty).pipe(
 
 const inputsOf = (chatId: ChatId.ChatId) =>
   ChatLog.ChatLog.use((log) => log.read(chatId)).pipe(
-    Effect.map((entries) => entries.flatMap(({ event }) => AssistantEvent.isInput(event) ? [event] : []))
+    Effect.map((entries) => entries.flatMap(({ event }) => (AssistantEvent.isInput(event) ? [event] : [])))
   )
 ```
 

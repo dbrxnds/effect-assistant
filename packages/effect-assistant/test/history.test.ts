@@ -121,14 +121,16 @@ describe("History.needsTurn", () => {
     expect(History.needsTurn(entries(events))).toBe(true)
     expect(History.needsTurn(entries([...events, AssistantEvent.TurnCompleted.make({ throughSeq: 2 })]))).toBe(false)
     expect(
-      History.unhandledInputs(entries([...events, AssistantEvent.TurnCompleted.make({ throughSeq: 2 }), say("more")]))
-        .map((input) => input.id.length > 0)
+      History.unhandledInputs(
+        entries([...events, AssistantEvent.TurnCompleted.make({ throughSeq: 2 }), say("more")])
+      ).map((input) => input.id.length > 0)
     ).toEqual([true])
   })
 
   it("counts a failed turn as handled, so a failing input isn't retried", () => {
-    expect(History.needsTurn(entries([say("boom"), AssistantEvent.TurnFailed.make({ throughSeq: 1, message: "x" })])))
-      .toBe(false)
+    expect(
+      History.needsTurn(entries([say("boom"), AssistantEvent.TurnFailed.make({ throughSeq: 1, message: "x" })]))
+    ).toBe(false)
   })
 })
 
@@ -161,10 +163,11 @@ describe("History.fromEntries, a finished specialist run", () => {
     ])
 
     expect(history.at(-1)).toMatchObject({
-      content: [{
-        text:
-          `<specialist name="research" run="${runId}" status="answered">\nYou started it 2 minutes ago for: Q4 budgets\nThe user hasn't written since you started it.\nReport:\nAmsterdam spent most.\n</specialist>`
-      }]
+      content: [
+        {
+          text: `<specialist name="research" run="${runId}" status="answered">\nYou started it 2 minutes ago for: Q4 budgets\nThe user hasn't written since you started it.\nReport:\nAmsterdam spent most.\n</specialist>`
+        }
+      ]
     })
   })
 })
