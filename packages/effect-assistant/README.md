@@ -72,6 +72,7 @@ Docs: [`apps/docs`](../../apps/docs) (`pnpm docs:dev`). Start with the
 JSDoc.
 
 ```bash
-pnpm --filter effect-assistant test        # calls the real model (ANTHROPIC_API_KEY in .env.local)
+pnpm --filter effect-assistant test            # the mechanics, on a scripted model
+pnpm --filter effect-assistant test:contract   # against the real model (ANTHROPIC_API_KEY in .env.local)
 pnpm --filter effect-assistant build       # vp pack: dist, with declarations and source maps
 ```

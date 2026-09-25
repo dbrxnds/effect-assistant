@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { AssistantChat, Instructions } from "../src/index.ts"
 import { memoryAssistant, newChat, say, TestAssistant } from "./fixtures.ts"
+import * as Scripted from "./scripted.ts"
 
 class Version extends Context.Service<Version, { readonly current: number }>()("test/Version") {}
 
@@ -38,7 +39,8 @@ describe("Instructions.resolve", () => {
           yield* Deferred.succeed(seen, `${turn.chatId} ${service.chatId}`)
 
           return Stream.empty
-        })
+        }),
+        Scripted.unused
       )
 
       const [chatId, got] = yield* Effect.gen(function* () {

@@ -1,5 +1,7 @@
 /**
- * The real model for tests. Needs ANTHROPIC_API_KEY (loaded from .env.local).
+ * What the tests share. Most tests run on a scripted model (`scripted.ts`);
+ * `realModel` is the Anthropic API, for the contract tests. It needs
+ * ANTHROPIC_API_KEY (loaded from .env.local).
  */
 import * as Anthropic from "@effect-uai/anthropic/Anthropic"
 import type * as LanguageModel from "@effect-uai/core/LanguageModel"
@@ -22,12 +24,12 @@ import {
   InputId
 } from "../src/index.ts"
 
-/** The Anthropic API, as the tests' `LanguageModel`. */
-export const layerModel = Anthropic.layer({
+/** The Anthropic API, for the contract tests. */
+export const realModel = Anthropic.layer({
   apiKey: Redacted.make(process.env.ANTHROPIC_API_KEY ?? "")
 }).pipe(Layer.provide(FetchHttpClient.layer))
 
-/** A small, fast model: tests check behaviour, not wording. */
+/** A small, fast model: the contract tests check behaviour, not wording. */
 export const testModel = "claude-haiku-4-5"
 
 /** The assistant most tests use: no blocks, no specialists. */
@@ -36,24 +38,22 @@ export const TestAssistant = Assistant.make("test")
 /** The event log, in memory. */
 export const layerStorage = ChatLog.layerMemory
 
-/** Runs these assistants' handlers on the in-memory engine, with their own storage and the test model. */
-export const runMemory = <E, RIn>(handlers: Layer.Layer<never, E, RIn>) =>
-  handlers.pipe(
-    Layer.provideMerge(AssistantEngine.layerMemory),
-    Layer.provideMerge(layerStorage),
-    Layer.provide(layerModel)
-  )
+type Model = Layer.Layer<LanguageModel.LanguageModel>
+
+/** Runs these assistants' handlers on the in-memory engine, with their own storage and this model. */
+export const runMemory = <E, RIn>(handlers: Layer.Layer<never, E, RIn>, model: Model) =>
+  handlers.pipe(Layer.provideMerge(AssistantEngine.layerMemory), Layer.provideMerge(layerStorage), Layer.provide(model))
 
 /** Runs these assistants' handlers on the cluster engine, on the in-process cluster. */
-export const runEntity = <E, RIn>(handlers: Layer.Layer<never, E, RIn>) =>
+export const runEntity = <E, RIn>(handlers: Layer.Layer<never, E, RIn>, model: Model) =>
   handlers.pipe(
     Layer.provideMerge(AssistantEngine.layerCluster),
     Layer.provideMerge(layerStorage),
-    Layer.provide(layerModel),
+    Layer.provide(model),
     Layer.provideMerge(TestRunner.layer)
   )
 
-/** A handler that runs the turn's loop with these options, on the test model. */
+/** A handler that runs the turn's loop with these options. */
 export const simple =
   <Tools extends Toolkit.Toolkit = Record<never, never>, R = never>(
     options: Omit<Assistant.LoopOptions<Tools, R>, "model">
@@ -61,9 +61,11 @@ export const simple =
   (turn: Assistant.Turn) =>
     turn.loop({ model: testModel, ...options })
 
-/** An in-memory `TestAssistant` with this handler, its own event log, and the test model. */
-export const memoryAssistant = (handler: Assistant.Handler<Assistant.TurnServices | LanguageModel.LanguageModel>) =>
-  runMemory(TestAssistant.toLayer(handler))
+/** An in-memory `TestAssistant` with this handler, its own event log, and this model. */
+export const memoryAssistant = (
+  handler: Assistant.Handler<Assistant.TurnServices | LanguageModel.LanguageModel>,
+  model: Model
+) => runMemory(TestAssistant.toLayer(handler), model)
 
 /** A new chat's id. */
 export const newChat = ChatId.make

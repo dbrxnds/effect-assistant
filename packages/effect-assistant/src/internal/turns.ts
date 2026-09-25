@@ -26,7 +26,7 @@ import type { AssistantChat } from "../AssistantChat.ts"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import * as AssistantLoop from "../AssistantLoop.ts"
 import type * as BlockKit from "../BlockKit.ts"
-import type * as Instructions from "../Instructions.ts"
+import * as Instructions from "../Instructions.ts"
 import * as Skill from "../Skill.ts"
 import type * as Specialist from "../Specialist.ts"
 import * as History from "./history.ts"
@@ -35,25 +35,17 @@ import * as Specialists from "./specialists.ts"
 import * as Telemetry from "./telemetry.ts"
 import * as Tools from "./tools.ts"
 
-/**
- * The colleague preamble every assistant's instructions follow.
- *
- * @internal
- */
-export const preamble = `You are a colleague working with the user in a chat.
-- The user only sees what you send with send_user_message. Anything else you write is private.
-- Every step is a tool call. When you have nothing more to do, call wait (in the same step as your last send_user_message, if any).
-- Messages and facts can arrive at any time, also while you are working. Always handle the newest message. Don't repeat something you already told the user.
-- A <fact> is an update from a tool or workflow, and a <specialist> is the report of a specialist you started. The user did not see either. Decide whether they need to know: tell them about results, questions for them, and problems; keep routine progress to yourself and just call wait.
-- For slow work, start it in the background if you can, tell the user in one line, and follow up when the result arrives.
-- Keep messages short, like texting a coworker.`
-
 /** Host-visible failure when a turn handled the user's input but never spoke. */
 export const silentTurnMessage = "I finished without sending a reply."
 
-/** Added to the instructions for one more short pass when a turn would end without replying. */
-export const replyNudge =
-  "You haven't replied to the user's latest message yet. Send them a message now with send_user_message: the answer, or what you started and when they'll hear back."
+/**
+ * Added to the instructions for one more short pass when a turn would end
+ * without replying, unless the handler gives its own.
+ *
+ * @internal
+ */
+export const defaultReplyNudge =
+  "You haven't replied to the user's latest message yet. Reply now with send_user_message."
 
 /**
  * What `Assistant.make` defines: the name, blocks, specialists, and events.
@@ -242,7 +234,7 @@ const makeTurnApi = (
   const history = Effect.map(entries, History.fromEntries)
 
   const instructions = (given: string | Instructions.Resolved) =>
-    mapText(given, (text) => `${preamble}\n\n${text}${running}`)
+    mapText(given, (text) => `${Instructions.protocol}\n\n${text}${running}`)
 
   // Only send_user_message, and the call is forced: the reply pass can only reply.
   const replyOnly = Toolkit.fromArray(Object.values(builtins).filter((tool) => tool.name === "send_user_message"))
@@ -258,7 +250,10 @@ const makeTurnApi = (
 
         return AssistantLoop.stream({
           model: options.model,
-          instructions: mapText(options.instructions, (text) => `${preamble}\n\n${text}\n\n${replyNudge}`),
+          instructions: mapText(
+            instructions(options.instructions),
+            (text) => `${text}\n\n${options.nudge ?? defaultReplyNudge}`
+          ),
           toolkit: replyOnly,
           // Not `history`: what the reply pass reads, it can only reply to, so it doesn't move how far the turn read.
           history: Effect.map(chat.entries, History.fromEntries),
@@ -307,7 +302,10 @@ const makeTurnApi = (
         )
       )
 
-      return Stream.concat(loop, replyIfOwed({ model: options.model, instructions: options.instructions }))
+      return Stream.concat(
+        loop,
+        replyIfOwed({ model: options.model, instructions: options.instructions, nudge: options.replyNudge })
+      )
     }
   }
 }

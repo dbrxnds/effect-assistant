@@ -97,7 +97,7 @@ export type TurnServices = AssistantChat | Specialist.Runner
 export interface LoopOptions<Tools extends Toolkit.Toolkit, R> {
   /** The model to call, as the `LanguageModel` in context names it (e.g. `"claude-sonnet-5"`). */
   readonly model: string
-  /** The assistant's role and rules, after the built-in colleague preamble. */
+  /** The assistant's role and rules. `Instructions.protocol` goes before them. */
   readonly instructions: string | Instructions.Resolved
   /** Its tools, next to its own. For tools found on demand, spread in `ToolDiscovery.make(...)`. */
   readonly toolkit?: Tools | undefined
@@ -105,6 +105,8 @@ export interface LoopOptions<Tools extends Toolkit.Toolkit, R> {
   readonly skills?: ReadonlyArray<Skill<R>> | undefined
   /** Model calls per turn. Default 16. */
   readonly maxSteps?: number | undefined
+  /** What the reply pass tells the model when the turn would end without replying. */
+  readonly replyNudge?: string | undefined
 }
 
 /**
@@ -128,8 +130,10 @@ export interface Entry<Events = never> {
  */
 export interface ReplyOptions {
   readonly model: string
-  /** The assistant's instructions, as for `turn.loop`: the preamble and a reply rule are added. */
+  /** The assistant's instructions, as for `turn.loop`: `Instructions.protocol` and the nudge are added. */
   readonly instructions: string | Instructions.Resolved
+  /** What to tell the model. Default: that it hasn't replied yet, and should now. */
+  readonly nudge?: string | undefined
 }
 
 /**
@@ -157,12 +161,12 @@ export interface Turn<Events = never> {
   /** The assistant's own tools: `send_user_message`, `wait`, and the specialist tools. */
   readonly tools: Toolkit.Toolkit
   /**
-   * The full system prompt for these instructions: the colleague preamble,
+   * The full system prompt for these instructions: `Instructions.protocol`,
    * the instructions, and the specialist runs working now.
    */
   readonly instructions: (instructions: string | Instructions.Resolved) => Instructions.Resolved
   /**
-   * The agent loop over the chat, with the preamble, the assistant's own tools,
+   * The agent loop over the chat, with `Instructions.protocol`, the assistant's own tools,
    * and these instructions, tools, and skills. Every step is a tool call. It
    * ends with `replyIfOwed`.
    */

@@ -41,7 +41,8 @@
   },
   "scripts": {
     "build": "vp pack",
-    "test": "vp test run"
+    "test": "vp test run --exclude test/contract.test.ts",
+    "test:contract": "vp test run test/contract.test.ts"
   },
   "devDependencies": {
     "@effect-uai/anthropic": "0.17.0",

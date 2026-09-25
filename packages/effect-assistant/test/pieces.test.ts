@@ -7,6 +7,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { Assistant, AssistantChat, AssistantEvent, AssistantHistory, AssistantLoop, ChatId } from "../src/index.ts"
 import { collectUntil, newChat, runMemory, say, testModel, turnsDone } from "./fixtures.ts"
+import * as Scripted from "./scripted.ts"
 
 class Summary extends Schema.TaggedClass<Summary>()("Summary", {
   throughSeq: Schema.Int,
@@ -35,7 +36,14 @@ describe("the app's own events", () => {
         yield* Compacting.submit(chat, say("hi"))
 
         return yield* collectUntil(Compacting, chat, (es) => turnsDone(es) >= 1)
-      }).pipe(Effect.provide(runMemory(handlers)))
+      }).pipe(
+        Effect.provide(
+          runMemory(
+            handlers,
+            Scripted.layer(() => Scripted.reply("Hi."))
+          )
+        )
+      )
 
       // Stored as a Custom entry, read back as a Summary.
       expect(entries.flatMap(({ event }) => (Predicate.isTagged(event, "Custom") ? [event.name] : []))).toEqual([
@@ -87,7 +95,14 @@ describe("a loop of your own", () => {
         yield* Own.submit(chat, say("Say hi in one short message."))
 
         return yield* collectUntil(Own, chat, (es) => turnsDone(es) >= 1)
-      }).pipe(Effect.provide(runMemory(handlers)))
+      }).pipe(
+        Effect.provide(
+          runMemory(
+            handlers,
+            Scripted.layer(() => Scripted.reply("Hi."))
+          )
+        )
+      )
 
       expect(AssistantEvent.assistantTexts(entries).length).toBeGreaterThanOrEqual(1)
       expect(entries.flatMap(({ event }) => (AssistantEvent.isTurnEnd(event) ? [event._tag] : []))).toEqual([
@@ -119,7 +134,14 @@ describe("a history built from turn.entries", () => {
         yield* Own.submit(chat, say("hello"))
 
         return yield* collectUntil(Own, chat, (es) => turnsDone(es) >= 1)
-      }).pipe(Effect.provide(runMemory(handlers)))
+      }).pipe(
+        Effect.provide(
+          runMemory(
+            handlers,
+            Scripted.layer(() => Scripted.reply("Hi."))
+          )
+        )
+      )
 
       const end = entries.flatMap(({ event }) => (AssistantEvent.isTurnEnd(event) ? [event] : [])).at(-1)
 

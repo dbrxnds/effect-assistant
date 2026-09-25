@@ -10,7 +10,7 @@ import * as Predicate from "effect/Predicate"
 import * as AssistantEvent from "../AssistantEvent.ts"
 
 const factText = (fact: AssistantEvent.Fact) =>
-  `<fact source="${fact.source}">\n${JSON.stringify(fact.payload)}\n</fact>`
+  `<fact source="${fact.source}">\nAn update from a tool or workflow. The user hasn't seen it: tell them if it matters to them.\n${JSON.stringify(fact.payload)}\n</fact>`
 
 /**
  * What a tool call gets as its result when its handler's stream stopped
@@ -60,6 +60,7 @@ const finishedText = (
   const wrote = since.some(({ event }) => Predicate.isTagged(event, "UserMessage"))
 
   const lines = [
+    "A report from a specialist you started. The user hasn't seen it.",
     started === undefined
       ? `You started it for: ${finished.goal}`
       : `You started it ${ago(at.at - started.at)} ago for: ${finished.goal}`,
@@ -79,7 +80,7 @@ const finishedText = (
 }
 
 const answerText = (answer: AssistantEvent.BlockAnswer) =>
-  `<answer message="${answer.messageId}" kind="${answer.kind}">\n${JSON.stringify(answer.value)}\n</answer>`
+  `<answer message="${answer.messageId}" kind="${answer.kind}">\nThe user answered with the block on your message ${answer.messageId}.\n${JSON.stringify(answer.value)}\n</answer>`
 
 /**
  * Rebuilds model history from a chat's entries, in the order the model saw

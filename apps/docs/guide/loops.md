@@ -7,15 +7,15 @@ stream.
 
 `turn.loop` is built from pieces you can use yourself:
 
-| Piece                                               | What it is                                                                                      |
-| --------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `turn.instructions(text)`                           | The full system prompt: the colleague preamble, your text, and the specialist runs working now. |
-| `turn.tools`                                        | The assistant's own tools: `send_user_message`, `wait`, and the specialist tools.               |
-| `turn.history`                                      | The model's history, rebuilt from the chat's log each time you read it.                         |
-| `turn.entries`                                      | The chat's entries, for a history of your own (see [below](#change-what-the-model-sees)).       |
-| [`AssistantLoop.step`](/api/AssistantLoop#step)     | One step: call the model, run its tool calls.                                                   |
-| [`AssistantLoop.stream`](/api/AssistantLoop#stream) | The whole loop, steps until the model is done.                                                  |
-| `turn.replyIfOwed(...)`                             | One more pass, reply-only, when the user's latest message has no reply.                         |
+| Piece                                               | What it is                                                                                       |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `turn.instructions(text)`                           | The full system prompt: `Instructions.protocol`, your text, and the specialist runs working now. |
+| `turn.tools`                                        | The assistant's own tools: `send_user_message`, `wait`, and the specialist tools.                |
+| `turn.history`                                      | The model's history, rebuilt from the chat's log each time you read it.                          |
+| `turn.entries`                                      | The chat's entries, for a history of your own (see [below](#change-what-the-model-sees)).        |
+| [`AssistantLoop.step`](/api/AssistantLoop#step)     | One step: call the model, run its tool calls.                                                    |
+| [`AssistantLoop.stream`](/api/AssistantLoop#stream) | The whole loop, steps until the model is done.                                                   |
+| `turn.replyIfOwed(...)`                             | One more pass, reply-only, when the user's latest message has no reply.                          |
 
 `turn.loop` is `AssistantLoop.stream` with these wired in, the skill catalog,
 and a tool call required at every step, followed by `turn.replyIfOwed`.
@@ -68,7 +68,8 @@ The loop's state is yours: step limits, budgets, anything `then` decides on.
 `turn.replyIfOwed({ model, instructions })` runs one more pass when the user's
 latest message has no reply and nothing arrived after the loop's last read.
 That pass can only call `send_user_message`. When no reply is owed, it's
-empty. Pass it the same instructions as the loop; it adds the preamble itself.
+empty. Pass it the same instructions as the loop; it adds `Instructions.protocol`
+itself, and a nudge that it hasn't replied yet (`nudge` sets your own).
 
 End a custom loop with `Stream.concat(turn.replyIfOwed(...))`. Without it, a
 turn that never replies ends with `TurnFailed` ("I finished without sending a
