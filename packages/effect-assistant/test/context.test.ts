@@ -6,7 +6,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Queue from "effect/Queue"
 import * as Stream from "effect/Stream"
-import { Assistant, AssistantTurn, ChatId, Specialist } from "../src/index.ts"
+import { Assistant, ChatId, Specialist } from "../src/index.ts"
 import { fact, runEntity, runMemory, say } from "./fixtures.ts"
 
 interface User {
@@ -26,7 +26,7 @@ const owners = new Map<ChatId.ChatId, User>()
 /** A new chat for the user, as the app would create it. */
 const chatFor = (user: User) =>
   Effect.sync(() => {
-    const chatId = ChatId.make()
+    const chatId = Effect.runSync(ChatId.make)
     owners.set(chatId, user)
 
     return chatId
@@ -106,7 +106,7 @@ const recording = (seen: Queue.Queue<Seen>) =>
         // The clerk's report arrives as a <specialist> input: file only once.
         if (history.includes("file it") && !history.includes(`name=\\"clerk\\"`)) {
           const runner = yield* Specialist.Runner
-          yield* runner.spawn({ turn: yield* AssistantTurn.AssistantTurn, kind: "clerk", brief: { goal: "File it." } })
+          yield* runner.spawn({ kind: "clerk", brief: { goal: "File it." } })
         }
       }).pipe(Effect.provideService(CurrentUser, user), Stream.fromEffect, Stream.drain)
     })

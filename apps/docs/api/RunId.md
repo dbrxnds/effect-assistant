@@ -8,16 +8,16 @@ import { RunId } from "effect-assistant"
 
 The `RunId` module defines the id of one background run, such as a
 specialist run or a workflow started from a tool: `run:` followed by a
-nanoid.
+UUID.
 
 ## Constructors
 
 ### make
 
-Creates a new random run id.
+Creates a new random run id, with Effect's `Random`.
 
 ```ts
-const make: () => RunId
+const make: Effect.Effect<RunId>
 ```
 
 <small>Since 0.1.0</small>
@@ -50,10 +50,10 @@ type RunId = typeof RunId.Type
 
 ### RunId
 
-Schema for run ids: `` `run:${nanoid}` ``, branded.
+Schema for run ids: `` `run:${uuid}` ``, branded.
 
 ```ts
-const RunId = Schema.TemplateLiteral(["run:", Nanoid.Nanoid]).pipe(Schema.brand("effect-assistant/RunId"))
+const RunId = Schema.TemplateLiteral(["run:", Uuid.Uuid]).pipe(Schema.brand("effect-assistant/RunId"))
 ```
 
 <small>Since 0.1.0</small>

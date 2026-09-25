@@ -31,7 +31,7 @@ describe("AssistantEngine.layerMemory", () => {
   it.live("picks up a chat whose turn a restart cut off", () =>
     Effect.gen(function* () {
       const log = yield* ChatLog.ChatLog
-      const [cutOff, otherAssistant, finished] = [ChatId.make(), ChatId.make(), ChatId.make()]
+      const [cutOff, otherAssistant, finished] = yield* Effect.all([ChatId.make, ChatId.make, ChatId.make])
 
       // What the log holds after a restart.
       yield* log.append(cutOff, [say("hi"), AssistantEvent.TurnStarted.make({ assistant: "resumer" })])
@@ -60,7 +60,7 @@ describe("tool calls after a crash", () => {
   it.live("runs a call the crash cut off again, with the same id and key, before the model goes on", () =>
     Effect.gen(function* () {
       const log = yield* ChatLog.ChatLog
-      const chat = ChatId.make()
+      const chat = yield* ChatId.make
       const ran = yield* Deferred.make<{ readonly callId: string; readonly key: string }>()
 
       const sendReport = Tool.make({
@@ -111,7 +111,7 @@ describe("destructive tool calls after a crash", () => {
   it.live("doesn't run a destructive call again, and tells the model it may have run", () =>
     Effect.gen(function* () {
       const log = yield* ChatLog.ChatLog
-      const chat = ChatId.make()
+      const chat = yield* ChatId.make
       let sent = 0
 
       const sendEmail = AssistantToolCall.destructive(
@@ -183,12 +183,12 @@ describe("a chat's log", () => {
 
   it.live("numbers a chat's writes in order, however many write at once", () =>
     Effect.gen(function* () {
-      const handler = Resumer.toLayer((turn: Assistant.Turn) =>
+      const handler = Resumer.toLayer(() =>
         Stream.fromEffect(
           Effect.gen(function* () {
-            // The ChatLog a turn gets is its chat's: its appends take the chat's lock.
-            const log = yield* ChatLog.ChatLog
-            yield* Effect.all([log.append(turn.chatId, [say("a")]), log.append(turn.chatId, [say("b"), say("c")])], {
+            // The chat's appends take its lock.
+            const chat = yield* AssistantChat.AssistantChat
+            yield* Effect.all([chat.append([say("a")]), chat.append([say("b"), say("c")])], {
               concurrency: "unbounded"
             })
           })
@@ -196,7 +196,7 @@ describe("a chat's log", () => {
       )
 
       const entries = yield* Effect.gen(function* () {
-        const chat = ChatId.make()
+        const chat = yield* ChatId.make
         yield* Resumer.submit(chat, say("go"))
 
         return yield* Resumer.subscribe(chat).pipe(
@@ -217,7 +217,7 @@ describe("a chat's log", () => {
       const handler = Resumer.toLayer(() => Stream.empty)
 
       const texts = yield* Effect.gen(function* () {
-        const [chat, other] = [ChatId.make(), ChatId.make()]
+        const [chat, other] = yield* Effect.all([ChatId.make, ChatId.make])
         yield* Resumer.submit(chat, say("stored"))
 
         const collected = yield* Resumer.subscribe(chat).pipe(
@@ -259,7 +259,7 @@ describe("a handler's build", () => {
         })
       )
 
-      const [chat, other] = [ChatId.make(), ChatId.make()]
+      const [chat, other] = yield* Effect.all([ChatId.make, ChatId.make])
 
       yield* Effect.gen(function* () {
         const turnsIn = (chatId: ChatId.ChatId, count: number) =>

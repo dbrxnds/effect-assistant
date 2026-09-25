@@ -21,7 +21,7 @@ import * as Effect from "effect/Effect"
 
 const startChat = (userId: string) =>
   Effect.gen(function* () {
-    const chatId = ChatId.make()
+    const chatId = yield* ChatId.make
     yield* chats.insert({ chatId, ownerId: userId, title: "Spring campaign" })
 
     return chatId

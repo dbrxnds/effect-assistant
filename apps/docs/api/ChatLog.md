@@ -131,14 +131,15 @@ export const make = (storage: Storage): ChatLog["Service"] =>
       if (events.length === 0) return []
 
       const seq = yield* storage.lastSeq(chatId)
-      const at = Date.now()
+      const at = yield* Clock.currentTimeMillis
       const entries = events.map((event, n) => AssistantEvent.Entry.make({ chatId, seq: seq + n + 1, at, event }))
+
       yield* storage.write(chatId, entries)
 
       return entries
     }),
-    unfinished: storage.lastEntries.pipe(
-      Effect.map((last) => last.flatMap((entry) => (AssistantEvent.isTurnEnd(entry.event) ? [] : [entry.chatId])))
+    unfinished: Effect.map(storage.lastEntries, (last) =>
+      last.flatMap((entry) => (AssistantEvent.isTurnEnd(entry.event) ? [] : [entry.chatId]))
     )
   })
 
@@ -154,16 +155,21 @@ export const layerMemory: Layer.Layer<ChatLog> = Layer.effect(
     const chats = yield* Ref.make(new Map<ChatId, ReadonlyArray<AssistantEvent.Entry>>())
 
     return make({
-      read: (chatId) => Ref.get(chats).pipe(Effect.map((all) => all.get(chatId) ?? [])),
-      lastSeq: (chatId) => Ref.get(chats).pipe(Effect.map((all) => all.get(chatId)?.at(-1)?.seq ?? 0)),
+      read: (chatId) => Effect.map(Ref.get(chats), (all) => all.get(chatId) ?? []),
+      lastSeq: (chatId) => Effect.map(Ref.get(chats), (all) => all.get(chatId)?.at(-1)?.seq ?? 0),
       write: (chatId, entries) =>
         Ref.update(chats, (all) => new Map(all).set(chatId, [...(all.get(chatId) ?? []), ...entries])),
-      lastEntries: Ref.get(chats).pipe(Effect.map((all) => [...all.values()].flatMap((entries) => entries.slice(-1))))
+      lastEntries: Effect.map(Ref.get(chats), (all) => [...all.values()].flatMap((entries) => entries.slice(-1)))
     })
   })
 )
 
 const EventJson = Schema.fromJsonString(AssistantEvent.AssistantEvent)
+
+// Postgres returns BIGINT and DOUBLE PRECISION columns as strings; other databases as numbers.
+const SqlNumber = Schema.Union([Schema.Finite, Schema.FiniteFromString])
+
+const Row = Schema.Struct({ chat_id: ChatId, seq: SqlNumber, at: SqlNumber, event: EventJson })
 
 /**
  * Layer that stores chats in a SQL table, `chat_log`, and creates it if it
@@ -192,63 +198,45 @@ export const layerSql: Layer.Layer<ChatLog, never, SqlClient.SqlClient> = Layer.
       )
     `.pipe(Effect.orDie)
 
-    const decode = Schema.decodeUnknownEffect(EventJson)
-    const encode = Schema.encodeEffect(EventJson)
-    const decodeChatId = Schema.decodeUnknownEffect(ChatId)
+    const toEntries = Effect.fn(function* (rows: ReadonlyArray<unknown>) {
+      const decoded = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(rows)
+
+      return decoded.map((row) =>
+        AssistantEvent.Entry.make({ chatId: row.chat_id, seq: row.seq, at: row.at, event: row.event })
+      )
+    })
+
+    const encodeEvent = Schema.encodeEffect(EventJson)
 
     return make({
-      read: (chatId) =>
-        // Postgres returns BIGINT and DOUBLE PRECISION columns as strings.
-        sql<{ readonly seq: string | number; readonly at: string | number; readonly event: string }>`
-          SELECT seq, at, event FROM chat_log WHERE chat_id = ${chatId} ORDER BY seq
-        `.pipe(
-          Effect.flatMap((rows) =>
-            Effect.forEach(rows, (row) =>
-              decode(row.event).pipe(
-                Effect.map((event) =>
-                  AssistantEvent.Entry.make({ chatId, seq: Number(row.seq), at: Number(row.at), event })
-                )
-              )
-            )
-          ),
-          Effect.orDie
-        ),
-      lastSeq: (chatId) =>
-        sql<{
-          readonly seq: string | number | null
-        }>`SELECT MAX(seq) AS seq FROM chat_log WHERE chat_id = ${chatId}`.pipe(
-          Effect.map((rows) => Number(rows[0]?.seq ?? 0)),
-          Effect.orDie
-        ),
-      write: (chatId, entries) =>
-        Effect.forEach(entries, (entry) =>
-          encode(entry.event).pipe(Effect.map((event) => ({ chat_id: chatId, seq: entry.seq, at: entry.at, event })))
-        ).pipe(
-          Effect.flatMap((rows) => sql`INSERT INTO chat_log ${sql.insert(rows)}`),
-          Effect.asVoid,
-          Effect.orDie
-        ),
-      lastEntries: sql<{
-        readonly chat_id: string
-        readonly seq: string | number
-        readonly at: string | number
-        readonly event: string
-      }>`
-        SELECT e.chat_id, e.seq, e.at, e.event FROM chat_log e
-        JOIN (SELECT chat_id, MAX(seq) AS seq FROM chat_log GROUP BY chat_id) last
-          ON last.chat_id = e.chat_id AND last.seq = e.seq
-      `.pipe(
-        Effect.flatMap((rows) =>
-          Effect.forEach(rows, (row) =>
-            Effect.all({ chatId: decodeChatId(row.chat_id), event: decode(row.event) }).pipe(
-              Effect.map(({ chatId, event }) =>
-                AssistantEvent.Entry.make({ chatId, seq: Number(row.seq), at: Number(row.at), event })
-              )
-            )
-          )
-        ),
-        Effect.orDie
-      )
+      read: Effect.fn(function* (chatId: ChatId) {
+        const rows = yield* sql`SELECT chat_id, seq, at, event FROM chat_log WHERE chat_id = ${chatId} ORDER BY seq`
+
+        return yield* toEntries(rows)
+      }, Effect.orDie),
+      lastSeq: Effect.fn(function* (chatId: ChatId) {
+        const rows = yield* sql<{ readonly seq: string | number | null }>`
+          SELECT MAX(seq) AS seq FROM chat_log WHERE chat_id = ${chatId}
+        `
+
+        return Number(rows[0]?.seq ?? 0)
+      }, Effect.orDie),
+      write: Effect.fn(function* (chatId: ChatId, entries: ReadonlyArray<AssistantEvent.Entry>) {
+        const rows = yield* Effect.forEach(entries, (entry) =>
+          Effect.map(encodeEvent(entry.event), (event) => ({ chat_id: chatId, seq: entry.seq, at: entry.at, event }))
+        )
+
+        yield* sql`INSERT INTO chat_log ${sql.insert(rows)}`
+      }, Effect.orDie),
+      lastEntries: Effect.gen(function* () {
+        const rows = yield* sql`
+          SELECT e.chat_id, e.seq, e.at, e.event FROM chat_log e
+          JOIN (SELECT chat_id, MAX(seq) AS seq FROM chat_log GROUP BY chat_id) last
+            ON last.chat_id = e.chat_id AND last.seq = e.seq
+        `
+
+        return yield* toEntries(rows)
+      }).pipe(Effect.orDie)
     })
   })
 )

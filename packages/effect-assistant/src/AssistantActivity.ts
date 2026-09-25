@@ -37,8 +37,8 @@ import type { RunId } from "./RunId.ts"
 export interface SpecialistRun {
   readonly runId: RunId
   readonly specialist: string
-  /** The goal it's working on, if the log recorded it. */
-  readonly goal: string | undefined
+  /** The goal it's working on. */
+  readonly goal: string
   /** When it started, in epoch milliseconds. */
   readonly since: number
 }

@@ -87,17 +87,21 @@ export const withCatalog = <R>(prompt: string, skills: ReadonlyArray<Skill<R>>):
 export const toolkit = <R>(skills: ReadonlyArray<Skill<R>>): Toolkit.Toolkit => {
   if (skills.length === 0) return {}
 
-  // SAFETY: there is at least one skill (checked above).
-  const names = skills.map((skill) => skill.name) as [string, ...Array<string>]
   const byName = new Map(skills.map((skill) => [skill.name, skill]))
+  const Input = Schema.Struct({ name: Schema.Literals(skills.map((skill) => skill.name)) })
 
   return Toolkit.make(
     Tool.make({
       name: "load_skill",
       description: "Load a skill's instructions by name. Follow them for the rest of the task.",
-      inputSchema: Schema.Struct({ name: Schema.Literals(names) }),
-      run: ({ name }) =>
-        Instructions.resolve(byName.get(name)!.instructions).pipe(Effect.map((resolved) => resolved.text))
+      inputSchema: Input,
+      run: Effect.fn(function* ({ name }: typeof Input.Type) {
+        const skill = byName.get(name)
+
+        if (skill === undefined) return yield* Tool.fail(`No skill named ${name}.`)
+
+        return (yield* Instructions.resolve(skill.instructions)).text
+      })
     })
   )
 }

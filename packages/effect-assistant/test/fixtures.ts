@@ -22,13 +22,10 @@ import {
   InputId
 } from "../src/index.ts"
 
-// SAFETY: the Anthropic layer provides `LanguageModel`; its extra outputs aren't needed here.
-const anthropic = Anthropic.layer({
-  apiKey: Redacted.make(process.env.ANTHROPIC_API_KEY ?? "")
-}).pipe(Layer.provide(FetchHttpClient.layer)) as Layer.Layer<LanguageModel.LanguageModel>
-
 /** The Anthropic API, as the tests' `LanguageModel`. */
-export const layerModel = anthropic
+export const layerModel = Anthropic.layer({
+  apiKey: Redacted.make(process.env.ANTHROPIC_API_KEY ?? "")
+}).pipe(Layer.provide(FetchHttpClient.layer))
 
 /** A small, fast model: tests check behaviour, not wording. */
 export const testModel = "claude-haiku-4-5"
@@ -69,12 +66,15 @@ export const memoryAssistant = (handler: Assistant.Handler<Assistant.TurnService
   runMemory(TestAssistant.toLayer(handler))
 
 /** A new chat's id. */
-export const newChat = () => Effect.sync(ChatId.make)
+export const newChat = ChatId.make
 
-export const say = (text: string) => AssistantEvent.UserMessage.make({ id: InputId.make(), text })
+/** A new input id, for events built outside an Effect. */
+const inputId = () => Effect.runSync(InputId.make)
+
+export const say = (text: string) => AssistantEvent.UserMessage.make({ id: inputId(), text })
 
 export const fact = (source: string, payload: Record<string, string | number>) =>
-  AssistantEvent.Fact.make({ id: InputId.make(), source, payload })
+  AssistantEvent.Fact.make({ id: inputId(), source, payload })
 
 /** One line per entry, for a failure message. */
 export const traceEntries = (entries: ReadonlyArray<AssistantEvent.Entry>) =>

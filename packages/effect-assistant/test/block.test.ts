@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { AssistantEvent, Block, BlockKit, ChatId, InputId } from "../src/index.ts"
 import { say } from "./fixtures.ts"
@@ -26,7 +27,12 @@ const choice = (options: ReadonlyArray<string>) =>
   AssistantEvent.MessageBlock.make({ kind: "choose_one", props: { options } })
 
 const answer = (messageId: string, value: string) =>
-  AssistantEvent.BlockAnswer.make({ id: InputId.make(), messageId, kind: "choose_one", value: { choice: value } })
+  AssistantEvent.BlockAnswer.make({
+    id: InputId.fromKey(`${messageId}:answer`),
+    messageId,
+    kind: "choose_one",
+    value: { choice: value }
+  })
 
 describe("BlockKit.toClient", () => {
   const render = BlockKit.toClient(kit, {
@@ -86,7 +92,7 @@ describe("BlockKit.toClient", () => {
 
 describe("BlockKit.blockStates", () => {
   it("closes a block on its answer, or when the assistant says it was answered in words", () => {
-    const chatId = ChatId.make()
+    const chatId = Effect.runSync(ChatId.make)
 
     const events = [
       message("m1", choice(["red", "blue"])),
@@ -115,7 +121,7 @@ describe("BlockKit.blockStates", () => {
   })
 
   it("finds the blocks the user moved on from, and closes them with BlocksClosed", () => {
-    const chatId = ChatId.make()
+    const chatId = Effect.runSync(ChatId.make)
 
     const events = [
       message("m1", choice(["red", "blue"])),

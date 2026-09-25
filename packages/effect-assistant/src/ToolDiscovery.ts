@@ -27,7 +27,7 @@ import * as Toolkit from "@effect-uai/core/Toolkit"
 import * as ToolResultWire from "@effect-uai/core/ToolResult"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import { nanoid } from "nanoid"
+import * as Uuid from "./internal/uuid.ts"
 
 const words = (text: string): ReadonlySet<string> =>
   new Set(
@@ -108,7 +108,7 @@ export const make = <Tools extends Toolkit.Toolkit>(toolkit: Tools) => {
 
       const call = {
         type: "function_call" as const,
-        call_id: `execute_${nanoid(8)}`,
+        call_id: `execute_${yield* Uuid.random}`,
         name,
         arguments: JSON.stringify(input)
       }

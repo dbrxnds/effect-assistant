@@ -43,9 +43,6 @@
     "build": "vp pack",
     "test": "vp test run"
   },
-  "dependencies": {
-    "nanoid": "^6.0.1"
-  },
   "devDependencies": {
     "@effect-uai/anthropic": "0.17.0",
     "@effect-uai/core": "0.17.0",

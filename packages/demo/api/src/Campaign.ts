@@ -19,9 +19,8 @@ import * as Orders from "@acme/demo-shared/Orders"
 import * as Tool from "@effect-uai/core/Tool"
 import type * as AssistantEvent from "effect-assistant/AssistantEvent"
 import * as AssistantToolCall from "effect-assistant/AssistantToolCall"
-import * as AssistantTurn from "effect-assistant/AssistantTurn"
+import * as AssistantChat from "effect-assistant/AssistantChat"
 import * as ChatId from "effect-assistant/ChatId"
-import * as ChatLog from "effect-assistant/ChatLog"
 import * as RunId from "effect-assistant/RunId"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
@@ -224,9 +223,8 @@ export const decideCampaign = Tool.make({
     "Approve or deny a campaign run that is awaiting approval, once the user has decided. Only call it after the user answered.",
   inputSchema: DecideInput,
   run: Effect.fn(function* ({ runId, decision }: typeof DecideInput.Type) {
-    const turn = yield* AssistantTurn.AssistantTurn
-    const log = yield* ChatLog.ChatLog
-    const token = approvalToken(yield* log.read(turn.chatId), runId)
+    const chat = yield* AssistantChat.AssistantChat
+    const token = approvalToken(yield* chat.entries, runId)
 
     if (Option.isNone(token)) return yield* Tool.fail(`No campaign run ${runId} is awaiting approval here.`)
 
@@ -296,12 +294,12 @@ export const startCampaign = Tool.make({
       )
     }
 
-    const turn = yield* AssistantTurn.AssistantTurn
+    const chat = yield* AssistantChat.AssistantChat
 
     yield* orders.put(
       LiveOrders.LiveOrder.make({
         reference,
-        chatId: turn.chatId,
+        chatId: chat.chatId,
         kind: "campaign",
         office: location.name,
         locationId: location.locationId,
@@ -315,7 +313,7 @@ export const startCampaign = Tool.make({
     yield* CreateCampaign.execute(
       {
         runId,
-        chatId: turn.chatId,
+        chatId: chat.chatId,
         reference,
         campaignName: product.name,
         office: location.name,

@@ -27,6 +27,8 @@ turn, like an input.
 
 ```ts
 import * as Layer from "effect/Layer"
+import * as MutableHashMap from "effect/MutableHashMap"
+import * as Option from "effect/Option"
 import { AssistantEngine, ChatLog } from "effect-assistant"
 
 const AppLive = Layer.mergeAll(MyAssistantLive, ResearchLive).pipe(

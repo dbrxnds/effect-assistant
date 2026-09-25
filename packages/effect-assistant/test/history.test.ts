@@ -1,4 +1,5 @@
 import * as HistoryCheck from "@effect-uai/core/HistoryCheck"
+import * as Effect from "effect/Effect"
 import type * as Items from "@effect-uai/core/Items"
 import { describe, expect, it } from "@effect/vitest"
 import * as Match from "effect/Match"
@@ -8,7 +9,7 @@ import { say } from "./fixtures.ts"
 
 const { ModelOutput, ToolResult, ToolStarted, TurnStarted } = AssistantEvent
 
-const chatId = ChatId.make()
+const chatId = Effect.runSync(ChatId.make)
 
 const entries = (events: ReadonlyArray<AssistantEvent.AssistantEvent>) =>
   events.map((event, i) => AssistantEvent.Entry.make({ chatId, seq: i + 1, at: 0, event }))
@@ -40,7 +41,7 @@ describe("History.fromEntries", () => {
     const history = History.fromEntries(
       entries([
         say("what orders does amsterdam have"),
-        TurnStarted.make({}),
+        TurnStarted.make({ assistant: "test" }),
         ModelOutput.make({ items: [call("a", "order_history")], seenThroughSeq: 2 }),
         ToolResult.make({ callId: "a", tool: "order_history", output: "[]" }),
         say("and do it for amsterdam"),
@@ -63,7 +64,7 @@ describe("History.fromEntries", () => {
     const history = History.fromEntries(
       entries([
         say("hi"),
-        TurnStarted.make({}),
+        TurnStarted.make({ assistant: "test" }),
         say("also this"),
         ModelOutput.make({ items: [call("a", "send_user_message")], seenThroughSeq: 3 }),
         ToolResult.make({ callId: "a", tool: "send_user_message", output: "sent" })
@@ -99,11 +100,11 @@ describe("History.fromEntries, after a crash", () => {
     const history = History.fromEntries(
       entries([
         say("look up the orders"),
-        TurnStarted.make({}),
+        TurnStarted.make({ assistant: "test" }),
         ModelOutput.make({ items: [call("a", "order_history")], seenThroughSeq: 2 }),
         ToolStarted.make({ callId: "a", tool: "order_history" }),
         // The process died here; the resumed turn starts, and a message arrives.
-        TurnStarted.make({}),
+        TurnStarted.make({ assistant: "test" }),
         say("any news?")
       ])
     )
@@ -116,7 +117,7 @@ describe("History.fromEntries, after a crash", () => {
 
 describe("History.needsTurn", () => {
   it("is true while an input arrived after the last finished turn read", () => {
-    const events = [say("hi"), TurnStarted.make({})]
+    const events = [say("hi"), TurnStarted.make({ assistant: "test" })]
 
     expect(History.needsTurn(entries(events))).toBe(true)
     expect(History.needsTurn(entries([...events, AssistantEvent.TurnCompleted.make({ throughSeq: 2 })]))).toBe(false)
@@ -136,7 +137,7 @@ describe("History.needsTurn", () => {
 
 describe("History.fromEntries, a finished specialist run", () => {
   it("shows its status, how long it took, whether the user wrote since, and its report", () => {
-    const runId = RunId.make()
+    const runId = RunId.fromKey("history-test")
 
     const history = History.fromEntries([
       AssistantEvent.Entry.make({ chatId, seq: 1, at: 0, event: say("research Q4") }),
@@ -151,7 +152,7 @@ describe("History.fromEntries, a finished specialist run", () => {
         seq: 3,
         at: 121_000,
         event: AssistantEvent.SpecialistFinished.make({
-          id: InputId.make(`${runId}:1`),
+          id: InputId.fromKey(`${runId}:1`),
           runId,
           specialist: "research",
           brief: 1,

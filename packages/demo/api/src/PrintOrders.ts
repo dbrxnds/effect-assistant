@@ -13,7 +13,7 @@ import * as Locations from "@acme/demo-shared/Locations"
 import * as Products from "@acme/demo-shared/Products"
 import * as Tool from "@effect-uai/core/Tool"
 import * as AssistantToolCall from "effect-assistant/AssistantToolCall"
-import * as AssistantTurn from "effect-assistant/AssistantTurn"
+import * as AssistantChat from "effect-assistant/AssistantChat"
 import * as ChatId from "effect-assistant/ChatId"
 import * as RunId from "effect-assistant/RunId"
 import * as Effect from "effect/Effect"
@@ -163,12 +163,12 @@ export const orderProducts = Tool.make({
       )
     }
 
-    const turn = yield* AssistantTurn.AssistantTurn
+    const chat = yield* AssistantChat.AssistantChat
 
     yield* orders.put(
       LiveOrders.LiveOrder.make({
         reference,
-        chatId: turn.chatId,
+        chatId: chat.chatId,
         kind: "product",
         office: location.name,
         locationId: location.locationId,
@@ -180,7 +180,7 @@ export const orderProducts = Tool.make({
       })
     )
     yield* PrintOrder.execute(
-      { runId, chatId: turn.chatId, reference, office: location.name, productName: item.name, quantity: units },
+      { runId, chatId: chat.chatId, reference, office: location.name, productName: item.name, quantity: units },
       { discard: true }
     )
 

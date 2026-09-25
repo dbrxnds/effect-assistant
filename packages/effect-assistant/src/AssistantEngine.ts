@@ -20,6 +20,8 @@
  *
  * ```ts
  * import * as Layer from "effect/Layer"
+import * as MutableHashMap from "effect/MutableHashMap"
+import * as Option from "effect/Option"
  * import { AssistantEngine, ChatLog } from "effect-assistant"
  *
  * const AppLive = Layer.mergeAll(MyAssistantLive, ResearchLive).pipe(
@@ -31,9 +33,13 @@
  * @since 0.1.0
  */
 import * as Context from "effect/Context"
+import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
+import * as MutableHashMap from "effect/MutableHashMap"
+import * as Option from "effect/Option"
+import * as Predicate from "effect/Predicate"
 import * as RcMap from "effect/RcMap"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
@@ -45,6 +51,7 @@ import * as Rpc from "effect/unstable/rpc/Rpc"
 import * as AssistantEvent from "./AssistantEvent.ts"
 import { ChatId } from "./ChatId.ts"
 import { ChatLog } from "./ChatLog.ts"
+import * as Chat from "./internal/chat.ts"
 import * as History from "./internal/history.ts"
 import * as Turns from "./internal/turns.ts"
 
@@ -66,6 +73,9 @@ export class AssistantEngine extends Context.Service<
     readonly subscribe: (assistant: string, chatId: ChatId) => Stream.Stream<AssistantEvent.Entry>
   }
 >()("effect-assistant/AssistantEngine") {}
+
+/** An open chat of the in-memory engine: which assistant, which chat. */
+class ChatKey extends Data.Class<{ readonly assistant: string; readonly chatId: ChatId }> {}
 
 const notRegistered = (assistant: string) =>
   Effect.die(`The ${assistant} assistant isn't registered: provide its toLayer.`)
@@ -92,70 +102,70 @@ export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.e
     const log = yield* ChatLog
     const registered = new Map<string, Turns.Registration>()
     // A chat's keep-alive: a hold on its entry, so it stays open while runs or turns work in the background.
-    const held = new Map<string, Scope.Closeable>()
-
-    const keyOf = (assistant: string, chatId: ChatId) => `${assistant}\n${chatId}`
+    const held = MutableHashMap.empty<ChatKey, Scope.Closeable>()
 
     // One entry per open chat, like a cluster entity: opened when used, closed five minutes after the last use.
-    const chats: RcMap.RcMap<string, Turns.Chat> = yield* RcMap.make({
-      lookup: (key: string) =>
-        Effect.gen(function* () {
-          const [assistant = "", chatId] = key.split("\n")
-          const registration = registered.get(assistant)
+    const chats: RcMap.RcMap<ChatKey, Chat.Chat> = yield* RcMap.make({
+      lookup: Effect.fn(function* (key: ChatKey) {
+        const registration = registered.get(key.assistant)
 
-          if (registration === undefined) return yield* notRegistered(assistant)
+        if (registration === undefined) return yield* notRegistered(key.assistant)
 
-          return yield* Turns.makeChat({
-            registration,
-            // SAFETY: the key is built from a chat id by keyOf.
-            chatId: chatId as ChatId,
-            keepAlive: (enabled) => keepAlive(key, enabled)
-          }).pipe(Effect.provide(context))
-        }),
+        return yield* Chat.makeChat({
+          registration,
+          chatId: key.chatId,
+          keepAlive: (enabled) => keepAlive(key, enabled)
+        }).pipe(Effect.provide(context))
+      }),
       idleTimeToLive: "5 minutes"
     })
 
-    const keepAlive = (key: string, enabled: boolean): Effect.Effect<void> =>
-      enabled
-        ? Effect.gen(function* () {
-            const scope = yield* Scope.make()
-            yield* RcMap.get(chats, key).pipe(Effect.provideService(Scope.Scope, scope))
-            held.set(key, scope)
-          })
-        : Effect.suspend(() => {
-            const scope = held.get(key)
-            held.delete(key)
+    // On: a hold on the chat's entry, in a scope of its own. Off: closing that scope lets the entry go idle.
+    const keepAlive = Effect.fn(function* (key: ChatKey, enabled: boolean) {
+      if (enabled) {
+        const scope = yield* Scope.make()
 
-            return scope === undefined ? Effect.void : Scope.close(scope, Exit.void)
-          })
+        yield* Effect.provideService(RcMap.get(chats, key), Scope.Scope, scope)
 
-    const withChat = <A>(assistant: string, chatId: ChatId, f: (chat: Turns.Chat) => Effect.Effect<A>) =>
-      Effect.scoped(RcMap.get(chats, keyOf(assistant, chatId)).pipe(Effect.flatMap(f)))
+        return MutableHashMap.set(held, key, scope)
+      }
+
+      const scope = MutableHashMap.get(held, key)
+
+      MutableHashMap.remove(held, key)
+
+      if (Option.isSome(scope)) yield* Scope.close(scope.value, Exit.void)
+    })
+
+    const withChat = <A>(assistant: string, chatId: ChatId, f: (chat: Chat.Chat) => Effect.Effect<A>) =>
+      Effect.scoped(RcMap.get(chats, new ChatKey({ assistant, chatId })).pipe(Effect.flatMap(f)))
 
     /** Runs turns for the assistant's chats that owe one: its last turn was cut off, or an input came after. */
     const resumeAll = Effect.fn(function* (assistant: string) {
       for (const chatId of yield* log.unfinished) {
         const entries = yield* log.read(chatId)
-        const turns = entries.flatMap(({ event }) => (event instanceof AssistantEvent.TurnStarted ? [event] : []))
-        const lastTurn = turns.at(-1)
+        const lastTurn = entries.findLast(({ event }) => Predicate.isTagged(event, "TurnStarted"))?.event
 
-        if (lastTurn?.assistant === assistant && History.needsTurn(entries)) {
+        if (
+          Predicate.isTagged(lastTurn, "TurnStarted") &&
+          lastTurn.assistant === assistant &&
+          History.needsTurn(entries)
+        ) {
           yield* withChat(assistant, chatId, (chat) => chat.resume)
         }
       }
     })
 
     return AssistantEngine.of({
-      register: (registration) =>
-        Effect.gen(function* () {
-          registered.set(registration.definition.name, registration)
-          // Chats this assistant was working on when the process stopped: pick them up again.
-          yield* resumeAll(registration.definition.name).pipe(Effect.forkScoped)
-        }),
+      register: Effect.fn(function* (registration: Turns.Registration) {
+        registered.set(registration.definition.name, registration)
+        // Chats this assistant was working on when the process stopped: pick them up again.
+        yield* Effect.forkScoped(resumeAll(registration.definition.name))
+      }),
       submit: (assistant, chatId, input) => withChat(assistant, chatId, (chat) => chat.submitInBackground(input)),
       // The subscriber holds the chat open while it streams.
       subscribe: (assistant, chatId) =>
-        Stream.unwrap(RcMap.get(chats, keyOf(assistant, chatId)).pipe(Effect.map((chat) => chat.stream)))
+        Stream.unwrap(RcMap.get(chats, new ChatKey({ assistant, chatId })).pipe(Effect.map((chat) => chat.stream)))
     })
   })
 )
@@ -211,7 +221,7 @@ export const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Shardin
         // A keep-alive left on from before a restart (by a run cut off) has done its job: it started the entity.
         yield* keepAlive(false)
 
-        const chat = yield* Turns.makeChat({ registration, chatId, keepAlive })
+        const chat = yield* Chat.makeChat({ registration, chatId, keepAlive })
         yield* chat.resume
 
         return ChatEntity.of({

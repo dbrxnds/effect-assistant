@@ -1,42 +1,40 @@
 /**
- * Running specialists: a brief's loop, the specialist tools, and the
- * in-memory runner assistants provide.
+ * Running specialists: a brief's loop, the specialist tools, and the chat's
+ * runner.
  *
  * @since 0.1.0
  * @internal
  */
 import * as Items from "@effect-uai/core/Items"
+import type * as LanguageModel from "@effect-uai/core/LanguageModel"
 import * as Tool from "@effect-uai/core/Tool"
 import * as Toolkit from "@effect-uai/core/Toolkit"
-import type * as Context from "effect/Context"
+import * as Clock from "effect/Clock"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as FiberSet from "effect/FiberSet"
 import * as Predicate from "effect/Predicate"
+import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import { AssistantChat } from "../AssistantChat.ts"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import * as AssistantLoop from "../AssistantLoop.ts"
-import { AssistantTurn } from "../AssistantTurn.ts"
-import type { ChatId } from "../ChatId.ts"
 import * as InputId from "../InputId.ts"
-import type * as Instructions from "../Instructions.ts"
 import * as RunId from "../RunId.ts"
 import * as Skill from "../Skill.ts"
 import * as Specialist from "../Specialist.ts"
+import { mapText } from "./instructions.ts"
 import * as Telemetry from "./telemetry.ts"
 
 /**
- * A specialist's handler, its build already run for the chat, with the
- * services of the layer that registered it.
+ * A specialist's handler once its build ran for the chat.
  *
  * @internal
  */
-export interface Opened {
-  readonly handler: Specialist.Handler<any, any>
-  readonly context: Context.Context<never>
-}
+export type RunHandler = (run: Specialist.Run) => Stream.Stream<AssistantLoop.Event, unknown, Specialist.RunServices>
 
 /**
  * The brief as the specialist's message.
@@ -62,15 +60,6 @@ const finalText = (items: ReadonlyArray<Items.HistoryItem>): string =>
     .join("")
     .trim()
 
-/** Instructions with the skills' catalog appended. */
-const withSkills = (
-  instructions: string | Instructions.Resolved,
-  skills: ReadonlyArray<Skill.Skill<any>>
-): Instructions.Resolved =>
-  Predicate.isString(instructions)
-    ? { text: Skill.withCatalog(instructions, skills) }
-    : { ...instructions, text: Skill.withCatalog(instructions.text, skills) }
-
 /**
  * Runs a specialist's handler on `history` until its loop ends, and returns
  * the answer: the last text the model wrote.
@@ -84,20 +73,20 @@ const withSkills = (
  *
  * @internal
  */
-export const run = Effect.fn(
+export const runBrief = Effect.fn(
   function* (
-    _specialist: Specialist.Any,
-    built: Opened,
+    handler: RunHandler,
     options: {
+      readonly specialist: Specialist.Any
       readonly runId: RunId.RunId
       readonly brief: Specialist.Brief
       readonly history: Array<Items.HistoryItem>
       readonly inbox: Array<Items.HistoryItem>
-      readonly chatId: ChatId
+      readonly chatId: AssistantChat["Service"]["chatId"]
     }
   ) {
     const { history, inbox } = options
-    let answer = ""
+    const answer = yield* Ref.make("")
 
     // Read before every model call, when no tool calls are open.
     const current = Effect.sync(() => {
@@ -106,7 +95,7 @@ export const run = Effect.fn(
       return [...history]
     })
 
-    const handlerRun: Specialist.Run = {
+    const run: Specialist.Run = {
       runId: options.runId,
       chatId: options.chatId,
       brief: options.brief,
@@ -116,7 +105,7 @@ export const run = Effect.fn(
 
         return AssistantLoop.stream({
           model: loop.model,
-          instructions: withSkills(loop.instructions, skills),
+          instructions: mapText(loop.instructions, (text) => Skill.withCatalog(text, skills)),
           toolkit: { ...Skill.toolkit(skills), ...loop.toolkit },
           history: current,
           maxSteps: loop.maxSteps ?? 8
@@ -124,35 +113,31 @@ export const run = Effect.fn(
       }
     }
 
+    // A run lives in memory, so there's nothing to run again after a crash: `ToolStarted` isn't kept.
     const record = (event: AssistantLoop.Event) =>
-      Effect.sync(() => {
-        // A run lives in memory, so there's nothing to run again after a crash.
-        if (Predicate.isTagged(event, "ToolStarted")) return
+      Predicate.isTagged(event, "ToolStarted")
+        ? Effect.void
+        : Predicate.isTagged(event, "ToolResult")
+          ? Effect.sync(() => history.push(Items.toolCallOutput(event.callId, event.output)))
+          : Effect.gen(function* () {
+              history.push(...event.items)
+              const text = finalText(event.items)
 
-        if (Predicate.isTagged(event, "ToolResult")) {
-          history.push(Items.toolCallOutput(event.callId, event.output))
+              if (text.length > 0) yield* Ref.set(answer, text)
+            })
 
-          return
-        }
+    yield* Stream.runForEach(handler(run), record)
 
-        history.push(...event.items)
-        const text = finalText(event.items)
+    const text = yield* Ref.get(answer)
 
-        if (text.length > 0) answer = text
-      })
+    yield* Telemetry.agentOutput(text)
 
-    const result = built.handler(handlerRun)
-    const events = Effect.isEffect(result) ? Stream.unwrap(result) : result
-
-    // SAFETY: the handler's layer context provides what it needs beyond the run services.
-    yield* (events.pipe(Stream.runForEach(record)) as Effect.Effect<void, unknown>).pipe(Effect.provide(built.context))
-    yield* Telemetry.agentOutput(answer)
-
-    return answer
+    return text
   },
-  (effect, specialist, _built, options) => effect.pipe(Telemetry.agentSpan(specialist.name, { chatId: options.chatId }))
+  (effect, _handler, options) => effect.pipe(Telemetry.agentSpan(options.specialist.name, { chatId: options.chatId }))
 )
 
+/** How a brief went. */
 type Outcome =
   | { readonly status: "answered"; readonly report: string }
   | { readonly status: "failed"; readonly error: string }
@@ -170,7 +155,7 @@ export const finished = (
   outcome: Outcome
 ): AssistantEvent.SpecialistFinished =>
   AssistantEvent.SpecialistFinished.make({
-    id: InputId.make(`${run.runId}:${run.brief}`),
+    id: InputId.fromKey(`${run.runId}:${run.brief}`),
     runId: run.runId,
     specialist,
     brief: run.brief,
@@ -188,23 +173,22 @@ export const toolkit = (specialists: ReadonlyArray<Specialist.Any>): Toolkit.Too
   if (specialists.length === 0) return {}
 
   const catalog = specialists.map((specialist) => `- ${specialist.name}: ${specialist.description}`).join("\n")
-  // SAFETY: there is at least one specialist (checked above).
-  const kinds = specialists.map((specialist) => specialist.name) as [string, ...Array<string>]
   const RunIdInput = Schema.String.annotate({ description: "The runId spawn_specialist returned." })
 
-  const fail = <A>(effect: Effect.Effect<A, Specialist.SpecialistError>) =>
-    effect.pipe(Effect.catch((error) => Tool.fail(error.message)))
+  const fail = <A>(effect: Effect.Effect<A, Specialist.SpecialistError, Specialist.Runner>) =>
+    Effect.catch(effect, (error) => Tool.fail(error.message))
 
-  const SpawnInput = Schema.Struct({ kind: Schema.Literals(kinds), ...Specialist.Brief.fields })
+  const SpawnInput = Schema.Struct({
+    kind: Schema.Literals(specialists.map((specialist) => specialist.name)),
+    ...Specialist.Brief.fields
+  })
 
   const spawn = Tool.make({
     name: "spawn_specialist",
     description: `Start a specialist on a job. It works in the background and its report arrives as a <specialist> input, often within seconds. Write a self-contained brief: it can't see this chat. For a quick question, just call wait; for slow work, tell the user in one line first.\n${catalog}`,
     inputSchema: SpawnInput,
     run: Effect.fn(function* ({ kind, ...brief }: typeof SpawnInput.Type) {
-      const turn = yield* AssistantTurn
-      const runner = yield* Specialist.Runner
-      const runId = yield* fail(runner.spawn({ turn, kind, brief }))
+      const runId = yield* fail(Specialist.Runner.use((runner) => runner.spawn({ kind, brief })))
 
       return { runId, status: "started" }
     })
@@ -218,9 +202,9 @@ export const toolkit = (specialists: ReadonlyArray<Specialist.Any>): Toolkit.Too
       "Send more to one of your specialists: new instructions for a running one (it reads them at its next step), or a follow-up for a finished one (it continues with what it already found).",
     inputSchema: MessageInput,
     run: Effect.fn(function* ({ runId, message }: typeof MessageInput.Type) {
-      const runner = yield* Specialist.Runner
+      const status = yield* fail(Specialist.Runner.use((runner) => runner.message(runId, message)))
 
-      return { runId, status: yield* fail(runner.message(runId, message)) }
+      return { runId, status }
     })
   })
 
@@ -232,8 +216,7 @@ export const toolkit = (specialists: ReadonlyArray<Specialist.Any>): Toolkit.Too
       "Stop one of your running specialists, for example when the user changed their mind. It posts no answer.",
     inputSchema: StopInput,
     run: Effect.fn(function* ({ runId }: typeof StopInput.Type) {
-      const runner = yield* Specialist.Runner
-      yield* fail(runner.stop(runId))
+      yield* fail(Specialist.Runner.use((runner) => runner.stop(runId)))
 
       return { runId, status: "stopped" }
     })
@@ -245,21 +228,20 @@ export const toolkit = (specialists: ReadonlyArray<Specialist.Any>): Toolkit.Too
 /** How long a finished run stays available for follow-ups. */
 const warmMillis = 15 * 60 * 1000
 
+/** A run of the chat: one specialist's history, continued by follow-ups. */
 interface Run {
+  readonly runId: RunId.RunId
   readonly specialist: Specialist.Any
-  readonly built: Opened
-  /** The turn that spawned it: its chat. */
-  readonly turn: AssistantTurn["Service"]
-  readonly history: Array<Items.HistoryItem>
-  /** Messages sent while it runs; the loop reads them at its next step. */
-  readonly inbox: Array<Items.HistoryItem>
-  /** Briefs so far, counting follow-ups; numbers the answer facts. */
-  briefs: number
-  readonly brief: Specialist.Brief
+  readonly handler: RunHandler
   readonly goal: string
-  fiber: Fiber.Fiber<void> | undefined
-  /** Set by `stop`, so the interruption isn't reported as a lost run. */
-  stopping: boolean
+  readonly brief: Specialist.Brief
+  readonly history: Array<Items.HistoryItem>
+  /** Messages sent while it works; the loop reads them at its next step. */
+  readonly inbox: Array<Items.HistoryItem>
+  /** Briefs so far, counting follow-ups; numbers the reports. */
+  briefs: number
+  /** The brief's loop, while it works: `stop` interrupts it. */
+  working: Fiber.Fiber<Outcome> | undefined
   lastUsed: number
 }
 
@@ -269,179 +251,153 @@ interface Run {
  * **Details**
  *
  * Runs are fibers in a `FiberSet` in the chat's scope. A message for a
- * running run steers it; a message for a finished one continues it. Each
- * answer goes to the chat through `answer`, which stores it and runs a turn
- * for it. `context` provides the model and whatever the specialists' tools
- * need, plus the turn services.
+ * running run steers it; a message for a finished one continues it. Every
+ * time a run starts working it records `SpecialistStarted`, and when it
+ * stops, however it stops, it reports `SpecialistFinished` through
+ * `report`: answered, failed, stopped, or cut off.
  *
- * Every time a run starts working it records `SpecialistStarted`, and when it
- * stops, however it stops, `SpecialistFinished`: answered, failed, stopped,
- * or cut off. `keepAlive(true)` is called
- * when the first run starts working, and `keepAlive(false)` when the last one
- * is done, so the chat's entity stays up for them. A run interrupted by
- * anything but `stop` (a shutdown) answers that it was cut off, and leaves
- * the keep-alive on: the cluster starts the entity again, which runs a turn
- * for the answer.
+ * Each run works inside `holding`, which keeps the chat up while it does.
+ * `stop` interrupts only the brief's loop, so the run still reports and lets
+ * go; a shutdown interrupts the whole run, which reports that it was cut off
+ * and keeps the hold, so the chat starts again and a turn reads the report.
  *
  * @internal
  */
 export const makeRunner = Effect.fn(function* (options: {
-  readonly specialists: ReadonlyArray<{ readonly specialist: Specialist.Any; readonly built: Opened }>
-  readonly context: () => Context.Context<never>
-  /** Stores a run's answer in the chat, and runs a turn for it. */
-  readonly answer: (chatId: ChatId, finished: AssistantEvent.SpecialistFinished) => Effect.Effect<void>
-  /** Appends a run's start or end to the chat's log. */
-  readonly record: (chatId: ChatId, event: AssistantEvent.SpecialistStarted) => Effect.Effect<void>
-  /** Keeps the chat up while runs work. */
-  readonly keepAlive: (enabled: boolean) => Effect.Effect<void>
+  readonly chat: AssistantChat["Service"]
+  readonly specialists: ReadonlyArray<{ readonly specialist: Specialist.Any; readonly handler: RunHandler }>
+  readonly model: Context.Context<LanguageModel.LanguageModel>
+  /** Keeps the chat up while the effect runs; an interruption keeps the hold. */
+  readonly holding: (effect: Effect.Effect<void>) => Effect.Effect<void>
+  /** Stores a run's report in the chat, and runs a turn for it. */
+  readonly report: (finished: AssistantEvent.SpecialistFinished) => Effect.Effect<void>
 }) {
+  const { chat } = options
   const fibers = yield* FiberSet.make()
   const runs = new Map<string, Run>()
   const byName = new Map(options.specialists.map((entry) => [entry.specialist.name, entry]))
-  // Runs working now.
-  let working = 0
 
-  const forgetOld = () => {
-    const now = Date.now()
+  const forgetOld = Effect.gen(function* () {
+    const now = yield* Clock.currentTimeMillis
 
-    for (const [id, entry] of runs) if (entry.fiber === undefined && now - entry.lastUsed > warmMillis) runs.delete(id)
-  }
+    for (const [id, run] of runs) if (run.working === undefined && now - run.lastUsed > warmMillis) runs.delete(id)
+  })
 
-  /** Works until the inbox is empty, then posts the answer. */
+  const report = (run: Run, outcome: Outcome) =>
+    options.report(finished(run.specialist.name, { runId: run.runId, brief: run.briefs, goal: run.goal }, outcome))
+
+  /** Works on the brief until nothing new is in the inbox, then reports. */
   const work = Effect.fn(
-    function* (runId: RunId.RunId, entry: Run) {
-      // SAFETY: `context` provides the model and the turn services.
-      const provided = run(entry.specialist, entry.built, {
-        runId,
-        brief: entry.brief,
-        history: entry.history,
-        inbox: entry.inbox,
-        chatId: entry.turn.chatId
-      }).pipe(Effect.provideService(AssistantTurn, entry.turn), Effect.provide(options.context())) as Effect.Effect<
-        string,
-        unknown
-      >
+    function* (run: Run) {
+      yield* chat.append([
+        AssistantEvent.SpecialistStarted.make({ runId: run.runId, specialist: run.specialist.name, goal: run.goal })
+      ])
 
-      const once = provided.pipe(
+      const once = runBrief(run.handler, {
+        specialist: run.specialist,
+        runId: run.runId,
+        brief: run.brief,
+        history: run.history,
+        inbox: run.inbox,
+        chatId: chat.chatId
+      }).pipe(
+        Effect.provideContext(Context.merge(options.model, services)),
         Effect.match({
           onSuccess: (report): Outcome => ({ status: "answered", report }),
           onFailure: (error): Outcome => ({ status: "failed", error: String(error) })
         })
       )
 
-      let outcome = yield* once
+      // A message that arrived after the last read: keep working before reporting.
+      const loop = Effect.gen(function* () {
+        let outcome = yield* once
 
-      // A message that arrived after the last read: keep working before answering.
-      while (entry.inbox.length > 0) outcome = yield* once
+        while (run.inbox.length > 0) outcome = yield* once
 
-      yield* options.answer(
-        entry.turn.chatId,
-        finished(entry.specialist.name, { runId, brief: entry.briefs, goal: entry.goal }, outcome)
-      )
+        return outcome
+      })
+
+      const working = yield* Effect.forkChild(loop)
+
+      run.working = working
+
+      const exit = yield* Fiber.await(working)
+
+      run.working = undefined
+      run.lastUsed = yield* Clock.currentTimeMillis
+
+      // Only `stop` interrupts the loop alone.
+      yield* report(run, Exit.isSuccess(exit) ? exit.value : { status: "stopped" })
     },
-    (effect, runId, entry) =>
-      effect.pipe(
-        Effect.onExit((exit) =>
-          Effect.gen(function* () {
-            entry.fiber = undefined
-            entry.lastUsed = Date.now()
-            const chatId = entry.turn.chatId
-            const cutOff = Exit.hasInterrupts(exit) && !entry.stopping
-
-            const run = { runId, brief: entry.briefs, goal: entry.goal }
-
-            // During a shutdown no turn can start: the report waits for the chat's next start. A run the
-            // assistant stopped is recorded too; it starts no turn. A run that answered already reported.
-            if (cutOff) yield* options.answer(chatId, finished(entry.specialist.name, run, { status: "cut_off" }))
-            else if (entry.stopping) {
-              yield* options.answer(chatId, finished(entry.specialist.name, run, { status: "stopped" }))
-            }
-
-            working -= 1
-
-            // A cut-off run leaves the keep-alive on, so the chat starts again and tells the user.
-            if (working === 0 && !cutOff) yield* options.keepAlive(false)
-          })
-        )
-      )
+    // A shutdown interrupts the whole run: no turn can start now, so the report waits for the chat's next start.
+    (effect, run) => Effect.onInterrupt(effect, () => report(run, { status: "cut_off" }))
   )
 
-  const launch = Effect.fn(function* (runId: RunId.RunId, entry: Run) {
-    entry.stopping = false
-    yield* options.record(
-      entry.turn.chatId,
-      AssistantEvent.SpecialistStarted.make({ runId, specialist: entry.specialist.name, goal: entry.goal })
-    )
-    working += 1
+  const launch = (run: Run) => FiberSet.run(fibers, options.holding(work(run))).pipe(Effect.asVoid)
 
-    if (working === 1) yield* options.keepAlive(true)
-
-    entry.fiber = yield* FiberSet.run(fibers, work(runId, entry))
-  })
-
-  return Specialist.Runner.of({
+  const runner = Specialist.Runner.of({
     spawn: Effect.fn(function* (request: Specialist.SpawnRequest) {
-      forgetOld()
+      yield* forgetOld
       const found = byName.get(request.kind)
 
       if (found === undefined) {
         return yield* Specialist.SpecialistError.make({ message: `No specialist named ${request.kind}.` })
       }
 
-      const runId = RunId.make()
-
-      const entry: Run = {
+      const run: Run = {
+        runId: yield* RunId.make,
         specialist: found.specialist,
-        built: found.built,
-        turn: request.turn,
+        handler: found.handler,
+        goal: request.brief.goal,
+        brief: request.brief,
         history: [Items.userText(briefText(request.brief))],
         inbox: [],
         briefs: 1,
-        brief: request.brief,
-        goal: request.brief.goal,
-        fiber: undefined,
-        stopping: false,
-        lastUsed: Date.now()
+        working: undefined,
+        lastUsed: yield* Clock.currentTimeMillis
       }
 
-      runs.set(runId, entry)
-      yield* launch(runId, entry)
+      runs.set(run.runId, run)
+      yield* launch(run)
 
-      return runId
+      return run.runId
     }),
     message: Effect.fn(function* (runId: string, text: string) {
-      forgetOld()
-      const entry = runs.get(runId)
+      yield* forgetOld
+      const run = runs.get(runId)
 
-      if (entry === undefined) {
+      if (run === undefined) {
         return yield* Specialist.SpecialistError.make({
           message: `Run ${runId} is no longer available. Spawn a new one with the full context.`
         })
       }
 
-      entry.briefs += 1
+      run.briefs += 1
 
-      if (entry.fiber !== undefined) {
-        entry.inbox.push(Items.userText(text))
+      if (run.working !== undefined) {
+        run.inbox.push(Items.userText(text))
 
         return "steered" as const
       }
 
-      entry.history.push(Items.userText(text))
-      // SAFETY: only ids minted by `spawn` are keys of `runs`.
-      yield* launch(runId as RunId.RunId, entry)
+      run.history.push(Items.userText(text))
+      yield* launch(run)
 
       return "continued" as const
     }),
     stop: Effect.fn(function* (runId: string) {
-      const entry = runs.get(runId)
+      const working = runs.get(runId)?.working
 
-      if (entry?.fiber === undefined) {
+      if (working === undefined) {
         return yield* Specialist.SpecialistError.make({ message: `Run ${runId} isn't running.` })
       }
 
-      entry.stopping = true
-      yield* Fiber.interrupt(entry.fiber)
+      yield* Fiber.interrupt(working)
     })
   })
+
+  // What a run's handler gets: its chat, this runner, and (merged in `work`) the model.
+  const services = Context.make(AssistantChat, chat).pipe(Context.add(Specialist.Runner, runner))
+
+  return runner
 })

@@ -6,46 +6,52 @@
 import { AssistantChat } from "effect-assistant"
 ```
 
-The `AssistantChat` module gives a handler's build the chat it's building
-for.
+The `AssistantChat` module gives code that runs in a chat that chat: its
+id, its entries, and a way to add to it.
 
-An assistant's (or a specialist's) build Effect runs once per chat
-activation, like an Effect cluster entity's: when the chat wakes up (a
-message, a specialist's report, a workflow's fact), and its scope closes
-when the chat goes idle. What the build sets up, like the chat's user or a
-resource with a finalizer, lives as long as the chat is active. The
-function it returns runs every turn.
+The engine provides it to everything that runs for a chat: a handler's
+build (once per chat activation), each turn's loop and tools, and the
+chat's specialist runs. Its `append` is the chat's only writer: appends go
+one at a time, each numbered after the last, and reach the chat's
+subscribers.
 
-**Example** (Looking the chat's user up once per activation)
+**Example** (A tool that reads the chat)
 
 ```ts
+import * as Tool from "@effect-uai/core/Tool"
 import * as Effect from "effect/Effect"
-import * as Stream from "effect/Stream"
 import { AssistantChat } from "effect-assistant"
 
-const MyAssistantHandlers = MyAssistant.toLayer(Effect.gen(function*() {
-  const { chatId } = yield* AssistantChat.AssistantChat
-  const user = yield* (yield* ChatUsers).forChat(chatId)
+const countMessages = Tool.make({
+  name: "count_messages",
+  description: "How many messages this chat has.",
+  inputSchema: Tool.noInput,
+  run: Effect.fn(function*() {
+    const chat = yield* AssistantChat.AssistantChat
+    const entries = yield* chat.entries
 
-  return (turn) =>
-    turn.loop({ model: "claude-sonnet-5", instructions: `You help ${user.name}.` }).pipe(
-      Stream.provideService(CurrentUser, user)
-    )
-}))
+    return entries.filter((entry) => entry.event._tag === "UserMessage").length
+  })
+})
 ```
 
 ## Services
 
 ### AssistantChat
 
-Service for the chat a handler's build runs for. The engine provides it to
-every build.
+Service for the chat that code runs in.
 
 ```ts
 class AssistantChat extends Context.Service<
   AssistantChat,
   {
     readonly chatId: ChatId
+    /** The chat's entries so far, in order. */
+    readonly entries: Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
+    /** Appends events after the chat's last entry, sends them to its subscribers, and returns them as stored. */
+    readonly append: (
+      events: ReadonlyArray<AssistantEvent.AssistantEvent>
+    ) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
   }
 >()("effect-assistant/AssistantChat")
 ```

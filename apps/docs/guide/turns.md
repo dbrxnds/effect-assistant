@@ -66,7 +66,7 @@ So a fact can say what it needs rather than what to say:
 
 ```ts
 AssistantEvent.Fact.make({
-  id: InputId.make(`${runId}:awaiting_approval`),
+  id: InputId.fromKey(`${runId}:awaiting_approval`),
   source: "workflow:CreateCampaign",
   payload: { status: "needs_approval", budget: 4800, next: "Get the user's approval for the budget." }
 })

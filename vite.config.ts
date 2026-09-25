@@ -27,6 +27,8 @@ export default defineConfig({
     ],
     rules: {
       "oxc/no-accumulating-spread": "error",
+      // No `as Type`: types come from the code, not from assertions. `as const` is fine.
+      "typescript/consistent-type-assertions": ["error", { assertionStyle: "never" }],
       "anti-slop/no-array-filter-map": "error",
       "anti-slop/no-reduce-accumulator-copy": "error",
       "anti-slop/no-chained-type-assertions": "error",

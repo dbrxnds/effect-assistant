@@ -2,6 +2,7 @@
  * Sending what the user does: typed text, or a block answer.
  */
 import { useAtomSet } from "@effect/atom-react"
+import * as Effect from "effect/Effect"
 import * as AssistantEvent from "effect-assistant/AssistantEvent"
 import type * as ChatId from "effect-assistant/ChatId"
 import * as InputId from "effect-assistant/InputId"
@@ -47,5 +48,5 @@ export const useSend = (
 export const userMessage = (content: ReadonlyArray<{ readonly type: string; readonly text?: string }>) => {
   const text = content.find((part) => part.type === "text")?.text?.trim() ?? ""
 
-  return text.length === 0 ? undefined : AssistantEvent.UserMessage.make({ id: InputId.make(), text })
+  return text.length === 0 ? undefined : AssistantEvent.UserMessage.make({ id: Effect.runSync(InputId.make), text })
 }

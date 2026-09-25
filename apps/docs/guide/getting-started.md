@@ -74,11 +74,11 @@ import * as Predicate from "effect/Predicate"
 import * as Stream from "effect/Stream"
 
 const program = Effect.gen(function* () {
-  const chatId = ChatId.make()
+  const chatId = yield* ChatId.make
 
   yield* MyAssistant.submit(
     chatId,
-    AssistantEvent.UserMessage.make({ id: InputId.make(), text: "Hi! What can you do?" })
+    AssistantEvent.UserMessage.make({ id: yield* InputId.make, text: "Hi! What can you do?" })
   )
 
   yield* MyAssistant.subscribe(chatId).pipe(
