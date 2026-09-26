@@ -98,10 +98,12 @@ export const makeChat = Effect.fn(function* (options: {
 
   // Every writer (the turn's loop, specialist runs, a handler's own appends) goes through here, one at a time: each
   // append is numbered after the last, and its entries go to the chat's subscribers.
+  // Uninterruptible: a stored append must reach memory and the subscribers too, or a turn misses it and replies twice.
   const write = (events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.AppEvent>) =>
     storage.append(chatId, events).pipe(
       Effect.tap((stored) => Ref.update(entries, (all) => [...all, ...stored])),
-      Effect.tap((stored) => PubSub.publishAll(channel, stored))
+      Effect.tap((stored) => PubSub.publishAll(channel, stored)),
+      Effect.uninterruptible
     )
 
   const chat = AssistantChat.of({
