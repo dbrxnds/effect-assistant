@@ -12,6 +12,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 import {
   Assistant,
   AssistantActivity,
@@ -275,6 +276,84 @@ describe("specialist runs", () => {
       // The turn that stopped it is the last one: a stopped run wakes nothing.
       const stoppedAt = entries.find(({ event }) => Predicate.isTagged(event, "SpecialistFinished"))?.seq ?? 0
       expect(entries.some(({ event, seq }) => seq > stoppedAt && Predicate.isTagged(event, "TurnStarted"))).toBe(false)
+    })
+  )
+
+  it.live("continues a finished run once when two messages arrive together", () =>
+    Effect.gen(function* () {
+      const script: Scripted.Script = (request) => {
+        if (!isAssistant(request)) {
+          return [Scripted.text(Scripted.inputs(request).join(" ").includes("province") ? "Ontario." : "Ottawa.")]
+        }
+
+        const last = Scripted.lastInput(request)
+        const runId = Option.getOrElse(Scripted.spawnedRunId(request), () => "")
+
+        if (last.includes("Ontario")) return Scripted.reply("It's in Ontario.")
+
+        if (last.includes("Ottawa")) {
+          return [
+            Scripted.call("message_specialist", { runId, message: "Which province is it in?" }),
+            Scripted.call("message_specialist", { runId, message: "Just the province." })
+          ]
+        }
+
+        if (Option.isSome(Scripted.lastResult(request, "message_specialist"))) return Scripted.wait()
+
+        return hasCalled(request, "spawn_specialist")
+          ? Scripted.reply("Asking research.")
+          : [
+              Scripted.call("spawn_specialist", {
+                kind: "research",
+                goal: "What's the capital of Canada?"
+              })
+            ]
+      }
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* ResearchAssistant.submit(chat, say("What's the capital of Canada?"))
+
+        return yield* collectUntil(ResearchAssistant, chat, (es) => text(es).includes("ontario") && notWorking(es))
+      }).pipe(Effect.provide(runMemory(researchHandlers, Scripted.layer(script))))
+
+      expect(failures(entries), traceEntries(entries)).toEqual([])
+      expect(statuses(entries).toSorted()).toEqual(["continued", "started", "steered"])
+      expect(finished(entries).map((run) => [run.status, run.brief])).toEqual([
+        ["answered", 1],
+        ["answered", 3]
+      ])
+    })
+  )
+
+  it.live("reports a run whose handler died as failed, and a turn relays it", () =>
+    Effect.gen(function* () {
+      const Crasher = Specialist.make("crasher", { description: "Crashes." })
+      const CrasherAssistant = Assistant.make("crasher-test", { specialists: [Crasher] })
+
+      const handlers = CrasherAssistant.toLayer(simple({ instructions })).pipe(
+        Layer.provide(Crasher.toLayer(() => Stream.die(new Error("boom"))))
+      )
+
+      const script: Scripted.Script = (request) => {
+        const last = Scripted.lastInput(request)
+
+        if (last.includes("<specialist")) return Scripted.reply(last.includes("boom") ? "It broke." : "Hm.")
+
+        return hasCalled(request, "spawn_specialist")
+          ? Scripted.reply("On it.")
+          : [Scripted.call("spawn_specialist", { kind: "crasher", goal: "Crash." })]
+      }
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* CrasherAssistant.submit(chat, say("Go."))
+
+        return yield* collectUntil(CrasherAssistant, chat, (es) => text(es).includes("broke") && notWorking(es))
+      }).pipe(Effect.provide(runMemory(handlers, Scripted.layer(script))))
+
+      expect(failures(entries), traceEntries(entries)).toEqual([])
+      expect(finished(entries).map((run) => run.status)).toEqual(["failed"])
     })
   )
 
