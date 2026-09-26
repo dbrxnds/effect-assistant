@@ -1,3 +1,4 @@
+import type * as Items from "@effect-uai/core/Items"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
@@ -8,29 +9,27 @@ import { silentTurnMessage } from "../src/internal/turns.ts"
 import { collectUntil, fact, memoryAssistant, newChat, say, TestAssistant, testModel, turnsDone } from "./fixtures.ts"
 import * as Scripted from "./scripted.ts"
 
-/** A handler that ends the turn with only `wait`, like a misbehaving model. */
-const waitOnly = () => {
-  const call = { type: "function_call" as const, call_id: "wait-1", name: "wait", arguments: "{}" }
+const toolCall = (callId: string, name: string): Items.ToolCall => ({
+  type: "function_call",
+  call_id: callId,
+  name,
+  arguments: "{}"
+})
 
-  return Stream.make(
-    AssistantEvent.ModelOutput.make({ items: [call] }),
+/** A handler that ends the turn with only `wait`, like a misbehaving model. */
+const waitOnly = () =>
+  Stream.make(
+    AssistantEvent.ModelOutput.make({ items: [toolCall("wait-1", "wait")] }),
     AssistantEvent.ToolResult.make({ callId: "wait-1", tool: "wait", output: "waiting" })
   )
-}
 
 const layer = memoryAssistant(waitOnly, Scripted.unused)
 
 /** A handler whose stream ends after a model output with a tool call, before the tool runs. */
 const stopsEarly: Assistant.Handler = () =>
-  Stream.make(
-    AssistantEvent.ModelOutput.make({
-      items: [{ type: "function_call" as const, call_id: "lookup-1", name: "lookup", arguments: "{}" }]
-    })
-  )
+  Stream.make(AssistantEvent.ModelOutput.make({ items: [toolCall("lookup-1", "lookup")] }))
 
 const stopsEarlyLayer = memoryAssistant(stopsEarly, Scripted.unused)
-
-const waitCall = (id: string) => ({ type: "function_call" as const, call_id: id, name: "wait", arguments: "{}" })
 
 /**
  * The first turn reads the history, then a fact lands before it ends (like a
@@ -49,7 +48,7 @@ const lateFact = () => {
       )
 
       return Stream.make(
-        AssistantEvent.ModelOutput.make({ items: [waitCall("w1")] }),
+        AssistantEvent.ModelOutput.make({ items: [toolCall("w1", "wait")] }),
         AssistantEvent.ToolResult.make({ callId: "w1", tool: "wait", output: "waiting" })
       )
     }
@@ -118,9 +117,7 @@ describe("turn completion", () => {
       const stopsMidCall = memoryAssistant(
         () =>
           Stream.make(
-            AssistantEvent.ModelOutput.make({
-              items: [{ type: "function_call" as const, call_id: "send-1", name: "send", arguments: "{}" }]
-            }),
+            AssistantEvent.ModelOutput.make({ items: [toolCall("send-1", "send")] }),
             AssistantEvent.ToolStarted.make({ callId: "send-1", tool: "send" })
           ),
         Scripted.unused
@@ -156,7 +153,9 @@ describe("turn completion", () => {
 
   it.live("replyIfOwed runs one pass that can only reply, with the nudge", () =>
     Effect.gen(function* () {
-      const model = yield* Scripted.make(() => [Scripted.call("send_user_message", { text: "You're welcome." })])
+      const model = yield* Scripted.make(() => [
+        Scripted.call("send_user_message", { text: "You're welcome.", wait: true })
+      ])
 
       // The loop only calls wait, as a model might after answering a workflow's question.
       const handler = (turn: Assistant.Turn) =>

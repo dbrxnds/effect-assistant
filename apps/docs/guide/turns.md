@@ -10,11 +10,10 @@ run its tools, repeat, until it has nothing left to do.
 2  TurnStarted
 3  ModelOutput       get_weather({ city: "Oslo" })
 4  ToolResult        get_weather: { city: "Oslo", weather: "sunny, 21°C" }
-5  ModelOutput       send_user_message({ text: "Sunny in Oslo, 21°C." }), wait()
+5  ModelOutput       send_user_message({ text: "Sunny in Oslo, 21°C.", wait: true })
 6  AssistantMessage  Sunny in Oslo, 21°C.
 7  ToolResult        send_user_message: sent
-8  ToolResult        wait: waiting
-9  TurnCompleted     throughSeq: 8
+8  TurnCompleted     throughSeq: 7
 ```
 
 Every line is an [event](./events) in the chat's log. The user sees two of
@@ -28,8 +27,9 @@ them: their message and the assistant's.
    model's history from the log, calls the model, and runs its tool calls.
    The engine records each step in the log. Then it repeats.
 3. Before **every** model call, the loop reads the log again.
-4. The turn ends when the model calls `wait` (or makes no tool call) and
-   nothing new arrived. `TurnCompleted.throughSeq` records how far it read;
+4. The turn ends when the model ends it (a message with `wait: true`, or
+   `wait`) or makes no tool call, and nothing new arrived. A step whose
+   calls failed doesn't end it: the model reads the failure first. `TurnCompleted.throughSeq` records how far it read;
    inputs after that start another turn.
 
 One turn runs per chat at a time. The [engine](./engines) sees to it.
@@ -48,9 +48,10 @@ coherent (see [history order](./events#history-order)).
 
 Every assistant has two tools of its own:
 
-- `send_user_message({ text, block? })` appends an `AssistantMessage`: what
-  the user sees. With [blocks](./blocks), it can carry buttons or an input.
-- `wait` ends the turn.
+- `send_user_message({ text, wait, block? })` appends an `AssistantMessage`:
+  what the user sees. With [blocks](./blocks), it can carry buttons or an
+  input. `wait: true` makes it the last message for now: it ends the turn.
+- `wait` ends the turn without a message.
 
 Every step must be a tool call (`toolChoice: "required"`), so text the model
 writes on its own never reaches the user. It's private reasoning.

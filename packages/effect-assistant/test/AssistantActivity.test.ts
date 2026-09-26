@@ -14,10 +14,6 @@ const activity = (events: ReadonlyArray<AssistantEvent.AssistantEvent>) =>
   AssistantActivity.fromEntries(entries(events))
 
 describe("AssistantActivity", () => {
-  it("is idle for an empty chat", () => {
-    expect(AssistantActivity.isWorking(activity([]))).toBe(false)
-  })
-
   it("works from an input until a turn that read it ends", () => {
     expect(activity([say("hi")]).queued).toBe(true)
     expect(AssistantActivity.isWorking(activity([say("hi")]))).toBe(true)

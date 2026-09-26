@@ -31,16 +31,17 @@ import * as Predicate from "effect/Predicate"
 
 /**
  * What the model has to know for a turn's loop to work: every step is a tool
- * call, `wait` ends the turn, and messages can arrive mid-turn. The rest (the
- * user sees only `send_user_message`, what a `<fact>` or a `<specialist>`
- * is) is in the tools' descriptions and in the history itself.
+ * call, `wait` (or a last message with `wait: true`) ends the turn, and
+ * messages can arrive mid-turn. The rest (the user sees only
+ * `send_user_message`, what a `<fact>` or a `<specialist>` is) is in the
+ * tools' descriptions and in the history itself.
  * `turn.instructions(text)` puts it before the text; a custom loop on
  * `AssistantLoop.stream` can use it too.
  *
  * @category constants
  * @since 0.1.0
  */
-export const protocol = `Every step is a tool call. When you have nothing more to do right now, call wait, in the same step as your last send_user_message.
+export const protocol = `Every step is a tool call. When you have nothing more to do right now, end your turn: set wait to true on your last send_user_message, or call wait if you have nothing to say.
 Messages and updates can arrive while you work: handle the newest one, and don't repeat what you already told the user.`
 
 /**

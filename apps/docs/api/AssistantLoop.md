@@ -88,8 +88,8 @@ const step: <Tools extends Toolkit.Toolkit, S, E2 = never, R2 = never>(
 ### stream
 
 Runs the agent loop as a stream: `step` after step, until the model
-is done (it made no tool calls, or called `wait`) and nothing new arrived
-while it worked, or after `maxSteps` model calls.
+is done (see `StepResult`) and nothing new arrived while it worked,
+or after `maxSteps` model calls.
 
 **Details**
 
@@ -164,171 +164,13 @@ How a step went, for deciding what comes next.
 interface StepResult {
   /** The model's output; unset when the step only ran calls a crash cut off. */
   readonly output: AssistantEvent.ModelOutput | undefined
-  /** Whether the model is done: it made no tool calls, or called `wait`. */
+  /**
+   * Whether the model is done: it made no tool calls, or ended its turn (`wait`, or a message
+   * with `wait: true`) and none of the step's calls failed.
+   */
   readonly done: boolean
   /** The history's length with this step's output and results: a longer one got something new meanwhile. */
   readonly historyLength: number
-}
-
-/**
- * A tool call with no input can arrive with `arguments: ""`. Store `"{}"`
- * instead: the Anthropic adapter parses arguments when it sends history back,
- * and `""` isn't JSON.
- */
-const withJsonArguments = (item: Items.HistoryItem): Items.HistoryItem =>
-  Items.isToolCall(item) && item.arguments.trim() === "" ? { ...item, arguments: "{}" } : item
-
-/** Runs one call through the toolkit, in its own span, with the call as `AssistantToolCall`. */
-const runCall = <Tools extends Toolkit.Toolkit>(toolkit: Tools, call: Items.ToolCall) =>
-  Toolkit.collectResults(Toolkit.run(toolkit, [call])).pipe(
-    Effect.provideService(AssistantToolCall, { callId: call.call_id, tool: call.name }),
-    Effect.map((results) =>
-      results.map((result) => {
-        const wire = ToolResultWire.toToolCallOutput(result)
-
-        return AssistantEvent.ToolResult.make({ callId: wire.call_id, tool: call.name, output: wire.output })
-      })
-    ),
-    Effect.tap((results) => Telemetry.toolOutput(results.map((result) => result.output).join("\n"))),
-    Telemetry.toolSpan(call)
-  )
-
-/** Runs the calls: first a `ToolStarted` for each (stored before any runs), then their results, concurrently. */
-const runCalls = <Tools extends Toolkit.Toolkit>(toolkit: Tools, calls: ReadonlyArray<Items.ToolCall>) =>
-  Stream.fromIterable(
-    calls.map((call) => Loop.value(AssistantEvent.ToolStarted.make({ callId: call.call_id, tool: call.name })))
-  ).pipe(
-    Stream.concat(
-      Stream.unwrap(
-        Effect.map(
-          Effect.forEach(calls, (call) => runCall(toolkit, call), { concurrency: "unbounded" }),
-          (all) => Stream.fromIterable(all.flat().map(Loop.value))
-        )
-      )
-    )
-  )
-
-/**
- * One step of the agent loop, as a body for effect-uai's `Loop.loop`: it
- * calls the model with the current history and emits its `ModelOutput`,
- * then runs the output's tool calls and emits a `ToolStarted` and a
- * `ToolResult` for each. `then` decides what comes next: `Loop.next(state)`
- * or `Loop.stop()`.
- *
- * **Details**
- *
- * A step whose history has calls a crash cut off runs those first, with the
- * same ids, and doesn't call the model. Whoever consumes the loop records each event
- * before pulling the next, so the next step's history has it; `then` runs
- * after the step's events are recorded.
- *
- * **Example** (A loop of your own)
- *
- * ```ts
- * import * as Loop from "@effect-uai/core/Loop"
- * import { AssistantLoop } from "effect-assistant"
- *
- * const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
- *   Loop.loop({ steps: 0 }, (state) =>
- *     AssistantLoop.step(
- *       { model: "claude-sonnet-5", instructions: turn.instructions("You help a small team."), toolkit: turn.tools, history: turn.history(), toolChoice: "required" },
- *       (result) => result.done || state.steps >= 12 ? Loop.stop() : Loop.next({ steps: state.steps + 1 })
- *     )
- *   )
- * )
- * ```
- *
- * @category constructors
- * @since 0.1.0
- */
-export const step = <Tools extends Toolkit.Toolkit, S, E2 = never, R2 = never>(
-  options: StepOptions<Tools>,
-  then: (result: StepResult) => Stream.Stream<Loop.Step<never, S>, E2, R2>
-): Stream.Stream<
-  Loop.Step<Event, S>,
-  AiError.AiError | ToolErrors<Tools> | E2,
-  LanguageModel.LanguageModel | ToolServices<Tools> | R2
-> => {
-  const { toolkit } = options
-  const instructions = Predicate.isString(options.instructions) ? { text: options.instructions } : options.instructions
-
-  const next = (result: StepResult) => Stream.unwrap(Effect.sync(() => then(result)))
-
-  return Stream.unwrap(
-    Effect.gen(function* () {
-      const history = yield* options.history
-      // Calls a crash cut off, with no result: they run again, with the same ids, before the model goes on.
-      const cutOff = HistoryCheck.findUnansweredCalls(history)
-
-      if (cutOff.length > 0) {
-        return runCalls(toolkit, cutOff).pipe(
-          Stream.concat(next({ output: undefined, done: false, historyLength: history.length + cutOff.length }))
-        )
-      }
-
-      const input = [Items.systemText(instructions.text), ...history]
-
-      const turn = yield* LanguageModel.turn({
-        model: options.model,
-        history: input,
-        tools: toolkit,
-        toolChoice: options.toolChoice
-      }).pipe(Telemetry.chatSpan(options.model, input, instructions.attributes))
-
-      const output = AssistantEvent.ModelOutput.make({ items: turn.items.map(withJsonArguments) })
-      const calls = Turn.getToolCalls(turn)
-      const done = calls.length === 0 || calls.some((call) => call.name === waitToolName)
-      const historyLength = history.length + turn.items.length + calls.length
-
-      return Stream.make(Loop.value(output)).pipe(
-        Stream.concat(runCalls(toolkit, calls)),
-        Stream.concat(next({ output, done, historyLength }))
-      )
-    })
-  )
-}
-
-/**
- * Runs the agent loop as a stream: {@link step} after step, until the model
- * is done (it made no tool calls, or called `wait`) and nothing new arrived
- * while it worked, or after `maxSteps` model calls.
- *
- * **Details**
- *
- * Each tool call is stored as started before it runs, and a call a crash cut
- * off (in the history with no result) runs again, with the same call id,
- * before the next model call. So a tool call runs at least once: a tool
- * that changes something outside the chat uses
- * `AssistantToolCall.idempotencyKey`.
- * The tools run only once the output is pulled, and the next model call only
- * once the results are: whoever consumes the stream records each event before
- * the next step reads the history.
- *
- * @category constructors
- * @since 0.1.0
- */
-export const stream = <Tools extends Toolkit.Toolkit>(
-  options: Options<Tools>
-): Stream.Stream<Event, AiError.AiError | ToolErrors<Tools>, LanguageModel.LanguageModel | ToolServices<Tools>> => {
-  const maxSteps = options.maxSteps ?? 16
-
-  // Done: stop, unless something arrived while the model was working; then it reads that first.
-  const afterDone = (steps: number, historyLength: number) =>
-    Stream.unwrap(
-      Effect.map(options.history, (history) =>
-        history.length > historyLength ? Loop.next(steps) : Loop.stop<number>()
-      )
-    )
-
-  return Loop.loop(0, (steps: number) =>
-    step(options, (result) => {
-      const taken = result.output === undefined ? steps : steps + 1
-
-      if (taken >= maxSteps) return Loop.stop<number>()
-
-      return result.done ? afterDone(taken, result.historyLength) : Loop.next(taken)
-    })
-  )
 }
 ```
 

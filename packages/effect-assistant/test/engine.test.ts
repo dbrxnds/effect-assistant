@@ -155,6 +155,32 @@ describe("a chat's log", () => {
     })
   )
 
+  it.live("stores an input once, even when it's submitted again while the first is storing", () =>
+    Effect.gen(function* () {
+      const input = say("once")
+
+      // Both submits return once their input is stored, or found stored.
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* ChatId.make
+        yield* Effect.all([Resumer.submit(chat, input), Resumer.submit(chat, input)], {
+          concurrency: "unbounded"
+        })
+
+        return yield* ChatLog.ChatLog.use((log) => log.read(chat))
+      }).pipe(
+        Effect.provide(
+          Resumer.toLayer(() => Stream.empty).pipe(
+            Layer.provideMerge(AssistantEngine.layerMemory),
+            Layer.provide(Scripted.unused)
+          )
+        ),
+        Effect.provide(Layer.effect(ChatLog.ChatLog, slowStorage))
+      )
+
+      expect(entries.filter(({ event }) => Predicate.isTagged(event, "UserMessage")).length).toBe(1)
+    })
+  )
+
   it.live("reads the log once when the chat opens, not every turn", () =>
     Effect.gen(function* () {
       const stored = yield* Ref.make<ReadonlyArray<AssistantEvent.Entry>>([])

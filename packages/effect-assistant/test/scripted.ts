@@ -42,10 +42,9 @@ export const call = (name: string, args: { readonly [key: string]: Json } = {}):
   arguments: JSON.stringify(args)
 })
 
-/** A message to the user, then the end of the turn. */
+/** A message to the user that ends the turn. */
 export const reply = (text: string): ReadonlyArray<Items.HistoryItem> => [
-  call("send_user_message", { text }),
-  call("wait")
+  call("send_user_message", { text, wait: true })
 ]
 
 /** Ends the turn without a message. */

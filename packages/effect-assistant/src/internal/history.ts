@@ -8,9 +8,10 @@ import * as Items from "@effect-uai/core/Items"
 import * as Match from "effect/Match"
 import * as Predicate from "effect/Predicate"
 import * as AssistantEvent from "../AssistantEvent.ts"
+import { toJsonText } from "./schema.ts"
 
 const factText = (fact: AssistantEvent.Fact) =>
-  `<fact source="${fact.source}">\nAn update from a tool or workflow. The user hasn't seen it: tell them if it matters to them.\n${JSON.stringify(fact.payload)}\n</fact>`
+  `<fact source="${fact.source}">\nAn update from a tool or workflow. The user hasn't seen it: tell them if it matters to them.\n${toJsonText(fact.payload)}\n</fact>`
 
 /**
  * What a tool call gets as its result when its handler's stream stopped
@@ -78,11 +79,10 @@ const finishedText = (
 }
 
 /** One of the app's own inputs as the model reads it: its tag, and its fields as JSON. */
-const appInputText = ({ _tag, ...fields }: { readonly _tag: string }) =>
-  `<${_tag}>\n${JSON.stringify(fields)}\n</${_tag}>`
+const appInputText = ({ _tag, ...fields }: { readonly _tag: string }) => `<${_tag}>\n${toJsonText(fields)}\n</${_tag}>`
 
 const answerText = (answer: AssistantEvent.BlockAnswer) =>
-  `<answer message="${answer.messageId}" kind="${answer.kind}">\nThe user answered with the block on your message ${answer.messageId}.\n${JSON.stringify(answer.value)}\n</answer>`
+  `<answer message="${answer.messageId}" kind="${answer.kind}">\nThe user answered with the block on your message ${answer.messageId}.\n${toJsonText(answer.value)}\n</answer>`
 
 /**
  * Rebuilds model history from a chat's entries, in the order the model saw

@@ -337,14 +337,12 @@ describe("UI blocks", () => {
     if (last.includes("<answer")) return Scripted.reply(last.includes("blue") ? "Blue it is." : "Red it is.")
 
     if (last === "blue")
-      return [
-        Scripted.call("send_user_message", { text: "Blue it is.", closes: [sentId(request)] }),
-        Scripted.call("wait")
-      ]
+      return [Scripted.call("send_user_message", { text: "Blue it is.", wait: true, closes: [sentId(request)] })]
 
     return [
       Scripted.call("send_user_message", {
         text: "Red or blue?",
+        wait: false,
         block: { kind: "choose_one", props: { options: ["red", "blue"] } }
       })
     ]
@@ -400,24 +398,33 @@ describe("UI blocks", () => {
     }).pipe(Effect.provide(layer))
   )
 
-  it.live("refuses props that don't fit the block, as a result the model sees", () =>
+  it.live("refuses props that don't fit the block, as a result the model sees, and the turn goes on", () =>
     Effect.gen(function* () {
-      const script: Scripted.Script = (request) =>
+      const model = yield* Scripted.make((request) =>
         Option.isSome(Scripted.lastResult(request, "send_user_message"))
           ? Scripted.reply("Red or blue?")
-          : [Scripted.call("send_user_message", { text: "Pick", block: { kind: "choose_one", props: { options: 3 } } })]
+          : [
+              Scripted.call("send_user_message", {
+                text: "Pick",
+                wait: true,
+                block: { kind: "choose_one", props: { options: 3 } }
+              })
+            ]
+      )
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
         yield* BlockAssistant.submit(chat, say("Pick a banner color."))
 
         return yield* collectUntil(BlockAssistant, chat, idle)
-      }).pipe(Effect.provide(runMemory(BlockAssistant.toLayer(simple({ instructions })), Scripted.layer(script))))
+      }).pipe(Effect.provide(runMemory(BlockAssistant.toLayer(simple({ instructions })), model.layer)))
 
       const results = entries.flatMap(({ event }) => (Predicate.isTagged(event, "ToolResult") ? [event.output] : []))
 
       expect(results[0]).toMatch(/props|Expected/)
       expect(shown(entries)).toBeUndefined()
+      // The failed message's `wait` doesn't end the turn: the loop's next step reads the failure.
+      expect((yield* model.requests).map((request) => request.toolChoice)).toEqual(["required", "required"])
     })
   )
 })
@@ -507,7 +514,7 @@ describe("tools found on demand, and skills", () => {
       )
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
-      expect(toolsRun(entries)).toEqual(["search_tools", "execute_tool", "send_user_message", "wait"])
+      expect(toolsRun(entries)).toEqual(["search_tools", "execute_tool", "send_user_message"])
       expect(text(entries)).toContain("37")
     })
   )

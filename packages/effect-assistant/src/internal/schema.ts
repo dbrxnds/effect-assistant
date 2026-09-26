@@ -2,7 +2,9 @@
  * @since 0.1.0
  * @internal
  */
-import type * as Schema from "effect/Schema"
+import { flow } from "effect/Function"
+import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 
 /**
  * Drops a codec's decoding and encoding services from its type.
@@ -17,3 +19,23 @@ export function withoutServices<T, E>(schema: Schema.Codec<T, E, unknown, unknow
 export function withoutServices(schema: Schema.Top): Schema.Top {
   return schema
 }
+
+const JsonText = Schema.fromJsonString(Schema.Unknown)
+
+/**
+ * A value as JSON text, for the model or a span. A value with no JSON form
+ * (`undefined`, a cycle) is empty text rather than a defect.
+ *
+ * @internal
+ */
+export const toJsonText = flow(
+  Schema.encodeUnknownOption(JsonText),
+  Option.getOrElse(() => "")
+)
+
+/**
+ * Whether text is valid JSON.
+ *
+ * @internal
+ */
+export const isJsonText = (text: string): boolean => Option.isSome(Schema.decodeOption(JsonText)(text))

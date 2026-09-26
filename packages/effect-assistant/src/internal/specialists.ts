@@ -361,7 +361,10 @@ export const makeRunner = Effect.fn(function* (options: {
 
       return run.runId
     }),
-    message: Effect.fn(function* (runId: string, text: string) {
+    message: Effect.fn(function* (
+      runId: string,
+      text: string
+    ): Effect.fn.Return<"steered" | "continued", Specialist.SpecialistError> {
       const run = runs.get(runId)
 
       if (run === undefined) {
@@ -375,13 +378,13 @@ export const makeRunner = Effect.fn(function* (options: {
       if (yield* FiberMap.has(working, runId)) {
         yield* Queue.offer(run.inbox, Items.userText(text))
 
-        return "steered" as const
+        return "steered"
       }
 
       yield* Ref.update(run.history, (all) => [...all, Items.userText(text)])
       yield* launch(run)
 
-      return "continued" as const
+      return "continued"
     }),
     stop: Effect.fn(function* (runId: string) {
       if (!(yield* FiberMap.has(working, runId))) {

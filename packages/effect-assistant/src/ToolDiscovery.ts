@@ -22,11 +22,13 @@
  *
  * @since 0.1.0
  */
+import type * as Items from "@effect-uai/core/Items"
 import * as Tool from "@effect-uai/core/Tool"
 import * as Toolkit from "@effect-uai/core/Toolkit"
 import * as ToolResultWire from "@effect-uai/core/ToolResult"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import { toJsonText } from "./internal/schema.ts"
 import * as Uuid from "./internal/uuid.ts"
 
 const words = (text: string): ReadonlySet<string> =>
@@ -106,11 +108,11 @@ export const make = <Tools extends Toolkit.Toolkit>(toolkit: Tools) => {
     run: Effect.fn(function* ({ name, input }: typeof ExecuteInput.Type) {
       if (!Object.hasOwn(toolkit, name)) return yield* Tool.fail(`No tool named ${name}. Use search_tools.`)
 
-      const call = {
-        type: "function_call" as const,
+      const call: Items.ToolCall = {
+        type: "function_call",
         call_id: `execute_${yield* Uuid.random}`,
         name,
-        arguments: JSON.stringify(input)
+        arguments: toJsonText(input)
       }
 
       const results = yield* Toolkit.collectResults(Toolkit.run(toolkit, [call]))

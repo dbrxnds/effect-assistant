@@ -4,6 +4,7 @@
  * @since 0.1.0
  * @internal
  */
+import type * as Items from "@effect-uai/core/Items"
 import * as Tool from "@effect-uai/core/Tool"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
@@ -13,19 +14,16 @@ import { AssistantChat } from "../AssistantChat.ts"
 import type * as BlockKit from "../BlockKit.ts"
 import * as Uuid from "./uuid.ts"
 
-/**
- * Calling a tool with this name ends the turn once the step's tool calls have
- * run.
- *
- * @internal
- */
-export const waitToolName = "wait"
+const waitToolName = "wait"
+
+/** @internal */
+export const sendUserMessageName = "send_user_message"
 
 /** @internal */
 export const wait = Tool.make({
   name: waitToolName,
   description:
-    "End your turn and wait for the next message or update. Call it when you have nothing more to do right now, in the same step as your last send_user_message.",
+    "End your turn and wait for the next message or update, when you have nothing more to do right now and no message to send (otherwise set wait on send_user_message).",
   inputSchema: Tool.noInput,
   run: () => Effect.succeed("waiting")
 })
@@ -33,12 +31,28 @@ export const wait = Tool.make({
 const description =
   "Send the user a chat message. It's the only way they see anything you write: text outside it is private to you."
 
+const Wait = Schema.Boolean.annotate({
+  description:
+    "true when this is your last message for now: your turn ends with it, as with the wait tool. false when you keep working after it."
+})
+
+const endsWithMessage = Schema.decodeOption(Schema.fromJsonString(Schema.Struct({ wait: Schema.Literal(true) })))
+
+/**
+ * Whether a tool call ends the turn: `wait`, or a message sent with
+ * `wait: true`.
+ *
+ * @internal
+ */
+export const endsTurn = (call: Items.ToolCall): boolean =>
+  call.name === waitToolName || (call.name === sendUserMessageName && Option.isSome(endsWithMessage(call.arguments)))
+
 const append = (message: AssistantEvent.AssistantMessage) => AssistantChat.use((chat) => chat.append([message]))
 
 const plainMessage = Tool.make({
-  name: "send_user_message",
+  name: sendUserMessageName,
   description,
-  inputSchema: Schema.Struct({ text: Schema.String }),
+  inputSchema: Schema.Struct({ text: Schema.String, wait: Wait }),
   run: Effect.fn(function* ({ text }: { readonly text: string }) {
     yield* append(AssistantEvent.AssistantMessage.make({ id: yield* Uuid.random, text }))
 
@@ -66,6 +80,7 @@ export const sendUserMessage = (kit: BlockKit.BlockKit | undefined) => {
   // Props are checked against their kind's schema in `run`; the model sees every kind's in the input schema.
   const Input = Schema.Struct({
     text: Schema.String,
+    wait: Wait,
     block: Schema.optional(
       Schema.Struct({
         kind: Schema.Literals(kinds),
@@ -85,7 +100,7 @@ export const sendUserMessage = (kit: BlockKit.BlockKit | undefined) => {
   }
 
   return Tool.make({
-    name: "send_user_message",
+    name: sendUserMessageName,
     description: `${description}
 You can add a block to show UI with the message, e.g. a few options to pick from or a yes/no, when that makes answering easier than typing. Plain text is fine too. Using it sends you an <answer>; the user may also just type their answer instead, and then you pass that message's id in closes.
 Blocks:

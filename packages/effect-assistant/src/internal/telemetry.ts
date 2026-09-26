@@ -20,11 +20,10 @@ import type * as Turn from "@effect-uai/core/Turn"
 import * as Effect from "effect/Effect"
 import * as Telemetry from "effect/unstable/ai/Telemetry"
 import type { SpanAttributes } from "../Instructions.ts"
+import { isJsonText, toJsonText } from "./schema.ts"
 
 /** What the spans record: model history, chat events, or text. */
 type Traced = string | ReadonlyArray<Items.HistoryItem> | ReadonlyArray<{ readonly _tag: string }>
-
-const json = (value: Traced): string => JSON.stringify(value)
 
 /**
  * Wraps a turn or a specialist run in an `invoke_agent` span.
@@ -48,14 +47,14 @@ export const agentSpan = (name: string, options: { readonly chatId: string; read
  *
  * @internal
  */
-export const agentInput = (input: Traced) => Effect.annotateCurrentSpan("input.value", json(input))
+export const agentInput = (input: Traced) => Effect.annotateCurrentSpan("input.value", toJsonText(input))
 
 /**
  * Sets the agent's output on the current span.
  *
  * @internal
  */
-export const agentOutput = (output: Traced) => Effect.annotateCurrentSpan("output.value", json(output))
+export const agentOutput = (output: Traced) => Effect.annotateCurrentSpan("output.value", toJsonText(output))
 
 /**
  * Wraps one model call in a `chat` span, with its input, output, and usage.
@@ -76,7 +75,7 @@ export const chatSpan =
                 response: { finishReasons: [turn.stop_reason] },
                 usage: { inputTokens: turn.usage.input_tokens, outputTokens: turn.usage.output_tokens }
               })
-              span.attribute("gen_ai.completion", json(turn.items))
+              span.attribute("gen_ai.completion", toJsonText(turn.items))
               const details = turn.usage.input_tokens_details
 
               if (details?.cached_tokens !== undefined) {
@@ -93,7 +92,7 @@ export const chatSpan =
       ),
       Effect.withSpan(`chat ${model}`, {
         kind: "client",
-        attributes: { "gen_ai.prompt": json(input), ...attributes }
+        attributes: { "gen_ai.prompt": toJsonText(input), ...attributes }
       })
     )
 
@@ -112,19 +111,9 @@ export const toolSpan = (call: Items.ToolCall) =>
       "gen_ai.operation.name": "execute_tool",
       "gen_ai.tool.name": call.name,
       "gen_ai.tool.call.id": call.call_id,
-      "input.value": `{"arguments":${isJson(call.arguments) ? call.arguments : JSON.stringify(call.arguments)}}`
+      "input.value": `{"arguments":${isJsonText(call.arguments) ? call.arguments : toJsonText(call.arguments)}}`
     }
   })
-
-const isJson = (raw: string): boolean => {
-  try {
-    JSON.parse(raw)
-
-    return true
-  } catch {
-    return false
-  }
-}
 
 /**
  * Sets a tool's output on the current span.

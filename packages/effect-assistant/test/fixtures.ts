@@ -6,6 +6,7 @@
 import * as Anthropic from "@effect-uai/anthropic/Anthropic"
 import type * as LanguageModel from "@effect-uai/core/LanguageModel"
 import type * as Toolkit from "@effect-uai/core/Toolkit"
+import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -23,6 +24,7 @@ import {
   ChatLog,
   InputId
 } from "../src/index.ts"
+import { toJsonText } from "../src/internal/schema.ts"
 
 /** The Anthropic API, for the contract tests. */
 export const realModel = Anthropic.layer({
@@ -90,7 +92,7 @@ export const traceEntries = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
             : Predicate.isTagged(event, "ToolResult")
               ? `${event.tool}: ${event.output.slice(0, 80)}`
               : Predicate.isTagged(event, "Fact")
-                ? JSON.stringify(event.payload).slice(0, 120)
+                ? toJsonText(event.payload).slice(0, 120)
                 : ""
 
       return `${seq} ${event._tag} ${detail}`
@@ -102,7 +104,7 @@ export const collectUntil = (
   assistant: Pick<Assistant.Any, "subscribe">,
   chatId: ChatId.ChatId,
   until: (entries: ReadonlyArray<AssistantEvent.Entry>) => boolean,
-  timeout = "90 seconds" as const
+  timeout: Duration.Input = "90 seconds"
 ) =>
   Effect.gen(function* () {
     let seen: ReadonlyArray<AssistantEvent.Entry> = []
