@@ -519,6 +519,36 @@ describe("tools found on demand, and skills", () => {
     })
   )
 
+  it.live("fails execute_tool when its tool fails, so a waiting message doesn't end the turn", () =>
+    Effect.gen(function* () {
+      const broken = Tool.make({
+        name: "broken_printer",
+        description: "Prints, when it works.",
+        inputSchema: Schema.Struct({}),
+        run: () => Tool.fail("Out of paper.")
+      })
+
+      const model = yield* Scripted.make((request) =>
+        Option.isSome(Scripted.result(request, "execute_tool"))
+          ? Scripted.wait()
+          : [Scripted.call("execute_tool", { name: "broken_printer", input: {} }), ...Scripted.reply("Printed.")]
+      )
+
+      yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* TestAssistant.submit(chat, say("Print it."))
+        yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
+      }).pipe(
+        Effect.provide(
+          memoryAssistant(simple({ instructions, toolkit: ToolDiscovery.make(Toolkit.make(broken)) }), model.layer)
+        )
+      )
+
+      // The model got another step to read the failure.
+      expect(yield* model.requests).toHaveLength(2)
+    })
+  )
+
   it.live("lists skills in the prompt, and load_skill returns one's instructions", () =>
     Effect.gen(function* () {
       const model = yield* Scripted.make((request) => {

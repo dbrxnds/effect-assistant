@@ -76,7 +76,8 @@ const ExecuteInput = Schema.Struct({
  *
  * Search scores the query's words against tool names and descriptions and
  * returns the top five. `execute_tool` runs the tool the way a model call
- * would, so its input is validated and its failures come back as results.
+ * would, so its input is validated, and a failure of the tool is a failure
+ * of `execute_tool`.
  *
  * @category constructors
  * @since 0.1.0
@@ -116,6 +117,10 @@ export const make = <Tools extends Toolkit.Toolkit>(toolkit: Tools) => {
       }
 
       const results = yield* Toolkit.collectResults(Toolkit.run(toolkit, [call]))
+      // The tool's failure is this call's, so the loop sees it failed (a `wait: true` message doesn't end the turn).
+      const failure = results.find(ToolResultWire.isFailure)
+
+      if (failure !== undefined) return yield* Tool.fail(failure.reason ?? failure.kind, { kind: failure.kind })
 
       return results.map((result) => ToolResultWire.toToolCallOutput(result).output).join("\n")
     })
