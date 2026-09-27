@@ -7,7 +7,19 @@ import * as Response from "effect/unstable/ai/Response"
 import { type Assistant, AssistantChat, AssistantEvent, BlockKit, ChatLog } from "../src/index.ts"
 import { mayHaveRunOutput, notRunOutput } from "../src/internal/history.ts"
 import { silentTurnMessage } from "../src/internal/turns.ts"
-import { collectUntil, fact, memoryAssistant, newChat, say, TestAssistant, turnsDone } from "./fixtures.ts"
+import {
+  collectUntil,
+  memoryAssistant,
+  newChat,
+  say,
+  storedUpdate,
+  TestAssistant,
+  turnsDone,
+  update,
+  type Update,
+  Updating,
+  updatingAssistant
+} from "./fixtures.ts"
 import * as Scripted from "./scripted.ts"
 
 const toolCall = (callId: string, name: string) =>
@@ -22,6 +34,8 @@ const waitOnly = () =>
 
 const layer = memoryAssistant(waitOnly, Scripted.unused)
 
+const updatingLayer = updatingAssistant(waitOnly, Scripted.unused)
+
 /** A handler whose stream ends after a model output with a tool call, before the tool runs. */
 const stopsEarly: Assistant.Handler = () =>
   Stream.make(AssistantEvent.ModelOutput.make({ parts: [toolCall("lookup-1", "lookup")] }))
@@ -29,19 +43,19 @@ const stopsEarly: Assistant.Handler = () =>
 const stopsEarlyLayer = memoryAssistant(stopsEarly, Scripted.unused)
 
 /**
- * The first turn reads the history, then a fact lands before it ends (like a
+ * The first turn reads the history, then an update lands before it ends (like a
  * specialist's answer), and it waits without replying. The next turn replies.
  */
-const lateFact = () => {
+const lateUpdate = () => {
   let turns = 0
 
-  return Effect.fn(function* (turn: Assistant.Turn) {
+  return Effect.fn(function* (turn: Assistant.Turn<Update>) {
     turns += 1
     yield* turn.history()
 
     if (turns === 1) {
       yield* AssistantChat.AssistantChat.use((chat) =>
-        chat.append([fact("specialist:research", { answer: "Ontario" })])
+        chat.append([storedUpdate("specialist:research", { answer: "Ontario" })])
       )
 
       return Stream.make(
@@ -78,13 +92,17 @@ describe("turn completion", () => {
     }).pipe(Effect.provide(layer))
   )
 
-  it.live("still allows a silent TurnCompleted for fact-only turns", () =>
+  it.live("still allows a silent TurnCompleted for turns woken only by an app event", () =>
     Effect.gen(function* () {
-      const assistant = TestAssistant
+      const assistant = Updating
       const chat = yield* newChat
       yield* assistant.submit(
         chat,
-        fact("workflow:InventorySync", { step: "3 of 10", status: "syncing", detail: "routine batch, nothing needed" })
+        update("workflow:InventorySync", {
+          step: "3 of 10",
+          status: "syncing",
+          detail: "routine batch, nothing needed"
+        })
       )
       const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 1)
 
@@ -93,7 +111,7 @@ describe("turn completion", () => {
       expect(end).toBeDefined()
       expect(Predicate.isTagged(end!, "TurnCompleted")).toBe(true)
       expect(AssistantEvent.assistantTexts(entries)).toEqual([])
-    }).pipe(Effect.provide(layer))
+    }).pipe(Effect.provide(updatingLayer))
   )
 
   it.live("gives a call the handler never ran a result", () =>
@@ -135,7 +153,7 @@ describe("turn completion", () => {
 
   it.live("leaves an input that arrived after the loop's last read to the next turn, without failing this one", () =>
     Effect.gen(function* () {
-      const assistant = TestAssistant
+      const assistant = Updating
       const chat = yield* newChat
       yield* assistant.submit(chat, say("which province is Ottawa in?"))
       const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 2)
@@ -145,7 +163,7 @@ describe("turn completion", () => {
         "TurnCompleted",
         "TurnCompleted"
       ])
-    }).pipe(Effect.provide(memoryAssistant(lateFact(), Scripted.unused)))
+    }).pipe(Effect.provide(updatingAssistant(lateUpdate(), Scripted.unused)))
   )
 
   it.live("replyIfOwed runs one pass that can only reply, with the nudge", () =>
@@ -182,9 +200,9 @@ describe("a turn's trace", () => {
 
   const oneTurn = Effect.gen(function* () {
     const chat = yield* newChat
-    yield* TestAssistant.submit(chat, fact("workflow:Export", { status: "done" }))
+    yield* Updating.submit(chat, update("workflow:Export", { status: "done" }))
 
-    return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
+    return yield* collectUntil(Updating, chat, (es) => turnsDone(es) >= 1)
   })
 
   it.live("is in TurnStarted when a tracer records it", () =>
@@ -200,7 +218,7 @@ describe("a turn's trace", () => {
         }
       })
 
-      const entries = yield* oneTurn.pipe(Effect.provide(layer), Effect.withTracer(recording))
+      const entries = yield* oneTurn.pipe(Effect.provide(updatingLayer), Effect.withTracer(recording))
       const [started] = turnStarts(entries)
 
       expect(started?.traceId).toBeDefined()
@@ -210,7 +228,7 @@ describe("a turn's trace", () => {
 
   it.live("isn't there with Effect's own tracer, which exports nothing", () =>
     Effect.gen(function* () {
-      const [started] = turnStarts(yield* oneTurn.pipe(Effect.provide(layer)))
+      const [started] = turnStarts(yield* oneTurn.pipe(Effect.provide(updatingLayer)))
 
       expect(started).toBeDefined()
       expect(started?.traceId).toBeUndefined()

@@ -37,13 +37,13 @@ const trace = (history: ReadonlyArray<Prompt.Message>) =>
   })
 
 // These tests use the library's inputs only.
-const noInputs: ReadonlySet<string> = new Set()
+const noWakes: ReadonlySet<string> = new Set()
 
-const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => History.fromEntries(entries, noInputs)
+const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => History.fromEntries(entries, () => undefined)
 
-const needsTurn = (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => History.needsTurn(entries, noInputs)
+const needsTurn = (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => History.needsTurn(entries, noWakes)
 
-const unhandledInputs = (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => History.unhandledInputs(entries, noInputs)
+const unhandledInputs = (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => History.unhandledInputs(entries, noWakes)
 
 describe("History.fromEntries", () => {
   it("puts a message that arrived while the model was writing after that step", () => {

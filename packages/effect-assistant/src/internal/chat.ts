@@ -23,6 +23,7 @@ import { ChatLog } from "../ChatLog.ts"
 import type { InputId } from "../InputId.ts"
 import * as SpecialistService from "../Specialist.ts"
 import * as Decisions from "./decisions.ts"
+import * as AppEvents from "./events.ts"
 import * as History from "./history.ts"
 import * as Specialists from "./specialists.ts"
 import * as Turns from "./turns.ts"
@@ -38,7 +39,7 @@ const idOf = (event: { readonly _tag: string }): string | undefined =>
       : undefined
 
 /** Whether an input is a workflow's decision: the answer completes its deferred, which takes a workflow engine. */
-const needsWorkflows = (input: AssistantEvent.Input | AssistantEvent.AppEvent) =>
+const needsWorkflows = (input: AssistantEvent.Input | AssistantEvent.StoredAppEvent) =>
   AssistantEvent.isLibraryEvent(input) &&
   Predicate.isTagged(input, "DecisionRequested") &&
   Predicate.isTagged(input.origin, "Work") &&
@@ -98,7 +99,8 @@ export const makeChat = Effect.fn(function* (options: {
   readonly keepAlive: (enabled: boolean) => Effect.Effect<void>
 }) {
   const { registration, chatId } = options
-  const { inputs } = registration.definition.app
+  const { app } = registration.definition
+  const { wakes } = app
   const storage = yield* ChatLog
   const channel = yield* makeChannelPubSub
   const writes = yield* Semaphore.make(1)
@@ -114,7 +116,15 @@ export const makeChat = Effect.fn(function* (options: {
   // Every writer (the turn's loop, specialist runs, a handler's own appends) goes through here, one at a time: each
   // append is numbered after the last, and its entries go to the chat's subscribers.
   // Uninterruptible: a stored append must reach memory and the subscribers too, or a turn misses it and replies twice.
-  const write = (events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.AppEvent>) =>
+  const write = (events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>) => {
+    const unknown = events.find((event) => !AssistantEvent.isLibraryEvent(event) && !AppEvents.isRegistered(app, event))
+
+    return unknown === undefined
+      ? stored(events)
+      : Effect.die(`${unknown._tag} isn't one of the ${registration.definition.name} assistant's events.`)
+  }
+
+  const stored = (events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>) =>
     storage.append(chatId, events).pipe(
       Effect.tap((stored) => Ref.update(entries, (all) => [...all, ...stored])),
       Effect.tap((stored) => PubSub.publishAll(channel, stored)),
@@ -153,7 +163,7 @@ export const makeChat = Effect.fn(function* (options: {
    * Stores the input unless an input with its id is already stored, or the chat refuses it: a decision answer that
    * doesn't fit its block or what's still waiting. A decision answer's decisions are resolved before the next input.
    */
-  const store = Effect.fn(function* (input: AssistantEvent.Input | AssistantEvent.AppEvent) {
+  const store = Effect.fn(function* (input: AssistantEvent.Input | AssistantEvent.StoredAppEvent) {
     if (needsWorkflows(input) && Option.isNone(registration.workflows)) return yield* Effect.die(noWorkflows(input))
 
     // Checked under the write lock: a retry that arrives while the first submit is storing is stored once.
@@ -205,7 +215,7 @@ export const makeChat = Effect.fn(function* (options: {
   /** Runs turns, one at a time, until no input is left unhandled. */
   const drain: Effect.Effect<void> = Semaphore.withPermit(turnsLock)(
     Effect.gen(function* () {
-      while (History.needsTurn(yield* chat.entries, inputs)) {
+      while (History.needsTurn(yield* chat.entries, wakes)) {
         yield* Turns.runTurn({ registration, handler, chat, services })
       }
     })
@@ -227,13 +237,13 @@ export const makeChat = Effect.fn(function* (options: {
 
   return {
     /** Stores the input, then runs turns until nothing is pending. */
-    submit: (input: AssistantEvent.Input | AssistantEvent.AppEvent) => store(input).pipe(Effect.andThen(drain)),
+    submit: (input: AssistantEvent.Input | AssistantEvent.StoredAppEvent) => store(input).pipe(Effect.andThen(drain)),
     /** Stores the input, and runs turns for it in the background. */
-    submitInBackground: (input: AssistantEvent.Input | AssistantEvent.AppEvent) =>
+    submitInBackground: (input: AssistantEvent.Input | AssistantEvent.StoredAppEvent) =>
       store(input).pipe(Effect.andThen(inBackground(drain))),
     /** Runs turns in the background for inputs no turn has read, like a report stored during a shutdown. */
     resume: Effect.gen(function* () {
-      if (History.needsTurn(yield* chat.entries, inputs)) yield* inBackground(drain)
+      if (History.needsTurn(yield* chat.entries, wakes)) yield* inBackground(drain)
     }),
     /** The chat's entries after `after` (all of them by default), then new ones as they're appended. */
     stream: (after: number) =>

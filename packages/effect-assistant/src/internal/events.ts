@@ -1,76 +1,84 @@
 /**
- * An assistant's own events and inputs: which tags are inputs, and how they
- * go to and from the form they're stored in (`AssistantEvent.AppEvent`).
+ * An assistant's own events: which tags it registered, which of them wake a
+ * turn, how the model reads them, and how they go to and from the form
+ * they're stored in (`AssistantEvent.StoredAppEvent`).
  *
  * @since 0.1.0
  * @internal
  */
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
-import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import * as SchemaAST from "effect/SchemaAST"
+import type * as AppEvent from "../AppEvent.ts"
 import type * as Assistant from "../Assistant.ts"
 import * as AssistantEvent from "../AssistantEvent.ts"
+import { toJsonText } from "./schema.ts"
 
 /**
- * An assistant's own events, by tag, and which of them are inputs.
+ * An assistant's own events, by tag.
  *
  * @internal
  */
 export interface AppEvents {
-  readonly byTag: ReadonlyMap<string, Assistant.EventSchema>
-  /** The tags of the app's inputs: they wake a turn, and the model reads them. */
-  readonly inputs: ReadonlySet<string>
+  readonly byTag: ReadonlyMap<string, Registered>
+  /** The tags of the events that wake a turn. */
+  readonly wakes: ReadonlySet<string>
 }
 
-/** The literal `_tag` of a tagged struct or class. */
-const tagOf = (schema: Assistant.EventSchema): string => {
-  const ast = schema.fields._tag.ast
-
-  if (SchemaAST.isLiteral(ast) && Predicate.isString(ast.literal)) return ast.literal
-
-  throw new Error("An assistant's events and inputs are tagged structs or classes.")
+/** A registered event, with its schema as any event schema: what the registry encodes and decodes with. */
+interface Registered {
+  readonly schema: AppEvent.EventSchema
+  readonly render: AppEvent.Render<{ readonly _tag: string }> | undefined
 }
 
 /**
- * Collects an assistant's events and inputs. A tag used twice, or one of the
- * library's, is a mistake in the definition.
+ * Collects an assistant's events. A tag used twice, or one of the library's,
+ * is a mistake in the definition.
  *
  * @internal
  */
-export const make = (
-  events: ReadonlyArray<Assistant.EventSchema>,
-  inputs: ReadonlyArray<Assistant.EventSchema>
-): AppEvents => {
-  const all = [...events, ...inputs]
-  const byTag = new Map(all.map((schema) => [tagOf(schema), schema]))
+export const make = (events: ReadonlyArray<AppEvent.Any>): AppEvents => {
+  const byTag = new Map(
+    events.map((event): [string, Registered] => [event.tag, { schema: event.schema, render: event.render }])
+  )
 
   for (const tag of byTag.keys()) {
     if (AssistantEvent.isLibraryEvent({ _tag: tag })) throw new Error(`${tag} is one of the library's events.`)
   }
 
-  if (byTag.size !== all.length) throw new Error("An assistant's events and inputs have different tags.")
+  if (byTag.size !== events.length) throw new Error("An assistant's events have different tags.")
 
-  return { byTag, inputs: new Set(inputs.map(tagOf)) }
+  return { byTag, wakes: new Set(events.flatMap((event) => (event.wakes ? [event.tag] : []))) }
 }
 
 /**
  * Encodes one of the app's events to the form it's stored in: its schema's
- * JSON form. An event with no schema here is a mistake in the handler.
+ * JSON form. The types only let registered events through, so one with no
+ * schema here is a defect.
  *
  * @internal
  */
-export const encode = (app: AppEvents, event: { readonly _tag: string }): Effect.Effect<AssistantEvent.AppEvent> => {
-  const schema = app.byTag.get(event._tag)
+export const encode = (
+  app: AppEvents,
+  event: { readonly _tag: string }
+): Effect.Effect<AssistantEvent.StoredAppEvent> => {
+  const registered = app.byTag.get(event._tag)
 
-  if (schema === undefined) return Effect.die(`${event._tag} isn't one of this assistant's events or inputs.`)
+  if (registered === undefined) return Effect.die(`${event._tag} isn't one of this assistant's events.`)
 
-  return Schema.encodeUnknownEffect(Schema.toCodecJson(schema))(event).pipe(
-    Effect.flatMap(Schema.decodeUnknownEffect(AssistantEvent.AppEvent)),
+  return Schema.encodeUnknownEffect(Schema.toCodecJson(registered.schema))(event).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(AssistantEvent.StoredAppEvent)),
     Effect.orDie
   )
 }
+
+/**
+ * Returns whether a stored app event is one of the assistant's. The chat
+ * stores no other.
+ *
+ * @internal
+ */
+export const isRegistered = (app: AppEvents, event: { readonly _tag: string }): boolean => app.byTag.has(event._tag)
 
 /**
  * Decodes a stored entry's app event with the assistant's schemas. The
@@ -84,14 +92,49 @@ export const decodeEntry = (app: AppEvents, entry: AssistantEvent.AnyEntry): Opt
 
   if (AssistantEvent.isLibraryEvent(event)) return Option.some({ ...toEntry(entry), event })
 
-  const schema = app.byTag.get(event._tag)
+  const registered = app.byTag.get(event._tag)
 
-  if (schema === undefined) return Option.none()
+  if (registered === undefined) return Option.none()
 
-  return Option.map(Schema.decodeUnknownOption(Schema.toCodecJson(schema))(event), (decoded) => ({
+  return Option.map(Schema.decodeUnknownOption(Schema.toCodecJson(registered.schema))(event), (decoded) => ({
     ...toEntry(entry),
     event: decoded
   }))
 }
 
+/**
+ * Decodes the app events in a chat's entries, leaving out those that don't.
+ *
+ * @internal
+ */
+export const decodeEntries = (
+  app: AppEvents,
+  entries: ReadonlyArray<AssistantEvent.AnyEntry>
+): ReadonlyArray<Assistant.Entry<any>> => entries.flatMap((entry) => Option.toArray(decodeEntry(app, entry)))
+
+const decodeStored = Schema.decodeUnknownOption(AssistantEvent.StoredAppEvent)
+
 const toEntry = (entry: AssistantEvent.AnyEntry) => ({ chatId: entry.chatId, seq: entry.seq, at: entry.at })
+
+/**
+ * How the model reads one of the app's events, decoded: the text its
+ * `render` gives, or `undefined` when it doesn't read it.
+ *
+ * @internal
+ */
+export const read = (app: AppEvents, event: { readonly _tag: string }): string | undefined => {
+  const registered = app.byTag.get(event._tag)
+
+  if (registered === undefined || registered.render === undefined) return undefined
+
+  if (registered.render !== "json") return registered.render(event)
+
+  const stored = Schema.encodeUnknownOption(Schema.toCodecJson(registered.schema))(event).pipe(
+    Option.flatMap(decodeStored)
+  )
+
+  return Option.match(stored, {
+    onNone: () => undefined,
+    onSome: ({ _tag, ...fields }) => `<${_tag}>\n${toJsonText(fields)}\n</${_tag}>`
+  })
+}

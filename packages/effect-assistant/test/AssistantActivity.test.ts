@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import { AssistantActivity, AssistantEvent, ChatId, InputId, RunId } from "../src/index.ts"
-import { fact, say } from "./fixtures.ts"
+import { AssistantActivity, AssistantEvent, ChatId, DecisionId, InputId, RunId } from "../src/index.ts"
+import { say, storedUpdate } from "./fixtures.ts"
 
 const { SpecialistFinished, SpecialistStarted, TurnCompleted, TurnFailed, TurnStarted } = AssistantEvent
 
@@ -101,16 +101,36 @@ describe("AssistantActivity", () => {
     expect(AssistantActivity.isWorking(stopped)).toBe(false)
   })
 
-  it("doesn't count a workflow waiting on an approval as work, once its fact is handled", () => {
+  it("doesn't count a workflow waiting on an approval as work, once its request is handled", () => {
     const waiting = activity([
       say("request the campaign"),
       TurnStarted.make({ assistant: "test" }),
       TurnCompleted.make({ throughSeq: 2 }),
-      fact("workflow:CampaignRequest", { status: "awaiting_admin_approval" }),
+      AssistantEvent.DecisionRequested.make({
+        id: DecisionId.fromKey("campaign-approval"),
+        origin: AssistantEvent.WorkOrigin.make({ source: "workflow:CampaignRequest" }),
+        preview: { campaign: "Spring" }
+      }),
       TurnStarted.make({ assistant: "test" }),
       TurnCompleted.make({ throughSeq: 5 })
     ])
 
     expect(AssistantActivity.isWorking(waiting)).toBe(false)
+  })
+
+  it("counts an app event that wakes a turn as an input, given its tag", () => {
+    const events = [
+      say("order it"),
+      TurnStarted.make({ assistant: "test" }),
+      TurnCompleted.make({ throughSeq: 2 }),
+      storedUpdate("workflow:Order", { status: "shipped" })
+    ]
+
+    const stored = events.map((event, i) => ({ chatId, seq: i + 1, at: (i + 1) * 1000, event }))
+
+    expect(AssistantActivity.isWorking(AssistantActivity.fromEntries(stored))).toBe(false)
+    expect(AssistantActivity.isWorking(AssistantActivity.fromEntries(stored, { wakes: new Set(["Update"]) }))).toBe(
+      true
+    )
   })
 })

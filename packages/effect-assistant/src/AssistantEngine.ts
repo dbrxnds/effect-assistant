@@ -69,7 +69,7 @@ export class AssistantEngine extends Context.Service<
     readonly submit: (
       assistant: string,
       chatId: ChatId,
-      input: AssistantEvent.Input | AssistantEvent.AppEvent
+      input: AssistantEvent.Input | AssistantEvent.StoredAppEvent
     ) => Effect.Effect<void>
     /** Streams the chat's stored events after `after`, then live ones. */
     readonly subscribe: (assistant: string, chatId: ChatId, after: number) => Stream.Stream<AssistantEvent.Entry>
@@ -152,7 +152,7 @@ export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.e
         const lastTurn = entries.findLast(({ event }) => Predicate.isTagged(event, "TurnStarted"))?.event
         const ours = Predicate.isTagged(lastTurn, "TurnStarted") && lastTurn.assistant === name
 
-        if (ours && History.needsTurn(entries, app.inputs)) yield* withChat(name, chatId, (chat) => chat.resume)
+        if (ours && History.needsTurn(entries, app.wakes)) yield* withChat(name, chatId, (chat) => chat.resume)
       }
     })
 
@@ -174,12 +174,12 @@ export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.e
 
 /** A registered assistant's chats, through their entities. */
 interface EntityClient {
-  readonly submit: (chatId: ChatId, input: AssistantEvent.Input | AssistantEvent.AppEvent) => Effect.Effect<void>
+  readonly submit: (chatId: ChatId, input: AssistantEvent.Input | AssistantEvent.StoredAppEvent) => Effect.Effect<void>
   readonly subscribe: (chatId: ChatId, after: number) => Stream.Stream<AssistantEvent.Entry>
 }
 
 const Submit = Rpc.make("Submit", {
-  payload: { input: Schema.Union([AssistantEvent.Input, AssistantEvent.AppEvent]) }
+  payload: { input: Schema.Union([AssistantEvent.Input, AssistantEvent.StoredAppEvent]) }
 }).annotate(ClusterSchema.Persisted, true)
 
 const Subscribe = Rpc.make("Subscribe", {

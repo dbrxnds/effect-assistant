@@ -33,7 +33,7 @@ export class ChatLog extends Context.Service<
     /** Appends events to a chat and returns them as stored entries. */
     readonly append: (
       chatId: ChatId,
-      events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.AppEvent>
+      events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>
     ) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
     /** Reads a chat's stored entries, in order: all of them, or those after a `seq`. */
     readonly read: (chatId: ChatId, options?: ReadOptions) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
@@ -90,7 +90,7 @@ export const make = (storage: Storage): ChatLog["Service"] =>
     read: storage.read,
     append: Effect.fn(function* (
       chatId: ChatId,
-      events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.AppEvent>
+      events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>
     ) {
       if (events.length === 0) return []
 
@@ -131,7 +131,7 @@ export const layerMemory: Layer.Layer<ChatLog> = Layer.effect(
   })
 )
 
-const EventJson = Schema.fromJsonString(Schema.Union([AssistantEvent.AssistantEvent, AssistantEvent.AppEvent]))
+const EventJson = Schema.fromJsonString(Schema.Union([AssistantEvent.AssistantEvent, AssistantEvent.StoredAppEvent]))
 
 // Postgres returns BIGINT and DOUBLE PRECISION columns as strings; other databases as numbers.
 const SqlNumber = Schema.Union([Schema.Finite, Schema.FiniteFromString])

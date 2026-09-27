@@ -33,7 +33,7 @@ import * as Predicate from "effect/Predicate"
  * What the model has to know for a turn's loop to work: every step is a tool
  * call, `wait` (or a last message with `wait: true`) ends the turn, and
  * messages can arrive mid-turn. The rest (the user sees only
- * `send_user_message`, what a `<fact>` or a `<specialist>` is) is in the
+ * `send_user_message`, what a `<specialist>` or an app's event is) is in the
  * tools' descriptions and in the history itself.
  * `turn.instructions(text)` puts it before the text; a custom loop on
  * `AssistantLoop.stream` can use it too.

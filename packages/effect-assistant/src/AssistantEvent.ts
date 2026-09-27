@@ -4,7 +4,7 @@
  * the chat UI renders it, and the model's history is rebuilt from it before
  * every model call.
  *
- * - Inputs: {@link UserMessage}, {@link BlockAnswer}, {@link Fact}. Submitting
+ * - Inputs from the user: {@link UserMessage}, {@link BlockAnswer}. Submitting
  *   one starts a turn, or joins the turn that is running.
  * - What the user sees: {@link AssistantMessage}, optionally with a
  *   {@link MessageBlock}.
@@ -20,9 +20,10 @@
  * - Decisions the user is asked to make: {@link DecisionRequested}, when a
  *   tool call waits for one or work asks for one (that one is an input), and
  *   {@link DecisionResolved}, once the user answered its decision block.
- * - The app's own events and inputs, like a summary for compaction or an
- *   uploaded file: {@link AppEvent}, as they're stored. An assistant's
- *   `events` and `inputs` decode them to their own types.
+ * - The app's own events, like a workflow's progress or a summary for
+ *   compaction: {@link StoredAppEvent}, as they're stored. The ones an
+ *   assistant registers (see `AppEvent`) decode to their own types, and
+ *   those registered with `wakes` start a turn.
  *
  * Turns and specialist runs are the chat's activity: each opens with one event
  * and closes with another (see `AssistantActivity`).
@@ -36,7 +37,8 @@
  * log reads as it did. {@link ModelOutput} and {@link ToolResult} are at
  * format 2, `effect/unstable/ai`'s response parts and a tool's encoded result;
  * their format 1 (history items, and results as text) came before the first
- * release and isn't read.
+ * release and isn't read. The app's own events carry their own tag, and
+ * their schemas evolve the same way (see `AppEvent`).
  *
  * @since 0.1.0
  */
@@ -72,26 +74,6 @@ export class BlockAnswer extends Schema.TaggedClass<BlockAnswer>()("BlockAnswer"
   messageId: Schema.String,
   kind: Schema.String,
   value: Schema.Unknown
-}) {}
-
-/**
- * Something the assistant should know about that the user didn't type: a workflow
- * update, a finished specialist, a webhook. `source` names the sender, such
- * as `workflow:CreateCampaign`.
- *
- * **Details**
- *
- * The user doesn't see facts. The assistant decides whether to tell them, so a fact
- * can say what it needs ("get the user's approval") and let the assistant write the
- * message.
- *
- * @category inputs
- * @since 0.1.0
- */
-export class Fact extends Schema.TaggedClass<Fact>()("Fact", {
-  id: InputId,
-  source: Schema.String,
-  payload: Schema.Unknown
 }) {}
 
 /**
@@ -158,7 +140,7 @@ export type CallOrigin = typeof CallOrigin.Type
 
 /**
  * Schema for a decision that running work asks for, like a workflow: who
- * asks (`source`, as for a fact), and, for a workflow waiting on it, the
+ * asks (`source`, like `workflow:CreateCampaign`), and, for a workflow waiting on it, the
  * `DurableDeferred` token the answer completes.
  *
  * @category decisions
@@ -184,7 +166,7 @@ export type WorkOrigin = typeof WorkOrigin.Type
  *   the user's decision, and the loop parked the call instead of running it.
  *   The model reads this as the call's result. It's not an input.
  * - From work (`origin: Work`): something already running asks, like a
- *   workflow. It's an input: it wakes a turn, like a fact.
+ *   workflow. It's an input: it wakes a turn.
  *
  * Either way the user sees nothing yet: the model sends a message with a
  * decision block for its id. `preview` is what they decide on, like an
@@ -221,7 +203,7 @@ export class DecisionResolved extends Schema.TaggedClass<DecisionResolved>()("De
  * @category inputs
  * @since 0.1.0
  */
-export const Input = Schema.Union([UserMessage, BlockAnswer, Fact, SpecialistFinished, DecisionRequested])
+export const Input = Schema.Union([UserMessage, BlockAnswer, SpecialistFinished, DecisionRequested])
 
 /**
  * An input to an assistant.
@@ -234,7 +216,7 @@ export type Input = typeof Input.Type
 /**
  * Schema for the inputs from the chat's user: messages and block answers. A
  * turn owes each one a reply. It's also what a chat client usually may
- * submit; facts come from the server.
+ * submit; the app's events come from the server.
  *
  * @category inputs
  * @since 0.1.0
@@ -460,7 +442,6 @@ export class BlocksClosed extends Schema.TaggedClass<BlocksClosed>()("BlocksClos
 export const AssistantEvent = Schema.Union([
   UserMessage,
   BlockAnswer,
-  Fact,
   AssistantMessage,
   ModelOutput,
   ToolStarted,
@@ -497,15 +478,14 @@ const libraryTags: ReadonlySet<string> = new Set(AssistantEvent.members.map((mem
 export const AppTag = Schema.String.pipe(Schema.brand("effect-assistant/AppTag"))
 
 /**
- * Schema for one of the app's own events or inputs, as it's stored and sent:
- * its `_tag` and its fields in JSON. An assistant made with
- * `events: [Summary]` decodes it to a `Summary` in `turn.entries` and in its
- * `subscribe`; a client decodes it with the same schema.
+ * Schema for one of the app's own events, as it's stored: its `_tag` and its
+ * fields in JSON. An assistant made with `events: [AppEvent.make(Summary)]`
+ * decodes it to a `Summary` in `turn.entries` and in its `subscribe`.
  *
  * @category models
  * @since 0.1.0
  */
-export const AppEvent = Schema.StructWithRest(Schema.Struct({ _tag: AppTag }), [
+export const StoredAppEvent = Schema.StructWithRest(Schema.Struct({ _tag: AppTag }), [
   Schema.Record(Schema.String, Schema.Json)
 ]).check(Schema.makeFilter((event) => !libraryTags.has(event._tag) || `${event._tag} is one of the library's events`))
 
@@ -515,7 +495,7 @@ export const AppEvent = Schema.StructWithRest(Schema.Struct({ _tag: AppTag }), [
  * @category models
  * @since 0.1.0
  */
-export type AppEvent = typeof AppEvent.Type
+export type StoredAppEvent = typeof StoredAppEvent.Type
 
 /**
  * Returns whether an event is one of the library's, not one of the app's own.
@@ -551,7 +531,7 @@ export const Entry = Schema.Struct({
   chatId: ChatId,
   seq: Schema.Int,
   at: Schema.Finite,
-  event: Schema.Union([AssistantEvent, AppEvent])
+  event: Schema.Union([AssistantEvent, StoredAppEvent])
 })
 
 /**
@@ -563,8 +543,10 @@ export const Entry = Schema.Struct({
 export type Entry = typeof Entry.Type
 
 /**
- * Returns whether an event is an input: a user message, a block answer, a
- * fact, a finished specialist run, or a decision that work requests.
+ * Returns whether an event is one of the library's inputs: a user message,
+ * a block answer, a finished specialist run, or a decision that work
+ * requests. The app's events that wake a turn are inputs too, but only
+ * their assistant knows which (see `AppEvent`).
  *
  * @category guards
  * @since 0.1.0
@@ -572,7 +554,6 @@ export type Entry = typeof Entry.Type
 export const isInput = (event: { readonly _tag: string }): event is Input =>
   Predicate.isTagged(event, "UserMessage") ||
   Predicate.isTagged(event, "BlockAnswer") ||
-  Predicate.isTagged(event, "Fact") ||
   Predicate.isTagged(event, "SpecialistFinished") ||
   (Predicate.isTagged(event, "DecisionRequested") &&
     Predicate.hasProperty(event, "origin") &&
