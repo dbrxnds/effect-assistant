@@ -183,7 +183,7 @@ Use when a client folds the event stream one entry at a time.
 ```ts
 const nextBlockStates: (
   states: ReadonlyMap<string, BlockState>,
-  event: AssistantEvent.AssistantEvent
+  event: { readonly _tag: string }
 ) => ReadonlyMap<string, BlockState>
 ```
 
@@ -194,7 +194,7 @@ const nextBlockStates: (
 Returns the state of every message's block, by message id.
 
 ```ts
-const blockStates: (entries: ReadonlyArray<AssistantEvent.Entry>) => ReadonlyMap<string, BlockState>
+const blockStates: (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => ReadonlyMap<string, BlockState>
 ```
 
 <small>Since 0.1.0</small>
@@ -206,7 +206,7 @@ without using them: the ones `closeStale` closes.
 
 ```ts
 const staleBlocks: (
-  entries: ReadonlyArray<AssistantEvent.Entry>,
+  entries: ReadonlyArray<AssistantEvent.AnyEntry>,
   options: { readonly messages: number }
 ) => ReadonlyArray<string>
 ```

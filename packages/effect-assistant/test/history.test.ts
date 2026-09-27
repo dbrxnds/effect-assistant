@@ -35,10 +35,19 @@ const trace = (history: ReadonlyArray<Items.HistoryItem>) =>
     )
   )
 
+// These tests use the library's inputs only.
+const noInputs: ReadonlySet<string> = new Set()
+
+const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => History.fromEntries(entries, noInputs)
+
+const needsTurn = (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => History.needsTurn(entries, noInputs)
+
+const unhandledInputs = (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => History.unhandledInputs(entries, noInputs)
+
 describe("History.fromEntries", () => {
   it("puts a message that arrived while the model was writing after that step", () => {
     // Seq 5 arrives after the step at seq 6 read through seq 4.
-    const history = History.fromEntries(
+    const history = fromEntries(
       entries([
         say("what orders does amsterdam have"),
         TurnStarted.make({ assistant: "test" }),
@@ -61,7 +70,7 @@ describe("History.fromEntries", () => {
   })
 
   it("keeps a message the model did see where it arrived", () => {
-    const history = History.fromEntries(
+    const history = fromEntries(
       entries([
         say("hi"),
         TurnStarted.make({ assistant: "test" }),
@@ -75,7 +84,7 @@ describe("History.fromEntries", () => {
   })
 
   it("holds a message that arrived during tool calls until their results", () => {
-    const history = History.fromEntries(
+    const history = fromEntries(
       entries([
         say("check A-17"),
         ModelOutput.make({ items: [call("a", "lookup_order")], seenThroughSeq: 1 }),
@@ -97,7 +106,7 @@ describe("History.fromEntries", () => {
 
 describe("History.fromEntries, after a crash", () => {
   it("leaves a call a turn left open without a result, for the loop to run again", () => {
-    const history = History.fromEntries(
+    const history = fromEntries(
       entries([
         say("look up the orders"),
         TurnStarted.make({ assistant: "test" }),
@@ -119,19 +128,19 @@ describe("History.needsTurn", () => {
   it("is true while an input arrived after the last finished turn read", () => {
     const events = [say("hi"), TurnStarted.make({ assistant: "test" })]
 
-    expect(History.needsTurn(entries(events))).toBe(true)
-    expect(History.needsTurn(entries([...events, AssistantEvent.TurnCompleted.make({ throughSeq: 2 })]))).toBe(false)
+    expect(needsTurn(entries(events))).toBe(true)
+    expect(needsTurn(entries([...events, AssistantEvent.TurnCompleted.make({ throughSeq: 2 })]))).toBe(false)
     expect(
-      History.unhandledInputs(
-        entries([...events, AssistantEvent.TurnCompleted.make({ throughSeq: 2 }), say("more")])
-      ).map((input) => input.id.length > 0)
-    ).toEqual([true])
+      unhandledInputs(entries([...events, AssistantEvent.TurnCompleted.make({ throughSeq: 2 }), say("more")])).map(
+        (input) => input._tag
+      )
+    ).toEqual(["UserMessage"])
   })
 
   it("counts a failed turn as handled, so a failing input isn't retried", () => {
-    expect(
-      History.needsTurn(entries([say("boom"), AssistantEvent.TurnFailed.make({ throughSeq: 1, message: "x" })]))
-    ).toBe(false)
+    expect(needsTurn(entries([say("boom"), AssistantEvent.TurnFailed.make({ throughSeq: 1, message: "x" })]))).toBe(
+      false
+    )
   })
 })
 
@@ -139,7 +148,7 @@ describe("History.fromEntries, a finished specialist run", () => {
   it("shows its status, how long it took, whether the user wrote since, and its report", () => {
     const runId = RunId.fromKey("history-test")
 
-    const history = History.fromEntries([
+    const history = fromEntries([
       AssistantEvent.Entry.make({ chatId, seq: 1, at: 0, event: say("research Q4") }),
       AssistantEvent.Entry.make({
         chatId,

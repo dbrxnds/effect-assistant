@@ -41,7 +41,7 @@ const lateFact = () => {
 
   return Effect.fn(function* (turn: Assistant.Turn) {
     turns += 1
-    yield* turn.history
+    yield* turn.history()
 
     if (turns === 1) {
       yield* AssistantChat.AssistantChat.use((chat) =>

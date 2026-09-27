@@ -89,8 +89,11 @@ const withoutRun = (activity: Activity, runId: RunId): Activity => {
  * @category combinators
  * @since 0.1.0
  */
-export const apply = (activity: Activity, entry: AssistantEvent.Entry): Activity => {
+export const apply = (activity: Activity, entry: AssistantEvent.AnyEntry): Activity => {
   const event = entry.event
+
+  // The app's own events aren't the library's to track; its inputs get a turn a moment later.
+  if (!AssistantEvent.isLibraryEvent(event)) return activity
 
   if (AssistantEvent.isInput(event)) {
     // A finished run's report is an input, and ends the run.
@@ -99,7 +102,7 @@ export const apply = (activity: Activity, entry: AssistantEvent.Entry): Activity
     return AssistantEvent.wakes(event) ? { ...current, queued: true, lastInputSeq: entry.seq } : current
   }
 
-  return Match.value(entry.event).pipe(
+  return Match.value(event).pipe(
     Match.tag("TurnStarted", (): Activity => ({ ...activity, turnSince: entry.at })),
     // Turns run one at a time, so an end closes whichever turn is open, also one a restart cut off.
     Match.tag("TurnCompleted", "TurnFailed", (ended): Activity => ({
@@ -126,7 +129,7 @@ export const apply = (activity: Activity, entry: AssistantEvent.Entry): Activity
  * @category constructors
  * @since 0.1.0
  */
-export const fromEntries = (entries: ReadonlyArray<AssistantEvent.Entry>): Activity => entries.reduce(apply, empty)
+export const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): Activity => entries.reduce(apply, empty)
 
 /**
  * Returns whether anything is working: a turn (or one about to start), or a

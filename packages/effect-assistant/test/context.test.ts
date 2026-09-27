@@ -102,7 +102,7 @@ const recording = (seen: Queue.Queue<Seen>) =>
           tools: Object.keys(toolkit)
         })
 
-        const history = JSON.stringify(yield* turn.history)
+        const history = JSON.stringify(yield* turn.history())
 
         // The clerk's report arrives as a <specialist> input: file only once.
         if (history.includes("file it") && !history.includes(`name=\\"clerk\\"`)) {

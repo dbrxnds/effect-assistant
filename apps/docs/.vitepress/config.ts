@@ -6,7 +6,6 @@ const modules = [
   "AssistantChat",
   "AssistantEngine",
   "AssistantEvent",
-  "AssistantHistory",
   "ChatLog",
   "AssistantLoop",
   "Block",

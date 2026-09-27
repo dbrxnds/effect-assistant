@@ -40,7 +40,7 @@ table:
 import type { AssistantEvent, ChatId } from "effect-assistant"
 import * as Effect from "effect/Effect"
 
-const send = (userId: string, chatId: ChatId.ChatId, input: AssistantEvent.ClientInput) =>
+const send = (userId: string, chatId: ChatId.ChatId, input: AssistantEvent.UserInput) =>
   Effect.gen(function* () {
     const chat = yield* chats.get(chatId)
 

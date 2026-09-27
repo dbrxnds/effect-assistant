@@ -19,11 +19,10 @@ import type * as Items from "@effect-uai/core/Items"
 import type * as Turn from "@effect-uai/core/Turn"
 import * as Effect from "effect/Effect"
 import * as Telemetry from "effect/unstable/ai/Telemetry"
-import type * as AssistantEvent from "../AssistantEvent.ts"
 import type { SpanAttributes } from "../Instructions.ts"
 
 /** What the spans record: model history, chat events, or text. */
-type Traced = string | ReadonlyArray<Items.HistoryItem> | ReadonlyArray<AssistantEvent.AssistantEvent>
+type Traced = string | ReadonlyArray<Items.HistoryItem> | ReadonlyArray<{ readonly _tag: string }>
 
 const json = (value: Traced): string => JSON.stringify(value)
 

@@ -26,7 +26,7 @@
  *     model: "claude-sonnet-5",
  *     instructions: turn.instructions("You help a small team."),
  *     toolkit: { ...turn.tools, ...toolkit },
- *     history: turn.history,
+ *     history: turn.history(),
  *     toolChoice: "required"
  *   })
  * )
@@ -182,7 +182,7 @@ const runCalls = <Tools extends Toolkit.Toolkit>(toolkit: Tools, calls: Readonly
  * const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
  *   Loop.loop({ steps: 0 }, (state) =>
  *     AssistantLoop.step(
- *       { model: "claude-sonnet-5", instructions: turn.instructions("You help a small team."), toolkit: turn.tools, history: turn.history, toolChoice: "required" },
+ *       { model: "claude-sonnet-5", instructions: turn.instructions("You help a small team."), toolkit: turn.tools, history: turn.history(), toolChoice: "required" },
  *       (result) => result.done || state.steps >= 12 ? Loop.stop() : Loop.next({ steps: state.steps + 1 })
  *     )
  *   )

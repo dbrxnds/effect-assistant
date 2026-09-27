@@ -84,8 +84,10 @@ export interface BlockState {
  */
 export const nextBlockStates = (
   states: ReadonlyMap<string, BlockState>,
-  event: AssistantEvent.AssistantEvent
+  event: { readonly _tag: string }
 ): ReadonlyMap<string, BlockState> => {
+  if (!AssistantEvent.isLibraryEvent(event)) return states
+
   const close = (ids: ReadonlyArray<string>) => {
     const open = ids.filter((id) => states.get(id)?.open === true)
 
@@ -117,7 +119,7 @@ export const nextBlockStates = (
  * @category folding
  * @since 0.1.0
  */
-export const blockStates = (entries: ReadonlyArray<AssistantEvent.Entry>): ReadonlyMap<string, BlockState> => {
+export const blockStates = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): ReadonlyMap<string, BlockState> => {
   let states: ReadonlyMap<string, BlockState> = new Map()
 
   for (const entry of entries) states = nextBlockStates(states, entry.event)
@@ -133,13 +135,17 @@ export const blockStates = (entries: ReadonlyArray<AssistantEvent.Entry>): Reado
  * @since 0.1.0
  */
 export const staleBlocks = (
-  entries: ReadonlyArray<AssistantEvent.Entry>,
+  entries: ReadonlyArray<AssistantEvent.AnyEntry>,
   options: { readonly messages: number }
 ): ReadonlyArray<string> => {
   const open = [...blockStates(entries)].flatMap(([id, state]) => (state.open ? [id] : []))
 
   return open.filter((id) => {
-    const shown = entries.findIndex(({ event }) => Predicate.isTagged(event, "AssistantMessage") && event.id === id)
+    const shown = entries.findIndex(
+      ({ event }) =>
+        AssistantEvent.isLibraryEvent(event) && Predicate.isTagged(event, "AssistantMessage") && event.id === id
+    )
+
     const typed = entries.slice(shown + 1).filter(({ event }) => Predicate.isTagged(event, "UserMessage")).length
 
     return shown !== -1 && typed >= options.messages

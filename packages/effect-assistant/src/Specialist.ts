@@ -270,7 +270,7 @@ export const make = <const Name extends string>(
   ): Layer.Layer<SpecialistHandler<Name>, never, any> {
     return Layer.effect(
       Handler,
-      Effect.map(Effect.context<never>(), (context) => ({
+      Effect.map(Effect.context(), (context) => ({
         // The build runs per chat activation, in the chat; here it only keeps the layer's services for it.
         open: (Effect.isEffect(build) ? build : Effect.succeed(build)).pipe(
           Effect.map((handler) => (run: Run) => Stream.provideContext(toStream(handler(run)), context)),

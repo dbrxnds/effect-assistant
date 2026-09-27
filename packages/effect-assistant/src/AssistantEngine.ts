@@ -53,7 +53,7 @@ import { ChatId } from "./ChatId.ts"
 import { ChatLog } from "./ChatLog.ts"
 import * as Chat from "./internal/chat.ts"
 import * as History from "./internal/history.ts"
-import * as Turns from "./internal/turns.ts"
+import type * as Turns from "./internal/turns.ts"
 
 /**
  * Service that runs assistants' chats. `toLayer` registers an assistant with
@@ -68,7 +68,11 @@ export class AssistantEngine extends Context.Service<
     /** Registers an assistant, for as long as the scope is open. */
     readonly register: (registration: Turns.Registration) => Effect.Effect<void, never, Scope.Scope>
     /** Stores an input in a chat of the assistant, which works on it in the background. */
-    readonly submit: (assistant: string, chatId: ChatId, input: AssistantEvent.Input) => Effect.Effect<void>
+    readonly submit: (
+      assistant: string,
+      chatId: ChatId,
+      input: AssistantEvent.Input | AssistantEvent.AppEvent
+    ) => Effect.Effect<void>
     /** Streams the chat's stored events after `after`, then live ones. */
     readonly subscribe: (assistant: string, chatId: ChatId, after: number) => Stream.Stream<AssistantEvent.Entry>
   }
@@ -141,18 +145,16 @@ export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.e
       Effect.scoped(RcMap.get(chats, new ChatKey({ assistant, chatId })).pipe(Effect.flatMap(f)))
 
     /** Runs turns for the assistant's chats that owe one: its last turn was cut off, or an input came after. */
-    const resumeAll = Effect.fn(function* (assistant: string) {
+    const resumeAll = Effect.fn(function* (registration: Turns.Registration) {
+      const { name, app } = registration.definition
+
       for (const chatId of yield* log.unfinished) {
         const entries = yield* log.read(chatId)
-        const lastTurn = entries.findLast(({ event }) => Predicate.isTagged(event, "TurnStarted"))?.event
 
-        if (
-          Predicate.isTagged(lastTurn, "TurnStarted") &&
-          lastTurn.assistant === assistant &&
-          History.needsTurn(entries)
-        ) {
-          yield* withChat(assistant, chatId, (chat) => chat.resume)
-        }
+        const lastTurn = entries.findLast(({ event }) => Predicate.isTagged(event, "TurnStarted"))?.event
+        const ours = Predicate.isTagged(lastTurn, "TurnStarted") && lastTurn.assistant === name
+
+        if (ours && History.needsTurn(entries, app.inputs)) yield* withChat(name, chatId, (chat) => chat.resume)
       }
     })
 
@@ -160,7 +162,7 @@ export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.e
       register: Effect.fn(function* (registration: Turns.Registration) {
         registered.set(registration.definition.name, registration)
         // Chats this assistant was working on when the process stopped: pick them up again.
-        yield* Effect.forkScoped(resumeAll(registration.definition.name))
+        yield* Effect.forkScoped(resumeAll(registration))
       }),
       submit: (assistant, chatId, input) => withChat(assistant, chatId, (chat) => chat.submitInBackground(input)),
       // The subscriber holds the chat open while it streams.
@@ -174,11 +176,13 @@ export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.e
 
 /** A registered assistant's chats, through their entities. */
 interface EntityClient {
-  readonly submit: (chatId: ChatId, input: AssistantEvent.Input) => Effect.Effect<void>
+  readonly submit: (chatId: ChatId, input: AssistantEvent.Input | AssistantEvent.AppEvent) => Effect.Effect<void>
   readonly subscribe: (chatId: ChatId, after: number) => Stream.Stream<AssistantEvent.Entry>
 }
 
-const Submit = Rpc.make("Submit", { payload: { input: AssistantEvent.Input } }).annotate(ClusterSchema.Persisted, true)
+const Submit = Rpc.make("Submit", {
+  payload: { input: Schema.Union([AssistantEvent.Input, AssistantEvent.AppEvent]) }
+}).annotate(ClusterSchema.Persisted, true)
 
 const Subscribe = Rpc.make("Subscribe", {
   payload: { after: Schema.Int },
