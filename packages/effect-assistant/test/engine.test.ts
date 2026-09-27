@@ -17,7 +17,7 @@ import {
   ChatId,
   ChatLog
 } from "../src/index.ts"
-import { say, testModel } from "./fixtures.ts"
+import { collectUntil, say, simple, testModel, turnsDone } from "./fixtures.ts"
 import * as Scripted from "./scripted.ts"
 
 const Resumer = Assistant.make("resumer")
@@ -152,6 +152,70 @@ describe("a chat's log", () => {
       )
 
       expect(entries.map((entry) => entry.seq)).toEqual(entries.map((_, i) => i + 1))
+    })
+  )
+
+  it.live("reads the log once when the chat opens, not every turn", () =>
+    Effect.gen(function* () {
+      const stored = yield* Ref.make<ReadonlyArray<AssistantEvent.Entry>>([])
+      const reads = yield* Ref.make(0)
+
+      const counting = ChatLog.make({
+        read: (chatId) =>
+          Ref.update(reads, (n) => n + 1).pipe(
+            Effect.andThen(Ref.get(stored)),
+            Effect.map((all) => all.filter((entry) => entry.chatId === chatId))
+          ),
+        lastSeq: (chatId) =>
+          Effect.map(Ref.get(stored), (all) => all.filter((entry) => entry.chatId === chatId).length),
+        write: (_, entries) => Ref.update(stored, (all) => [...all, ...entries]),
+        lastEntries: Effect.succeed([])
+      })
+
+      const handler = Resumer.toLayer(simple({ instructions: "Be brief." }))
+
+      yield* Effect.gen(function* () {
+        const chat = yield* ChatId.make
+        yield* Resumer.submit(chat, say("one"))
+        yield* collectUntil(Resumer, chat, (es) => turnsDone(es) >= 1)
+        yield* Resumer.submit(chat, say("two"))
+        yield* collectUntil(Resumer, chat, (es) => turnsDone(es) >= 2)
+      }).pipe(
+        Effect.provide(
+          handler.pipe(
+            Layer.provideMerge(AssistantEngine.layerMemory),
+            Layer.provide(Scripted.layer(() => Scripted.reply("Hi.")))
+          )
+        ),
+        Effect.provide(Layer.succeed(ChatLog.ChatLog, counting))
+      )
+
+      expect(yield* Ref.get(reads)).toBe(1)
+    })
+  )
+
+  it.live("streams only the entries after `after`, then live ones", () =>
+    Effect.gen(function* () {
+      const handler = Resumer.toLayer(() => Stream.empty)
+
+      const seqs = yield* Effect.gen(function* () {
+        const chat = yield* ChatId.make
+        yield* Resumer.submit(chat, say("one"))
+        yield* Resumer.submit(chat, say("two"))
+
+        return yield* Resumer.subscribe(chat, { after: 1 }).pipe(
+          Stream.filter(({ event }) => Predicate.isTagged(event, "UserMessage")),
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.map((entries) => [...entries].map((entry) => entry.seq))
+        )
+      }).pipe(
+        Effect.provide(handler.pipe(Layer.provideMerge(AssistantEngine.layerMemory), Layer.provide(Scripted.unused))),
+        Effect.provide(ChatLog.layerMemory)
+      )
+
+      // "one" is seq 1, then its turn's entries; the first message after 1 is "two".
+      expect(seqs).not.toContain(1)
     })
   )
 

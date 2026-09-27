@@ -69,8 +69,8 @@ export class AssistantEngine extends Context.Service<
     readonly register: (registration: Turns.Registration) => Effect.Effect<void, never, Scope.Scope>
     /** Stores an input in a chat of the assistant, which works on it in the background. */
     readonly submit: (assistant: string, chatId: ChatId, input: AssistantEvent.Input) => Effect.Effect<void>
-    /** Streams the chat's stored events, then live ones. */
-    readonly subscribe: (assistant: string, chatId: ChatId) => Stream.Stream<AssistantEvent.Entry>
+    /** Streams the chat's stored events after `after`, then live ones. */
+    readonly subscribe: (assistant: string, chatId: ChatId, after: number) => Stream.Stream<AssistantEvent.Entry>
   }
 >()("effect-assistant/AssistantEngine") {}
 
@@ -164,8 +164,10 @@ export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.e
       }),
       submit: (assistant, chatId, input) => withChat(assistant, chatId, (chat) => chat.submitInBackground(input)),
       // The subscriber holds the chat open while it streams.
-      subscribe: (assistant, chatId) =>
-        Stream.unwrap(RcMap.get(chats, new ChatKey({ assistant, chatId })).pipe(Effect.map((chat) => chat.stream)))
+      subscribe: (assistant, chatId, after) =>
+        Stream.unwrap(
+          RcMap.get(chats, new ChatKey({ assistant, chatId })).pipe(Effect.map((chat) => chat.stream(after)))
+        )
     })
   })
 )
@@ -173,12 +175,16 @@ export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.e
 /** A registered assistant's chats, through their entities. */
 interface EntityClient {
   readonly submit: (chatId: ChatId, input: AssistantEvent.Input) => Effect.Effect<void>
-  readonly subscribe: (chatId: ChatId) => Stream.Stream<AssistantEvent.Entry>
+  readonly subscribe: (chatId: ChatId, after: number) => Stream.Stream<AssistantEvent.Entry>
 }
 
 const Submit = Rpc.make("Submit", { payload: { input: AssistantEvent.Input } }).annotate(ClusterSchema.Persisted, true)
 
-const Subscribe = Rpc.make("Subscribe", { success: AssistantEvent.Entry, stream: true })
+const Subscribe = Rpc.make("Subscribe", {
+  payload: { after: Schema.Int },
+  success: AssistantEvent.Entry,
+  stream: true
+})
 
 /**
  * Layer that runs chats as cluster entities, one per chat, keyed by chat id.
@@ -227,7 +233,7 @@ export const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Shardin
         return ChatEntity.of({
           // The turns run inside the request, so a crash leaves it unprocessed and the cluster redelivers it.
           Submit: (request) => chat.submit(request.payload.input),
-          Subscribe: () => chat.stream
+          Subscribe: (request) => chat.stream(request.payload.after)
         })
       })
 
@@ -240,7 +246,7 @@ export const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Shardin
 
       clients.set(registration.definition.name, {
         submit: (chatId, input) => makeClient(chatId).Submit({ input }, { discard: true }).pipe(Effect.orDie),
-        subscribe: (chatId) => makeClient(chatId).Subscribe().pipe(Stream.orDie)
+        subscribe: (chatId, after) => makeClient(chatId).Subscribe({ after }).pipe(Stream.orDie)
       })
     })
 
@@ -254,8 +260,8 @@ export const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Shardin
       register: (registration) => register(registration).pipe(Effect.provide(context)),
       submit: (assistant, chatId, input) =>
         clientOf(assistant).pipe(Effect.flatMap((client) => client.submit(chatId, input))),
-      subscribe: (assistant, chatId) =>
-        Stream.unwrap(Effect.map(clientOf(assistant), (client) => client.subscribe(chatId)))
+      subscribe: (assistant, chatId, after) =>
+        Stream.unwrap(Effect.map(clientOf(assistant), (client) => client.subscribe(chatId, after)))
     })
   })
 )

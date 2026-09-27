@@ -10,6 +10,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as FiberSet from "effect/FiberSet"
 import * as PubSub from "effect/PubSub"
+import * as Ref from "effect/Ref"
 import * as Semaphore from "effect/Semaphore"
 import * as Stream from "effect/Stream"
 import * as SynchronizedRef from "effect/SynchronizedRef"
@@ -80,14 +81,18 @@ export const makeChat = Effect.fn(function* (options: {
   const holding = yield* makeHolding(options.keepAlive)
   const background = yield* FiberSet.make()
 
+  // The chat is its log's only writer, so it reads the log once and keeps the entries: a turn reads memory.
+  const entries = yield* Ref.make(yield* storage.read(chatId))
+
   // Every writer (the turn's loop, specialist runs, a handler's own appends) goes through here, one at a time: each
   // append is numbered after the last, and its entries go to the chat's subscribers.
   const chat = AssistantChat.of({
     chatId,
-    entries: storage.read(chatId),
+    entries: Ref.get(entries),
     append: (events) =>
       storage.append(chatId, events).pipe(
-        Effect.tap((entries) => PubSub.publishAll(channel, entries)),
+        Effect.tap((stored) => Ref.update(entries, (all) => [...all, ...stored])),
+        Effect.tap((stored) => PubSub.publishAll(channel, stored)),
         Semaphore.withPermit(writes)
       )
   })
@@ -142,19 +147,21 @@ export const makeChat = Effect.fn(function* (options: {
     resume: Effect.gen(function* () {
       if (History.needsTurn(yield* chat.entries)) yield* inBackground(drain)
     }),
-    /** The chat's stored entries, then new ones as they're appended. It subscribes before it reads. */
-    stream: Stream.unwrap(
-      Effect.gen(function* () {
-        const subscription = yield* PubSub.subscribe(channel)
-        const entries = yield* chat.entries
-        const after = entries.at(-1)?.seq ?? 0
+    /** The chat's entries after `after` (all of them by default), then new ones as they're appended. */
+    stream: (after: number) =>
+      Stream.unwrap(
+        Effect.gen(function* () {
+          // Subscribes before it reads, so nothing appended in between is missed.
+          const subscription = yield* PubSub.subscribe(channel)
+          const stored = (yield* chat.entries).filter((entry) => entry.seq > after)
+          const last = stored.at(-1)?.seq ?? after
 
-        return Stream.concat(
-          Stream.fromIterable(entries),
-          Stream.fromSubscription(subscription).pipe(Stream.filter((entry) => entry.seq > after))
-        )
-      })
-    )
+          return Stream.concat(
+            Stream.fromIterable(stored),
+            Stream.fromSubscription(subscription).pipe(Stream.filter((entry) => entry.seq > last))
+          )
+        })
+      )
   }
 })
 

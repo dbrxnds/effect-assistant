@@ -34,4 +34,15 @@ describe("ChatLog.layerMemory", () => {
       expect([...(yield* log.unfinished)].sort()).toEqual([midTurn, waiting].sort())
     }).pipe(Effect.provide(ChatLog.layerMemory))
   )
+
+  it.effect("reads the entries after a seq", () =>
+    Effect.gen(function* () {
+      const log = yield* ChatLog.ChatLog
+      const chat = yield* ChatId.make
+      yield* log.append(chat, [say("one"), say("two"), say("three")])
+
+      expect((yield* log.read(chat, { after: 1 })).map((entry) => entry.seq)).toEqual([2, 3])
+      expect(yield* log.read(chat, { after: 3 })).toEqual([])
+    }).pipe(Effect.provide(ChatLog.layerMemory))
+  )
 })

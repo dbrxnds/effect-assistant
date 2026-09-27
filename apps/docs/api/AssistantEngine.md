@@ -93,8 +93,8 @@ class AssistantEngine extends Context.Service<
     readonly register: (registration: Turns.Registration) => Effect.Effect<void, never, Scope.Scope>
     /** Stores an input in a chat of the assistant, which works on it in the background. */
     readonly submit: (assistant: string, chatId: ChatId, input: AssistantEvent.Input) => Effect.Effect<void>
-    /** Streams the chat's stored events, then live ones. */
-    readonly subscribe: (assistant: string, chatId: ChatId) => Stream.Stream<AssistantEvent.Entry>
+    /** Streams the chat's stored events after `after`, then live ones. */
+    readonly subscribe: (assistant: string, chatId: ChatId, after: number) => Stream.Stream<AssistantEvent.Entry>
   }
 >()("effect-assistant/AssistantEngine")
 ```
