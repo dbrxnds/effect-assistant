@@ -206,6 +206,9 @@ const decisionAnswerText = (
     }
   })
 
+const resultText = (result: AssistantEvent.ToolResult) =>
+  `<result tool="${result.tool}" call="${result.callId}" outcome="${result.outcome}">\nThe result of a call from earlier in this chat.\n${toJsonText(result.result)}\n</result>`
+
 /** An approved call's result, as the model reads it: the call ran after the user approved it. */
 const approvedResultText = (
   request: AssistantEvent.DecisionRequested,
@@ -229,6 +232,8 @@ const approvedResultText = (
  * - A parked call's result is that it waits for the user's decision. If the
  *   user approves and it runs, its result reads as the decision's, where it
  *   ran, since the call already has one.
+ * - A result whose call isn't in these entries (a view that starts after it)
+ *   reads as text, where it is.
  *
  * @internal
  */
@@ -242,6 +247,7 @@ export const fromEntries = (
   const requests = new Map<string, AssistantEvent.DecisionRequested>()
   // Parked calls by call id: their result came with the parking, so a later one reads as the decision's.
   const parked = new Map<string, AssistantEvent.DecisionRequested>()
+  const called = new Set<string>()
 
   const flushIfClosed = () => {
     if (open.size === 0) history.push(...held.splice(0))
@@ -283,13 +289,23 @@ export const fromEntries = (
         ModelOutput: (output) => {
           history.push(...Prompt.fromResponseParts(output.parts).content)
 
-          for (const part of output.parts) if (part.type === "tool-call") open.add(part.id)
+          for (const part of output.parts) {
+            if (part.type === "tool-call") {
+              open.add(part.id)
+              called.add(part.id)
+            }
+          }
+
           flushIfClosed()
         },
         ToolResult: (result) => {
           const request = parked.get(result.callId)
 
           if (request !== undefined) return input(index, userText(approvedResultText(request, result.tool, result)))
+
+          // A view that starts after the call (since a summary, say) keeps its result as text: a tool result needs its
+          // call right before it. An approved call's result can come long after the call was parked.
+          if (!called.has(result.callId)) return input(index, userText(resultText(result)))
 
           history.push(toolMessage(result))
           open.delete(result.callId)

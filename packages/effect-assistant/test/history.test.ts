@@ -273,6 +273,22 @@ describe("History.fromEntries, decisions", () => {
     expect(Decisions.approvedCalls(entries(ran))).toEqual([])
   })
 
+  it("reads an approved call's result as text when a view starts after the call", () => {
+    const later = [
+      answer("approved"),
+      resolved("approved"),
+      TurnStarted.make({ assistant: "test" }),
+      ToolStarted.make({ callId: "a", tool: "place_order" }),
+      ToolResult.make({ callId: "a", tool: "place_order", outcome: "success", result: { reference: "R-1" } })
+    ]
+
+    // Only what came after the parked call and its request, like a view since a summary.
+    const history = fromEntries(entries([...parked, ...later]).slice(parked.length))
+
+    expect(history.every((message) => message.role === "user")).toBe(true)
+    expect(texts(history).at(-1)).toContain('<result tool="place_order" call="a" outcome="success">')
+  })
+
   it("reads a decline as a call that didn't run", () => {
     const declined = [...parked, answer("declined"), resolved("declined")]
     const history = fromEntries(entries(declined))
