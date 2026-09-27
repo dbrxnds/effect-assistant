@@ -9,10 +9,9 @@
  * a payment's key), so the second run finds the first one's work instead of
  * doing it twice.
  *
- * A tool that can't do that, like one that sends an email, is marked
- * {@link destructive}: a call of it that a crash cut off isn't run again. The
- * model gets a result saying it may have run, and checks before trying
- * again. The name follows MCP's `destructiveHint`.
+ * A side effect that can't take a key, like sending an email, belongs in a
+ * workflow step (it runs once per key, however often the tool call does) or
+ * behind the user's approval, with a block.
  *
  * **Example** (A tool that starts a workflow once per call)
  *
@@ -37,10 +36,8 @@
  *
  * @since 0.1.0
  */
-import type * as Tool from "@effect-uai/core/Tool"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
-import * as Predicate from "effect/Predicate"
 
 /**
  * Service for the tool call a tool runs for. The agent loop provides it to
@@ -69,27 +66,3 @@ export class AssistantToolCall extends Context.Service<
 export const idempotencyKey: Effect.Effect<string, never, AssistantToolCall> = AssistantToolCall.useSync(
   (call) => `tool-call:${call.callId}`
 )
-
-const DestructiveId = "~effect-assistant/AssistantToolCall/destructive"
-
-/**
- * Marks a tool as destructive: it changes something it can't safely do twice.
- * A call of it that a crash cut off isn't run again; the model is told it may
- * have run.
- *
- * @category constructors
- * @since 0.1.0
- */
-export const destructive = <T extends Tool.AnyTool>(tool: T): T & { readonly [DestructiveId]: true } => ({
-  ...tool,
-  [DestructiveId]: true
-})
-
-/**
- * Whether a tool is marked {@link destructive}.
- *
- * @category guards
- * @since 0.1.0
- */
-export const isDestructive = (tool: Tool.AnyTool | undefined): boolean =>
-  tool !== undefined && Predicate.hasProperty(tool, DestructiveId) && tool[DestructiveId] === true

@@ -16,10 +16,9 @@ on. A tool that orders, sends, or writes something passes
 a payment's key), so the second run finds the first one's work instead of
 doing it twice.
 
-A tool that can't do that, like one that sends an email, is marked
-`destructive`: a call of it that a crash cut off isn't run again. The
-model gets a result saying it may have run, and checks before trying
-again. The name follows MCP's `destructiveHint`.
+A side effect that can't take a key, like sending an email, belongs in a
+workflow step (it runs once per key, however often the tool call does) or
+behind the user's approval, with a block.
 
 **Example** (A tool that starts a workflow once per call)
 
@@ -42,20 +41,6 @@ const placeOrder = Tool.make({
 })
 ```
 
-## Constructors
-
-### destructive
-
-Marks a tool as destructive: it changes something it can't safely do twice.
-A call of it that a crash cut off isn't run again; the model is told it may
-have run.
-
-```ts
-const destructive: <T extends Tool.AnyTool>(tool: T) => T & { readonly [DestructiveId]: true }
-```
-
-<small>Since 0.1.0</small>
-
 ## Services
 
 ### AssistantToolCall
@@ -73,18 +58,6 @@ class AssistantToolCall extends Context.Service<
     readonly tool: string
   }
 >()("effect-assistant/AssistantToolCall")
-```
-
-<small>Since 0.1.0</small>
-
-## Guards
-
-### isDestructive
-
-Whether a tool is marked `destructive`.
-
-```ts
-const isDestructive: (tool: Tool.AnyTool | undefined) => boolean
 ```
 
 <small>Since 0.1.0</small>

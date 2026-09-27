@@ -52,8 +52,7 @@ or `Loop.stop()`.
 **Details**
 
 A step whose history has calls a crash cut off runs those first, with the
-same ids (a destructive tool's call gets a may-have-run result instead),
-and doesn't call the model. Whoever consumes the loop records each event
+same ids, and doesn't call the model. Whoever consumes the loop records each event
 before pulling the next, so the next step's history has it; `then` runs
 after the step's events are recorded.
 
@@ -96,10 +95,9 @@ while it worked, or after `maxSteps` model calls.
 
 Each tool call is stored as started before it runs, and a call a crash cut
 off (in the history with no result) runs again, with the same call id,
-before the next model call, unless its tool is marked
-`AssistantToolCall.destructive`. So a tool call runs at least once: a tool
+before the next model call. So a tool call runs at least once: a tool
 that changes something outside the chat uses
-`AssistantToolCall.idempotencyKey`, or is marked destructive.
+`AssistantToolCall.idempotencyKey`.
 The tools run only once the output is pulled, and the next model call only
 once the results are: whoever consumes the stream records each event before
 the next step reads the history.
@@ -220,8 +218,7 @@ const runCalls = <Tools extends Toolkit.Toolkit>(toolkit: Tools, calls: Readonly
  * **Details**
  *
  * A step whose history has calls a crash cut off runs those first, with the
- * same ids (a destructive tool's call gets a may-have-run result instead),
- * and doesn't call the model. Whoever consumes the loop records each event
+ * same ids, and doesn't call the model. Whoever consumes the loop records each event
  * before pulling the next, so the next step's history has it; `then` runs
  * after the step's events are recorded.
  *
@@ -261,21 +258,10 @@ export const step = <Tools extends Toolkit.Toolkit, S, E2 = never, R2 = never>(
     Effect.gen(function* () {
       const history = yield* options.history
       // Calls a crash cut off, with no result: they run again, with the same ids, before the model goes on.
-      // A destructive tool's call doesn't: the model is told it may have run.
       const cutOff = HistoryCheck.findUnansweredCalls(history)
 
       if (cutOff.length > 0) {
-        const destructive = cutOff.filter((call) => isDestructive(toolkit[call.name]))
-        const again = cutOff.filter((call) => !isDestructive(toolkit[call.name]))
-
-        return Stream.fromIterable(
-          destructive.map((call) =>
-            Loop.value(
-              AssistantEvent.ToolResult.make({ callId: call.call_id, tool: call.name, output: mayHaveRunOutput })
-            )
-          )
-        ).pipe(
-          Stream.concat(runCalls(toolkit, again)),
+        return runCalls(toolkit, cutOff).pipe(
           Stream.concat(next({ output: undefined, done: false, historyLength: history.length + cutOff.length }))
         )
       }
@@ -311,10 +297,9 @@ export const step = <Tools extends Toolkit.Toolkit, S, E2 = never, R2 = never>(
  *
  * Each tool call is stored as started before it runs, and a call a crash cut
  * off (in the history with no result) runs again, with the same call id,
- * before the next model call, unless its tool is marked
- * `AssistantToolCall.destructive`. So a tool call runs at least once: a tool
+ * before the next model call. So a tool call runs at least once: a tool
  * that changes something outside the chat uses
- * `AssistantToolCall.idempotencyKey`, or is marked destructive.
+ * `AssistantToolCall.idempotencyKey`.
  * The tools run only once the output is pulled, and the next model call only
  * once the results are: whoever consumes the stream records each event before
  * the next step reads the history.

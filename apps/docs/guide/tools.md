@@ -126,17 +126,13 @@ const placeOrder = Tool.make({
 })
 ```
 
-A tool that can't do its work once per key, like one that sends an email,
-is marked destructive. After a crash its cut-off call doesn't run again; the
-model gets a result saying it may have run, and checks before trying again.
-The name follows MCP's `destructiveHint`.
+A side effect that can't take a key, like sending an email, goes in a
+workflow step, which runs once per key however often the tool call does, or
+behind the user's approval with a block. That's how durable-execution tools
+handle it too: a step runs at least once, and the side effect is idempotent.
 
-```ts
-const sendEmail = AssistantToolCall.destructive(Tool.make({ name: "send_email", … }))
-```
-
-A call whose handler stopped while it ran (not a crash) gets the same
-result.
+A call whose handler stopped while it ran (not a crash) gets a result saying
+it may have run.
 
 ## Failures
 
