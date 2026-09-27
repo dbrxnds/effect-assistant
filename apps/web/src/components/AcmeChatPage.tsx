@@ -11,9 +11,11 @@ import { useAtom, useAtomMount, useAtomSet, useAtomValue } from "@effect/atom-re
 import { useNavigate } from "@tanstack/react-router"
 import * as AssistantEvent from "effect-assistant/AssistantEvent"
 import type * as ChatId from "effect-assistant/ChatId"
+import type * as ChatView from "effect-assistant/ChatView"
 import * as InputId from "effect-assistant/InputId"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Predicate from "effect/Predicate"
 import { useCallback, useMemo, useState } from "react"
 import * as AcmeRpc from "~/lib/AcmeRpc.ts"
 import * as ChatRoute from "~/lib/ChatRoute.ts"
@@ -25,8 +27,8 @@ import { BlockContext, type BlockContextValue } from "./Blocks.tsx"
 import { Message, Typing } from "./Message.tsx"
 import { ThreadList } from "./ThreadList.tsx"
 
-const toThreadMessage = (message: ChatState.ChatMessage): ThreadMessageLike =>
-  message.role === "user"
+const toThreadMessage = (message: ChatView.Message): ThreadMessageLike =>
+  Predicate.isTagged(message, "UserMessage")
     ? { id: message.id, role: "user", content: message.text }
     : { id: message.id, role: "assistant", content: message.text, status: { type: "complete", reason: "stop" } }
 
@@ -39,7 +41,7 @@ export function AcmeChatPage() {
 
   const navigate = useNavigate()
   const { chatId } = Route.useRouteContext()
-  const server = AcmeRpc.chatSession(useAtomValue(AcmeRpc.chatSessionAtom(chatId)), chatId)
+  const server = AcmeRpc.chatSession(useAtomValue(AcmeRpc.chatSessionAtom(chatId)))
   const [pending, setPending] = useAtom(ChatState.pendingSends(chatId))
   const state = useMemo(() => ChatState.withPendingSends(server, pending), [server, pending])
   const chats = AcmeRpc.chatList(useAtomValue(AcmeRpc.chatListAtom))
@@ -63,11 +65,9 @@ export function AcmeChatPage() {
   const blocks = useMemo<BlockContextValue>(
     () => ({
       byId: new Map(state.messages.map((message) => [message.id, message])),
-      states: state.blocks,
-      decisions: state.decisions,
       respond: (answer) => void send(answer)
     }),
-    [state.messages, state.blocks, state.decisions, send]
+    [state.messages, send]
   )
 
   const openChat = (next: ChatId.ChatId) => {
@@ -99,7 +99,7 @@ export function AcmeChatPage() {
     if (target === chatId) openChat(demoChatId)
   }
 
-  const runtime = useExternalStoreRuntime<ChatState.ChatMessage>({
+  const runtime = useExternalStoreRuntime<ChatView.Message>({
     messages: [...state.messages],
     isRunning: false,
     convertMessage: toThreadMessage,

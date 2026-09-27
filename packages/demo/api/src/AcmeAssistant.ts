@@ -7,16 +7,19 @@
 import { Blocks } from "@acme/demo-shared/Blocks"
 import * as Assistant from "effect-assistant/Assistant"
 import { Research } from "./Research.ts"
+import * as WorkflowStep from "./WorkflowStep.ts"
 
 /**
- * Acme: `submit` and `subscribe` wherever the assistant engine is
- * provided. The demo has no sign-in: every thread is everyone's. It hands
- * research to the research specialist.
+ * Acme: `submit`, `subscribeView`, and `delete` wherever the assistant
+ * engine is provided. The demo has no sign-in: every thread is everyone's.
+ * It hands research to the research specialist, and its workflows report
+ * their steps as `WorkflowStep`s.
  *
  * @category definitions
  * @since 0.1.0
  */
 export const AcmeAssistant = Assistant.make("acme", {
   blocks: Blocks,
-  specialists: [Research]
+  specialists: [Research],
+  events: [WorkflowStep.event]
 })

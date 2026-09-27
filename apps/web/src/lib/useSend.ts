@@ -5,12 +5,12 @@ import { useAtomSet } from "@effect/atom-react"
 import * as Effect from "effect/Effect"
 import * as AssistantEvent from "effect-assistant/AssistantEvent"
 import type * as ChatId from "effect-assistant/ChatId"
+import * as ChatView from "effect-assistant/ChatView"
 import * as InputId from "effect-assistant/InputId"
 import * as Exit from "effect/Exit"
 import * as Predicate from "effect/Predicate"
 import { useCallback } from "react"
 import * as AcmeRpc from "./AcmeRpc.ts"
-import type * as ChatState from "./ChatState.ts"
 
 /**
  * Returns a function that submits an input. Typed text shows at once as a
@@ -19,15 +19,15 @@ import type * as ChatState from "./ChatState.ts"
  */
 export const useSend = (
   chatId: ChatId.ChatId,
-  setPending: (update: (pending: ReadonlyArray<ChatState.ChatMessage>) => ReadonlyArray<ChatState.ChatMessage>) => void,
+  setPending: (update: (pending: ReadonlyArray<ChatView.UserMessage>) => ReadonlyArray<ChatView.UserMessage>) => void,
   onError: (message: string) => void
 ) => {
   const submit = useAtomSet(AcmeRpc.submit, { mode: "promiseExit" })
 
   return useCallback(
     async (input: AssistantEvent.UserInput) => {
-      const pending: ChatState.ChatMessage | undefined = Predicate.isTagged(input, "UserMessage")
-        ? { id: input.id, role: "user", text: input.text }
+      const pending = Predicate.isTagged(input, "UserMessage")
+        ? ChatView.UserMessage.make({ id: input.id, text: input.text, at: Date.now() })
         : undefined
 
       if (pending) setPending((all) => [...all, pending])

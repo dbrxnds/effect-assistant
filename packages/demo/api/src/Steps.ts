@@ -1,10 +1,9 @@
 /**
- * What the demo workflows share: reporting a step to the chat, and waiting
- * between steps at demo pace.
+ * What the demo workflows share: reporting a step to the chat (a
+ * `WorkflowStep`), and waiting between steps at demo pace.
  *
  * @since 0.1.0
  */
-import * as AssistantEvent from "effect-assistant/AssistantEvent"
 import type * as ChatId from "effect-assistant/ChatId"
 import * as InputId from "effect-assistant/InputId"
 import type * as RunId from "effect-assistant/RunId"
@@ -14,6 +13,7 @@ import * as Effect from "effect/Effect"
 import * as Activity from "effect/unstable/workflow/Activity"
 import * as DurableClock from "effect/unstable/workflow/DurableClock"
 import { AcmeAssistant } from "./AcmeAssistant.ts"
+import { WorkflowStep } from "./WorkflowStep.ts"
 
 /**
  * One demo step, in seconds: `DEMO_STEP_SECONDS`, default 10. A step stands
@@ -45,16 +45,17 @@ export const wait = Effect.fn(function* (name: string, steps: number) {
  * @since 0.1.0
  */
 export interface Step {
-  readonly source: string
+  readonly workflow: WorkflowStep["workflow"]
   readonly runId: RunId.RunId
   readonly chatId: ChatId.ChatId
   readonly status: string
-  readonly details: Readonly<Record<string, string | number | boolean | undefined>>
+  readonly details: WorkflowStep["details"]
 }
 
 /**
- * Tells the chat about a step, as a fact. It runs once per step, even when
- * the workflow replays, and the fact's id makes a resend harmless.
+ * Tells the chat about a step, as a `WorkflowStep`. It runs once per step,
+ * even when the workflow replays, and the step's id makes a resend harmless.
+ * A chat deleted meanwhile takes nothing: the report does nothing then.
  *
  * @category combinators
  * @since 0.1.0
@@ -62,16 +63,16 @@ export interface Step {
 export const report = (step: Step) =>
   Activity.make({
     name: `Report:${step.status}`,
-    execute: Effect.gen(function* () {
-      yield* AcmeAssistant.submit(
-        step.chatId,
-        AssistantEvent.Fact.make({
-          id: InputId.fromKey(`${step.runId}:${step.status}`),
-          source: step.source,
-          payload: { runId: step.runId, status: step.status, ...step.details }
-        })
-      )
-    })
+    execute: AcmeAssistant.submit(
+      step.chatId,
+      WorkflowStep.make({
+        id: InputId.fromKey(`${step.runId}:${step.status}`),
+        workflow: step.workflow,
+        runId: step.runId,
+        status: step.status,
+        details: step.details
+      })
+    )
   })
 
 /**

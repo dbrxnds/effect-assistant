@@ -22,6 +22,7 @@ import * as Campaign from "../src/Campaign.ts"
 import * as LiveOrders from "../src/LiveOrders.ts"
 import * as PrintOrders from "../src/PrintOrders.ts"
 import { Research } from "../src/Research.ts"
+import { WorkflowStep } from "../src/WorkflowStep.ts"
 
 // Demo steps take no time in tests.
 process.env.DEMO_STEP_SECONDS = "0"
@@ -61,20 +62,18 @@ const model = Layer.effect(
   })
 )
 
-/** The inputs stored in a chat so far. */
+/** The library's inputs stored in a chat so far. */
 const inputsOf = (chatId: ChatId.ChatId) =>
   ChatLog.ChatLog.use((log) => log.read(chatId)).pipe(
     Effect.map((entries) => entries.flatMap(({ event }) => (AssistantEvent.isInput(event) ? [event] : [])))
   )
 
-const Step = Schema.Struct({
-  status: Schema.String,
-  trackingNumber: Schema.optional(Schema.String)
-})
+const decodeStep = Schema.decodeUnknownOption(Schema.toCodecJson(WorkflowStep))
 
-const steps = (inputs: ReadonlyArray<AssistantEvent.Input>) =>
-  inputs.flatMap((input) =>
-    Predicate.isTagged(input, "Fact") ? Option.toArray(Schema.decodeUnknownOption(Step)(input.payload)) : []
+/** The steps the workflows reported to a chat so far. */
+const stepsOf = (chatId: ChatId.ChatId) =>
+  ChatLog.ChatLog.use((log) => log.read(chatId)).pipe(
+    Effect.map((entries) => entries.flatMap(({ event }) => Option.toArray(decodeStep(event))))
   )
 
 const layer = Layer.mergeAll(Campaign.layerWorkflow, PrintOrders.layerWorkflow).pipe(
@@ -87,8 +86,8 @@ const layer = Layer.mergeAll(Campaign.layerWorkflow, PrintOrders.layerWorkflow).
 )
 
 const waitFor = (chatId: ChatId.ChatId, status: string) =>
-  inputsOf(chatId).pipe(
-    Effect.map((all) => steps(all).find((step) => step.status === status)),
+  stepsOf(chatId).pipe(
+    Effect.map((all) => all.find((step) => step.status === status)),
     Effect.filterOrFail(Predicate.isNotUndefined, () => `no ${status} yet`),
     Effect.retry(Schedule.spaced("50 millis")),
     Effect.timeout("10 seconds")
@@ -153,7 +152,7 @@ describe("CreateCampaign", () => {
         yield* AcmeAssistant.submit(chatId, yield* answer(asked, "approved"))
         yield* waitFor(chatId, "first_results")
 
-        expect(steps(yield* inputsOf(chatId)).map((step) => step.status)).toEqual([
+        expect((yield* stepsOf(chatId)).map((step) => step.status)).toEqual([
           "creative_in_progress",
           "scheduled",
           "live",
@@ -171,7 +170,7 @@ describe("CreateCampaign", () => {
         yield* AcmeAssistant.submit(chatId, yield* answer(yield* askedFor(chatId), "declined"))
         yield* waitFor(chatId, "declined")
 
-        expect(steps(yield* inputsOf(chatId)).map((step) => step.status)).toEqual(["declined"])
+        expect((yield* stepsOf(chatId)).map((step) => step.status)).toEqual(["declined"])
       }).pipe(Effect.provide(layer))
     })
   )
@@ -212,15 +211,63 @@ describe("PrintOrder", () => {
         yield* waitFor(chatId, "delivered")
         const order = yield* orders.get("ACM-TEST02")
 
-        expect(steps(yield* inputsOf(chatId)).map((step) => step.status)).toEqual([
+        expect((yield* stepsOf(chatId)).map((step) => step.status)).toEqual([
           "confirmed",
           "printing",
           "shipped",
           "delivered"
         ])
-        expect(shipped.trackingNumber).toMatch(/^1Z/)
+        expect(shipped.details.trackingNumber).toMatch(/^1Z/)
         expect(order?.status).toBe("delivered")
-        expect(order?.trackingNumber).toBe(shipped.trackingNumber)
+        expect(order?.trackingNumber).toBe(shipped.details.trackingNumber)
+      }).pipe(Effect.provide(layer))
+    })
+  )
+
+  it.live("goes on quietly when its chat is deleted: the chat takes none of its steps", () =>
+    Effect.gen(function* () {
+      yield* Effect.gen(function* () {
+        const chatId = yield* ChatId.make
+        const orders = yield* LiveOrders.LiveOrders
+        yield* orders.put(
+          LiveOrders.LiveOrder.make({
+            reference: "ACM-TEST03",
+            kind: "product",
+            office: "Acme Amsterdam",
+            locationId: "location:amsterdam",
+            description: "500 × Acme branded pens",
+            total: 450,
+            status: "placed",
+            placedOn: "2026-09-24",
+            updatedAt: 0
+          })
+        )
+        yield* PrintOrders.PrintOrder.execute(
+          {
+            runId: yield* RunId.make,
+            chatId,
+            reference: "ACM-TEST03",
+            office: "Acme Amsterdam",
+            productName: "Acme branded pens",
+            quantity: 500
+          },
+          { discard: true }
+        )
+
+        yield* waitFor(chatId, "confirmed")
+        yield* AcmeAssistant.delete(chatId)
+
+        // The order still moves; the deleted chat just isn't told.
+        yield* orders.get("ACM-TEST03").pipe(
+          Effect.filterOrFail(
+            (order) => order?.status === "delivered",
+            () => "not delivered yet"
+          ),
+          Effect.retry(Schedule.spaced("50 millis")),
+          Effect.timeout("10 seconds")
+        )
+
+        expect(yield* stepsOf(chatId)).toEqual([])
       }).pipe(Effect.provide(layer))
     })
   )

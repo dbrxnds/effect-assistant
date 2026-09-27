@@ -1,7 +1,8 @@
 /**
  * End-to-end smoke test against a running demo (local, preview, or prod), with
- * the real model and the real RPC socket. Every chat it creates is deleted at
- * the end, so the thread list stays clean for demos.
+ * the real model and the real RPC socket. It sees what the web app sees (the
+ * chat's view), so it checks what the user is told. Every chat it creates is
+ * deleted at the end, so the thread list stays clean for demos.
  *
  *   pnpm --filter @acme/demo-api smoke [baseUrl]
  *
@@ -23,6 +24,7 @@
 import { AcmeRpcs } from "@acme/demo-shared/Rpc"
 import * as AssistantEvent from "effect-assistant/AssistantEvent"
 import type * as ChatId from "effect-assistant/ChatId"
+import * as ChatView from "effect-assistant/ChatView"
 import * as Decision from "effect-assistant/Decision"
 import * as InputId from "effect-assistant/InputId"
 import * as Duration from "effect/Duration"
@@ -45,63 +47,44 @@ const layer = RpcClient.layerProtocolSocket().pipe(
   Layer.provide(RpcSerialization.layerNdjson)
 )
 
-type Entries = ReadonlyArray<AssistantEvent.Entry>
+/** What the smoke test sees of a chat: its view after each update, as a client folds them. */
+type Views = ReadonlyArray<ChatView.View>
 
 const ChoiceProps = Schema.Struct({ options: Schema.Array(Schema.String) })
 
-const Status = Schema.Struct({ status: Schema.String })
+const latest = (views: Views): ChatView.View => views.at(-1) ?? ChatView.empty
 
-const messages = AssistantEvent.assistantTexts
+const sent = (view: ChatView.View): ReadonlyArray<ChatView.AssistantMessage> =>
+  view.messages.flatMap((message) => (Predicate.isTagged(message, "AssistantMessage") ? [message] : []))
 
-const blockMessages = (entries: Entries, kind: string): ReadonlyArray<AssistantEvent.AssistantMessage> =>
-  entries.flatMap(({ event }) =>
-    Predicate.isTagged(event, "AssistantMessage") && event.block?.kind === kind ? [event] : []
-  )
+const messages = (views: Views): ReadonlyArray<string> => sent(latest(views)).map((message) => message.text)
 
-const failures = (entries: Entries) =>
-  entries.flatMap(({ event }) => (Predicate.isTagged(event, "TurnFailed") ? [event.message] : []))
+const blockMessages = (views: Views, kind: string): ReadonlyArray<ChatView.AssistantMessage> =>
+  sent(latest(views)).filter((message) => message.block?.kind === kind)
 
-const idle = (entries: Entries) =>
-  entries.at(-1) !== undefined && Predicate.isTagged(entries.at(-1)!.event, "TurnCompleted")
+const failed = (views: Views) => latest(views).failed
 
-/** The seq of the first fact from a source (with a status, if given). */
-const factSeq = (entries: Entries, source: string, status?: string) =>
-  entries.find(
-    ({ event }) =>
-      Predicate.isTagged(event, "Fact") &&
-      event.source.startsWith(source) &&
-      (status === undefined ||
-        Option.exists(Schema.decodeUnknownOption(Status)(event.payload), (payload) => payload.status === status))
-  )?.seq
+const idle = (views: Views) => views.length > 0 && ChatView.isIdle(latest(views))
 
-/** Where a specialist's report arrived, if it has. */
-const finishedSeq = (entries: Entries) =>
-  entries.find(({ event }) => Predicate.isTagged(event, "SpecialistFinished") && event.status === "answered")?.seq
+/** Whether the assistant said something matching `pattern`, and is done. */
+const said = (views: Views, pattern: RegExp) => idle(views) && messages(views).some((text) => pattern.test(text))
 
-/** One line per entry, for a timeout message. */
-const trace = (entries: Entries) =>
-  entries
-    .map(({ seq, event }) => {
-      const detail =
-        Predicate.isTagged(event, "UserMessage") || Predicate.isTagged(event, "AssistantMessage")
-          ? event.text.slice(0, 120)
-          : Predicate.isTagged(event, "ModelOutput")
-            ? event.parts.flatMap((part) => (part.type === "tool-call" ? [part.name] : [])).join(",")
-            : Predicate.isTagged(event, "ToolResult")
-              ? `${event.tool} (${event.outcome}): ${JSON.stringify(event.result).slice(0, 100)}`
-              : Predicate.isTagged(event, "Fact")
-                ? JSON.stringify(event.payload).slice(0, 120)
-                : ""
+/** Whether a specialist worked, and the assistant said something after it and is done. */
+const reportedBack = (views: Views) => {
+  const from = views.findIndex((view) => view.activity.specialists.length > 0)
 
-      return `  ${seq} ${event._tag} ${detail}`
-    })
+  return from !== -1 && idle(views) && sent(latest(views)).length > sent(views[from]!).length
+}
+
+/** One line per message, for a timeout message. */
+const trace = (views: Views) =>
+  latest(views)
+    .messages.map((message) =>
+      Predicate.isTagged(message, "AssistantMessage")
+        ? `  acme: ${message.text.slice(0, 120)}${message.block === undefined ? "" : ` [${message.block.kind}: ${message.block.status}]`}`
+        : `  user: ${message.text.slice(0, 120)}`
+    )
     .join("\n")
-
-/** Whether the assistant said something after an entry, and is done. */
-const answeredAfter = (entries: Entries, seq: number | undefined) =>
-  seq !== undefined &&
-  idle(entries) &&
-  entries.some((entry) => entry.seq > seq && Predicate.isTagged(entry.event, "AssistantMessage"))
 
 const oneLine = (text: string | undefined) => (text ?? "").replaceAll("\n", " ").slice(0, 160)
 
@@ -126,26 +109,26 @@ const program = Effect.gen(function* () {
     Effect.ignore
   )
 
-  /** Collects a chat's events until `until` holds. */
-  const waitFor = (chatId: ChatId.ChatId, label: string, until: (entries: Entries) => boolean, seconds = 90) => {
-    let seen: Entries = []
+  /** Folds a chat's view until `until` holds for the views so far. */
+  const waitFor = (chatId: ChatId.ChatId, label: string, until: (views: Views) => boolean, seconds = 90) => {
+    let seen: Views = []
 
     return client.Subscribe({ chatId }).pipe(
       Stream.scan(
-        (): Entries => [],
-        (acc, entry) => [...acc, entry]
+        (): Views => [],
+        (views, update) => [...views, ChatView.apply(latest(views), update)]
       ),
-      Stream.tap((entries) => Effect.sync(() => (seen = entries))),
-      Stream.takeUntil((entries) => until(entries) || failures(entries).length > 0),
+      Stream.tap((views) => Effect.sync(() => (seen = views))),
+      Stream.takeUntil((views) => until(views) || failed(views)),
       Stream.runLast,
-      Effect.map(Option.getOrElse((): Entries => [])),
+      Effect.map(Option.getOrElse((): Views => [])),
       Effect.timeoutOrElse({
         duration: Duration.seconds(seconds),
         orElse: () => Effect.fail(`${label}: timed out; the chat so far:\n${trace(seen)}`)
       }),
       Effect.filterOrFail(
-        (entries) => failures(entries).length === 0,
-        (entries) => `${label}: turn failed: ${failures(entries).join(" | ").slice(0, 400)}`
+        (views) => !failed(views),
+        (views) => `${label}: a turn failed (the server's log says why); the chat so far:\n${trace(views)}`
       )
     )
   }
@@ -157,7 +140,7 @@ const program = Effect.gen(function* () {
   /** Uses a block the way the web app does. */
   const answer = (
     chatId: ChatId.ChatId,
-    message: AssistantEvent.AssistantMessage,
+    message: ChatView.AssistantMessage,
     value: Record<string, string | boolean> | Decision.Answer
   ) =>
     client.Submit({
@@ -230,7 +213,9 @@ const program = Effect.gen(function* () {
     Effect.gen(function* () {
       const chatId = yield* newChat
       yield* send(chatId, "What did the Amsterdam office order recently?")
-      yield* waitFor(chatId, "first step", (es) => es.some(({ event }) => Predicate.isTagged(event, "ModelOutput")))
+      // Working on it: the second question arrives while the first turn runs.
+      yield* waitFor(chatId, "working", (views) => latest(views).activity.working)
+      yield* Effect.sleep("1500 millis")
       yield* send(chatId, "Also: what's the address of the London office?")
 
       const entries = yield* waitFor(
@@ -254,12 +239,7 @@ const program = Effect.gen(function* () {
 
       yield* approve(chatId, "campaign")
 
-      const done = yield* waitFor(
-        chatId,
-        "first results",
-        (es) => answeredAfter(es, factSeq(es, "workflow:CreateCampaign", "first_results")),
-        240
-      )
+      const done = yield* waitFor(chatId, "first results", (views) => said(views, /conversion|clicks/i), 240)
 
       console.log(`     campaign > ${oneLine(messages(done).at(-1))}`)
     })
@@ -272,19 +252,18 @@ const program = Effect.gen(function* () {
       yield* send(chatId, "Please order 300 cotton tote bags for the Berlin office.")
       yield* approve(chatId, "products")
 
-      const shipped = yield* waitFor(
-        chatId,
-        "shipped",
-        (es) => answeredAfter(es, factSeq(es, "workflow:PrintOrder", "shipped")),
-        240
-      )
-
-      if (!messages(shipped).join(" ").includes("1Z")) return yield* Effect.fail("products: no tracking number shared")
+      // The tracking number is only in the workflow's shipped step: the assistant shared it.
+      const shipped = yield* waitFor(chatId, "shipped, with tracking", (views) => said(views, /1Z/), 240)
+      const before = messages(shipped).length
 
       const delivered = yield* waitFor(
         chatId,
         "delivered",
-        (es) => answeredAfter(es, factSeq(es, "workflow:PrintOrder", "delivered")),
+        (views) =>
+          idle(views) &&
+          messages(views)
+            .slice(before)
+            .some((text) => /deliver/i.test(text)),
         240
       )
 
@@ -300,7 +279,7 @@ const program = Effect.gen(function* () {
         chatId,
         "Have research put together a report on how our campaigns performed this year, ranked by cost per conversion, with a recommendation for Q4."
       )
-      const entries = yield* waitFor(chatId, "report", (es) => answeredAfter(es, finishedSeq(es)), 300)
+      const entries = yield* waitFor(chatId, "report", reportedBack, 300)
       console.log(`     research > ${oneLine(messages(entries).at(-1))}`)
     })
   )
