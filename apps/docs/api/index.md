@@ -25,6 +25,8 @@ import * as Assistant from "effect-assistant/Assistant"
 - [BlockKit](./BlockKit)
 - [ChatId](./ChatId)
 - [ChatLog](./ChatLog)
+- [Decision](./Decision)
+- [DecisionId](./DecisionId)
 - [InputId](./InputId)
 - [Instructions](./Instructions)
 - [RunId](./RunId)

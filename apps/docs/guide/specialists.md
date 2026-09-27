@@ -146,6 +146,10 @@ Runs are fibers next to the chat's turns: with `AssistantEngine.layerCluster`,
 in the chat's entity, which keeps itself alive while a run (or a turn for its
 answer) works. A finished run stays warm for 15 minutes for follow-ups.
 
+A run can't ask the user anything: a call of its own to a tool that needs the
+user's [decision](./decisions#specialists) fails, and it reports what needs
+deciding.
+
 Runs aren't durable. That's deliberate: a specialist is a quick helper, not
 a durable job. A run cut off by a shutdown answers that it was cut off, so
 the assistant can spawn it again; with the cluster engine, the chat's entity

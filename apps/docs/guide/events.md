@@ -32,6 +32,7 @@ Each event is stored as an `AssistantEvent.Entry`: the chat id, a `seq`
 | `TurnStarted`, `TurnCompleted`, `TurnFailed` | [Turn](./turns) bookkeeping.                                                                                             |
 | `SpecialistStarted`, `SpecialistFinished`    | A [specialist](./specialists) run working, and done; a finished run's report wakes a turn.                               |
 | `BlocksClosed`                               | [Blocks](./blocks) closed without an answer.                                                                             |
+| `DecisionRequested`, `DecisionResolved`      | A [decision](./decisions) the user is asked to make (for a parked call, or by running work), and how they decided.       |
 | Your own events and inputs                   | [Yours](#your-own-events-and-inputs), like a summary or an uploaded file, stored as themselves.                          |
 
 A `ModelOutput` is one model call: its response parts (text, reasoning, and
@@ -43,7 +44,8 @@ writes), and how long it took. A `ToolResult` is a call's `outcome`
 the log to the trace.
 
 The first three are **inputs**: submitting one starts a turn, or joins the
-one that is running. A chat client may submit `UserMessage` and
+one that is running. So is a `SpecialistFinished`, and a `DecisionRequested`
+that running work submits (not one for a parked call, which the turn records). A chat client may submit `UserMessage` and
 `BlockAnswer` (`AssistantEvent.UserInput`); facts come from your server,
 which submits them itself.
 

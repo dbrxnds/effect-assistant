@@ -67,13 +67,15 @@ So a fact can say what it needs rather than what to say:
 
 ```ts
 AssistantEvent.Fact.make({
-  id: InputId.fromKey(`${runId}:awaiting_approval`),
-  source: "workflow:CreateCampaign",
-  payload: { status: "needs_approval", budget: 4800, next: "Get the user's approval for the budget." }
+  id: InputId.fromKey(`${runId}:needs_date`),
+  source: "workflow:PrintOrder",
+  payload: { status: "needs_date", next: "Ask the user which delivery date works: Tuesday or Thursday." }
 })
 ```
 
-The assistant writes the message, and can attach a confirm [block](./blocks).
+The assistant writes the message, and can attach a [block](./blocks). An
+approval is a [decision](./decisions): the workflow asks for one, and the
+assistant asks the user with the decision block.
 
 ## A reply to every message
 

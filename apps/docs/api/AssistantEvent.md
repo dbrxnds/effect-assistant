@@ -24,6 +24,9 @@ every model call.
 - Specialist runs: `SpecialistStarted`, `SpecialistFinished`. A
   finished run is an input too: its report wakes a turn.
 - Blocks closed without an answer: `BlocksClosed`.
+- Decisions the user is asked to make: `DecisionRequested`, when a
+  tool call waits for one or work asks for one (that one is an input), and
+  `DecisionResolved`, once the user answered its decision block.
 - The app's own events and inputs, like a summary for compaction or an
   uploaded file: `AppEvent`, as they're stored. An assistant's
   `events` and `inputs` decode them to their own types.
@@ -368,10 +371,12 @@ class Fact extends Schema.TaggedClass<Fact>()("Fact", {
 
 ### Input
 
-Schema for everything `Assistant.submit` accepts.
+Schema for everything `Assistant.submit` accepts. A `DecisionRequested` is
+one only when work requests it (`origin: Work`); the chat refuses a parked
+call submitted from outside.
 
 ```ts
-const Input = Schema.Union([UserMessage, BlockAnswer, Fact, SpecialistFinished])
+const Input = Schema.Union([UserMessage, BlockAnswer, Fact, SpecialistFinished, DecisionRequested])
 ```
 
 <small>Since 0.1.0</small>
@@ -467,7 +472,7 @@ const isLibraryEvent: (event: { readonly _tag: string }) => event is AssistantEv
 ### isInput
 
 Returns whether an event is an input: a user message, a block answer, a
-fact, or a finished specialist run.
+fact, a finished specialist run, or a decision that work requests.
 
 ```ts
 const isInput: (event: { readonly _tag: string }) => event is Input
@@ -514,6 +519,111 @@ Returns the text of every message the user was shown, in order.
 
 ```ts
 const assistantTexts: (entries: ReadonlyArray<AnyEntry>) => ReadonlyArray<string>
+```
+
+<small>Since 0.1.0</small>
+
+## Decisions
+
+### DecisionOutcome
+
+Schema for how the user decided: `"approved"` or `"declined"`.
+
+```ts
+const DecisionOutcome = Schema.Literals(["approved", "declined"])
+```
+
+<small>Since 0.1.0</small>
+
+### DecisionOutcome
+
+How the user decided.
+
+```ts
+type DecisionOutcome = typeof DecisionOutcome.Type
+```
+
+<small>Since 0.1.0</small>
+
+### CallOrigin
+
+Schema for a decision a tool call waits for: the call, as the model wrote
+it. Approving it runs exactly this call.
+
+```ts
+const CallOrigin = Schema.TaggedStruct("Call", { …
+```
+
+<small>Since 0.1.0</small>
+
+### CallOrigin
+
+A decision a tool call waits for.
+
+```ts
+type CallOrigin = typeof CallOrigin.Type
+```
+
+<small>Since 0.1.0</small>
+
+### WorkOrigin
+
+Schema for a decision that running work asks for, like a workflow: who
+asks (`source`, as for a fact), and, for a workflow waiting on it, the
+`DurableDeferred` token the answer completes.
+
+```ts
+const WorkOrigin = Schema.TaggedStruct("Work", { …
+```
+
+<small>Since 0.1.0</small>
+
+### WorkOrigin
+
+A decision that running work asks for.
+
+```ts
+type WorkOrigin = typeof WorkOrigin.Type
+```
+
+<small>Since 0.1.0</small>
+
+### DecisionRequested
+
+The user is asked to decide something: approve or decline.
+
+- From a tool call (`origin: Call`): the model called a tool that needs
+  the user's decision, and the loop parked the call instead of running it.
+  The model reads this as the call's result. It's not an input.
+- From work (`origin: Work`): something already running asks, like a
+  workflow. It's an input: it wakes a turn, like a fact.
+
+Either way the user sees nothing yet: the model sends a message with a
+decision block for its id. `preview` is what they decide on, like an
+order's total, in JSON.
+
+```ts
+class DecisionRequested extends Schema.TaggedClass<DecisionRequested>()("DecisionRequested", {
+  id: DecisionId,
+  origin: Schema.Union([CallOrigin, WorkOrigin]),
+  preview: Schema.Json
+})
+```
+
+<small>Since 0.1.0</small>
+
+### DecisionResolved
+
+A decision is made: the user answered a decision block for it (`answer` is
+that `BlockAnswer`'s id). An approved call runs next, at the turn's next
+step; a workflow's decision is passed on to it before this is stored.
+
+```ts
+class DecisionResolved extends Schema.TaggedClass<DecisionResolved>()("DecisionResolved", {
+  id: DecisionId,
+  outcome: DecisionOutcome,
+  answer: InputId
+})
 ```
 
 <small>Since 0.1.0</small>

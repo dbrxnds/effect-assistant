@@ -140,7 +140,7 @@ the same every time the call runs.
 import { AssistantToolCall, RunId } from "effect-assistant"
 
 const PlaceOrder = Tool.make("place_order", {
-  description: "Places the order the user confirmed.",
+  description: "Places an order.",
   parameters: OrderInput,
   success: Schema.Struct({ runId: RunId.RunId }),
   dependencies: [AssistantToolCall.AssistantToolCall]
@@ -157,9 +157,13 @@ const placeOrder = (input: typeof OrderInput.Type) =>
 ```
 
 A side effect that can't take a key, like sending an email, goes in a
-workflow step, which runs once per key however often the tool call does, or
-behind the user's approval with a block. That's how durable-execution tools
-handle it too: a step runs at least once, and the side effect is idempotent.
+workflow step, which runs once per key however often the tool call does.
+That's how durable-execution tools handle it too: a step runs at least once,
+and the side effect is idempotent.
+
+A tool whose effect the user must approve first sets `needsApproval`: the
+call waits for the user's [decision](./decisions), with a preview of what
+it will do, and runs once they approve.
 
 A call whose handler stopped while it ran (not a crash) gets a failed result
 saying it may have run (kind `may_have_run`); one that never started, that it
@@ -223,5 +227,6 @@ const MyAssistantHandlers = MyAssistant.toLayer(
 ```
 
 Keep the tools an assistant uses often in the toolkit directly; discovery
-costs an extra step. For discovery over the tools a user may use, build it in
+costs an extra step. `execute_tool` doesn't run a tool that needs the user's
+[decision](./decisions): keep those in the toolkit directly too. For discovery over the tools a user may use, build it in
 the handler, over [that user's tools](./chats#tools-per-user).

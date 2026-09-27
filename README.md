@@ -7,7 +7,7 @@ research in the background, and messages you when there's news.
 
 | Path                        | What                                                                                                                                            |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/effect-assistant` | The assistant library: event log, agent loop, specialists, skills, UI blocks, memory and cluster layers. [Docs](./apps/docs)                    |
+| `packages/effect-assistant` | The assistant library: event log, agent loop, specialists, skills, UI blocks, decisions, memory and cluster layers. [Docs](./apps/docs)         |
 | `packages/demo/api`         | The demo server, for a fictional company, Acme: assistant config, tools and prompts, the `CreateCampaign` workflow, RPC, and the built web app. |
 | `packages/demo/shared`      | What web and API share: RPCs, UI blocks, ids, and demo data (orders, offices).                                                                  |
 | `apps/web`                  | Chat UI. One RPC WebSocket per tab.                                                                                                             |
