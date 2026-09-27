@@ -9,6 +9,7 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as FiberSet from "effect/FiberSet"
+import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as PubSub from "effect/PubSub"
 import * as Ref from "effect/Ref"
@@ -19,7 +20,9 @@ import { AssistantChat } from "../AssistantChat.ts"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import type { ChatId } from "../ChatId.ts"
 import { ChatLog } from "../ChatLog.ts"
+import type { InputId } from "../InputId.ts"
 import * as SpecialistService from "../Specialist.ts"
+import * as Decisions from "./decisions.ts"
 import * as History from "./history.ts"
 import * as Specialists from "./specialists.ts"
 import * as Turns from "./turns.ts"
@@ -33,6 +36,16 @@ const idOf = (event: { readonly _tag: string }): string | undefined =>
     : Predicate.hasProperty(event, "id") && Predicate.isString(event.id)
       ? event.id
       : undefined
+
+/** Whether an input is a workflow's decision: the answer completes its deferred, which takes a workflow engine. */
+const needsWorkflows = (input: AssistantEvent.Input | AssistantEvent.AppEvent) =>
+  AssistantEvent.isLibraryEvent(input) &&
+  Predicate.isTagged(input, "DecisionRequested") &&
+  Predicate.isTagged(input.origin, "Work") &&
+  input.origin.token !== undefined
+
+const noWorkflows = (request: { readonly _tag: string }) =>
+  `A workflow's ${request._tag} needs the WorkflowEngine to pass the answer on: provide it to the assistant's layer.`
 
 /** The chat's live entries, for its subscribers; shut down with the chat. */
 const makeChannelPubSub = Effect.acquireRelease(PubSub.unbounded<AssistantEvent.Entry>(), PubSub.shutdown)
@@ -89,6 +102,8 @@ export const makeChat = Effect.fn(function* (options: {
   const storage = yield* ChatLog
   const channel = yield* makeChannelPubSub
   const writes = yield* Semaphore.make(1)
+  // Inputs are stored one at a time, with the decisions they make: an answer checks the decisions the last one made.
+  const storing = yield* Semaphore.make(1)
   const turnsLock = yield* Semaphore.make(1)
   const holding = yield* makeHolding(options.keepAlive)
   const background = yield* FiberSet.make()
@@ -112,16 +127,67 @@ export const makeChat = Effect.fn(function* (options: {
     append: (events) => Semaphore.withPermit(writes)(write(events))
   })
 
-  /** Stores the input unless an input with its id is already stored. */
-  const store = Effect.fn(
-    function* (input: AssistantEvent.Input | AssistantEvent.AppEvent) {
-      const id = idOf(input)
-      const stored = yield* Ref.get(entries)
+  /** Passes a workflow's decision on: completes the deferred it waits on. */
+  const deliver = ({ request, outcome }: Decisions.Decided) => {
+    const { origin } = request
 
-      if (id === undefined || !stored.some(({ event }) => idOf(event) === id)) yield* write([input])
-    },
+    if (!Predicate.isTagged(origin, "Work") || origin.token === undefined) return Effect.void
+
+    const token = origin.token
+
+    return Option.match(registration.workflows, {
+      onNone: () => Effect.die(noWorkflows(request)),
+      onSome: (workflows) => Effect.provideContext(Decisions.complete(token, outcome), workflows)
+    })
+  }
+
+  /** Records what an answer decided, once any workflow waiting on it has it. */
+  const resolve = Effect.fn(function* (decided: ReadonlyArray<Decisions.Decided>, answer: InputId) {
+    yield* Effect.forEach(decided, deliver, { discard: true })
+    yield* chat.append(
+      decided.map(({ request, outcome }) => AssistantEvent.DecisionResolved.make({ id: request.id, outcome, answer }))
+    )
+  })
+
+  /**
+   * Stores the input unless an input with its id is already stored, or the chat refuses it: a decision answer that
+   * doesn't fit its block or what's still waiting. A decision answer's decisions are resolved before the next input.
+   */
+  const store = Effect.fn(function* (input: AssistantEvent.Input | AssistantEvent.AppEvent) {
+    if (needsWorkflows(input) && Option.isNone(registration.workflows)) return yield* Effect.die(noWorkflows(input))
+
     // Checked under the write lock: a retry that arrives while the first submit is storing is stored once.
-    Semaphore.withPermit(writes)
+    const verdict = yield* Semaphore.withPermit(writes)(
+      Effect.gen(function* () {
+        const stored = yield* Ref.get(entries)
+        const id = idOf(input)
+
+        if (id !== undefined && stored.some(({ event }) => idOf(event) === id)) return Option.none()
+
+        const verdict = Decisions.verdict(stored, input)
+
+        if (Predicate.isTagged(verdict, "Refuse")) {
+          yield* Effect.logWarning(`assistant chat refused ${input._tag}: ${verdict.reason}`)
+
+          return Option.none()
+        }
+
+        yield* write([input])
+
+        return Option.some(verdict)
+      })
+    )
+
+    if (Option.isSome(verdict) && Predicate.isTagged(verdict.value, "Decide")) {
+      yield* resolve(verdict.value.decided, verdict.value.answer)
+    }
+  }, Semaphore.withPermit(storing))
+
+  // A restart between storing an answer and resolving it: resolve it now, before anything reads the chat.
+  yield* Effect.forEach(
+    Decisions.unresolved(yield* Ref.get(entries)),
+    (decided) => resolve([decided], decided.answer),
+    { discard: true }
   )
 
   // The handlers' builds run now, in the chat's scope: what they set up lives while the chat does.
@@ -155,6 +221,7 @@ export const makeChat = Effect.fn(function* (options: {
 
   const services = Context.make(AssistantChat, chat).pipe(
     Context.add(SpecialistService.Runner, runner),
+    Context.add(Decisions.TurnDecisions, Option.some({ approved: Effect.map(chat.entries, Decisions.approvedCalls) })),
     Context.merge(registration.model)
   )
 

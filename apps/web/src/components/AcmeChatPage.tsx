@@ -64,9 +64,10 @@ export function AcmeChatPage() {
     () => ({
       byId: new Map(state.messages.map((message) => [message.id, message])),
       states: state.blocks,
+      decisions: state.decisions,
       respond: (answer) => void send(answer)
     }),
-    [state.messages, state.blocks, send]
+    [state.messages, state.blocks, state.decisions, send]
   )
 
   const openChat = (next: ChatId.ChatId) => {

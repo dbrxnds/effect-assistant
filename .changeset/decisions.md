@@ -1,0 +1,11 @@
+---
+"effect-assistant": minor
+---
+
+Decisions: what the user approves or declines, like placing an order. A tool with Effect's `needsApproval` (static, or a function of its params) is parked when the model calls it instead of running: its preview runs (`AssistantLoop.tools(toolkit, { previews })`, an Effect of the params), and the model reads that the call waits, with the decision's id and the preview. Running work asks with `Decision.durable` (a workflow waits on a `DurableDeferred` until the answer) or `Decision.request` from any app code (`Decision.outcome` waits for it). The library never asks the user: the model sends a message with the decision block, `Decision.block`, for one decision or several, and only its answer decides. An approved call runs at the turn's next step exactly as the model made it, with the same call id; a declined one never runs. The chat takes answers one at a time and refuses one whose block is closed, that doesn't decide exactly the decisions its block asks for, or that decides one already decided. New events: `DecisionRequested` (a work request is an input) and `DecisionResolved`; `Decision.states` folds them for a client, and `DecisionId` is the id's schema.
+
+Breaking changes, and how to migrate:
+
+- **More events.** `AssistantEvent.AssistantEvent` has `DecisionRequested` and `DecisionResolved`, `AssistantEvent.Input` has `DecisionRequested`, and `AssistantLoop.Event` (what a loop emits, and a handler returns) has `DecisionRequested`. An exhaustive match over any of them adds the new cases; a custom specialist or loop that records events passes a `DecisionRequested` through like a `ToolResult`.
+- **`needsApproval` is honored.** A tool that sets it no longer runs when the model calls it: it waits for the user's decision, and an assistant whose loop has such a tool needs `Decision.block` in its blocks (its turn fails, saying so, otherwise). A specialist's call to one fails (kind `needs_decision`), and `execute_tool` refuses one.
+- **Approvals move to decisions.** A workflow that reported an approval token in a fact, for a tool to complete once the user answered a confirm block, asks with `Decision.durable` instead and gets the outcome; the tool and the token go. Provide the `WorkflowEngine` to the assistant's layer, so the answer can complete the workflow's deferred.

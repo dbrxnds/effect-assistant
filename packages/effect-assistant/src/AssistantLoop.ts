@@ -57,20 +57,28 @@ import type * as Tool from "effect/unstable/ai/Tool"
 import type * as Toolkit from "effect/unstable/ai/Toolkit"
 import * as AssistantEvent from "./AssistantEvent.ts"
 import type { AssistantToolCall } from "./AssistantToolCall.ts"
+import * as DecisionId from "./DecisionId.ts"
 import type * as Instructions from "./Instructions.ts"
+import * as Decisions from "./internal/decisions.ts"
 import * as History from "./internal/history.ts"
 import * as Telemetry from "./internal/telemetry.ts"
 import * as Toolkits from "./internal/toolkit.ts"
 import { endsTurn } from "./internal/tools.ts"
+import type * as ToolFailure from "./ToolFailure.ts"
 
 /**
  * What the loop produces: each model call's output, then for each of its tool
- * calls a `ToolStarted` before it runs and its result.
+ * calls a `ToolStarted` before it runs and its result, or, for a call that
+ * waits for the user's decision, its `DecisionRequested`.
  *
  * @category models
  * @since 0.1.0
  */
-export type Event = AssistantEvent.ModelOutput | AssistantEvent.ToolStarted | AssistantEvent.ToolResult
+export type Event =
+  | AssistantEvent.ModelOutput
+  | AssistantEvent.ToolStarted
+  | AssistantEvent.ToolResult
+  | AssistantEvent.DecisionRequested
 
 /**
  * How a tool call went: success or failure, its result in JSON, as the model
@@ -103,6 +111,19 @@ export interface CallResult {
 export interface Tools<out R = never> {
   readonly definitions: ReadonlyArray<Tool.Any>
   readonly run: (call: AssistantEvent.ToolCallPart) => Effect.Effect<CallResult, never, R>
+  /**
+   * Whether a call waits for the user's decision instead of running (see
+   * `Decision`): its tool's native `needsApproval`. Default: never.
+   */
+  readonly needsDecision?:
+    | ((call: AssistantEvent.ToolCallPart, history: ReadonlyArray<Prompt.Message>) => Effect.Effect<boolean, never, R>)
+    | undefined
+  /**
+   * What the user sees for a call that waits for their decision: its preview
+   * in JSON, or a failure the model reads instead, and the call isn't parked.
+   * Default: no preview.
+   */
+  readonly preview?: ((call: AssistantEvent.ToolCallPart) => Effect.Effect<CallResult, never, R>) | undefined
 }
 
 /**
@@ -111,10 +132,37 @@ export interface Tools<out R = never> {
  * @category utility types
  * @since 0.1.0
  */
-export type ToolServices<Tools extends Record<string, Tool.Any>> = Exclude<
-  Tool.HandlerServices<Tools[keyof Tools]>,
-  AssistantToolCall
->
+export type ToolServices<Tools extends Record<string, Tool.Any>> =
+  | Exclude<Tool.HandlerServices<Tools[keyof Tools]>, AssistantToolCall>
+  // Already in the handlers' services; stated for the loop, which decodes params to decide on a call.
+  | Tools[keyof Tools]["parametersSchema"]["DecodingServices"]
+
+/**
+ * What the user sees before they decide on a call to a tool that needs their
+ * decision, by tool name: an Effect of the call's params, like the order's
+ * total, run when the call is parked. It may use the services its tool
+ * declares, and `AssistantToolCall`. Its value is stored in JSON; its
+ * `ToolFailure` goes to the model instead, and the call isn't parked.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Previews<Tools extends Record<string, Tool.Any>, R = never> = {
+  readonly [Name in keyof Tools]?: (
+    params: Tools[Name]["parametersSchema"]["Type"]
+  ) => Effect.Effect<unknown, ToolFailure.ToolFailure, R>
+}
+
+/**
+ * Options for {@link tools}.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface ToolsOptions<Tools extends Record<string, Tool.Any>, R = never> {
+  /** What the user sees before they decide on a call that needs their decision (see `Decision`). */
+  readonly previews?: Previews<Tools, R> | undefined
+}
 
 /**
  * Tools from a native toolkit: with its handlers, resolved (`yield* MyToolkit`
@@ -149,26 +197,49 @@ export type ToolServices<Tools extends Record<string, Tool.Any>> = Exclude<
  * const MyAssistantLive = MyAssistant.toLayer((turn) => turn.loop({ instructions: "You help a small team.", toolkit }))
  * ```
  *
+ * A tool whose `needsApproval` says so waits for the user's decision instead
+ * of running (see `Decision`); `previews` says what the user decides on.
+ *
  * @category constructors
  * @since 0.1.0
  */
-export function tools<T extends Record<string, Tool.Any>>(
+export function tools<T extends Record<string, Tool.Any>, RP = never>(
   toolkit: Toolkit.Toolkit<T>,
-  handlers: Toolkit.HandlersFrom<T>
-): Tools<ToolServices<T>>
-export function tools<T extends Record<string, Tool.Any>>(toolkit: Toolkit.WithHandler<T>): Tools<ToolServices<T>>
+  handlers: Toolkit.HandlersFrom<T>,
+  options?: ToolsOptions<T, RP>
+): Tools<ToolServices<T> | Exclude<RP, AssistantToolCall>>
+export function tools<T extends Record<string, Tool.Any>, RP = never>(
+  toolkit: Toolkit.WithHandler<T>,
+  options?: ToolsOptions<T, RP>
+): Tools<ToolServices<T> | Exclude<RP, AssistantToolCall>>
 export function tools<T extends Record<string, Tool.Any>>(
   toolkit: Toolkit.Toolkit<T>
 ): Tools<ToolServices<T> | Tool.HandlersFor<T>>
 // Each overload states what the tools need; an unresolved toolkit is an Effect, which resolves it with its handlers.
-export function tools<T extends Record<string, Tool.Any>>(
-  toolkit: Toolkit.WithHandler<T> | Toolkit.Toolkit<T>,
-  handlers?: Toolkit.HandlersFrom<T>
-): Tools<ToolServices<T> | Tool.HandlersFor<T>> {
-  if (!Effect.isEffect(toolkit)) return Toolkits.fromWithHandler(toolkit)
+export function tools<T extends Record<string, Tool.Any>, RP>(
+  ...args: ToolsArgs<T, RP>
+): Tools<ToolServices<T> | Tool.HandlersFor<T> | Exclude<RP, AssistantToolCall>> {
+  if (isResolved(args)) return Toolkits.fromWithHandler(args[0], args[1]?.previews)
 
-  return handlers === undefined ? Toolkits.fromToolkit(toolkit) : Toolkits.withHandlers(toolkit, handlers)
+  const [toolkit, handlers, options] = args
+
+  return handlers === undefined
+    ? Toolkits.fromToolkit(toolkit)
+    : Toolkits.withHandlers(toolkit, handlers, options?.previews)
 }
+
+type ResolvedArgs<T extends Record<string, Tool.Any>, RP> = readonly [
+  toolkit: Toolkit.WithHandler<T>,
+  options?: ToolsOptions<T, RP>
+]
+
+type ToolsArgs<T extends Record<string, Tool.Any>, RP> =
+  | ResolvedArgs<T, RP>
+  | readonly [toolkit: Toolkit.Toolkit<T>, handlers?: Toolkit.HandlersFrom<T>, options?: ToolsOptions<T, RP>]
+
+// An unresolved toolkit is an Effect; what follows it depends on which one it is.
+const isResolved = <T extends Record<string, Tool.Any>, RP>(args: ToolsArgs<T, RP>): args is ResolvedArgs<T, RP> =>
+  !Effect.isEffect(args[0])
 
 /**
  * Two sets of tools together, like the assistant's own and the app's.
@@ -237,7 +308,10 @@ export interface StepResult {
  * so the model call runs none.
  */
 const requestToolkit = (definitions: ReadonlyArray<Tool.Any>): Toolkit.WithHandler<Record<string, Tool.Any>> => ({
-  tools: Object.fromEntries(definitions.map((tool) => [tool.name, tool])),
+  // The loop decides which calls wait for the user's decision; the model call would ask for approvals of its own.
+  tools: Object.fromEntries(
+    definitions.map((tool) => [tool.name, tool.needsApproval === undefined ? tool : tool.setNeedsApproval(false)])
+  ),
   handle: () => Effect.succeed(Stream.empty)
 })
 
@@ -274,30 +348,80 @@ const runCall = <R>(tools: Tools<R>, call: AssistantEvent.ToolCallPart) =>
     Effect.map((result) => AssistantEvent.ToolResult.make({ callId: call.id, tool: call.name, ...result }))
   )
 
+/** A call to run: `approved` when the user approved it, so it runs without asking again. */
+interface Pending {
+  readonly call: AssistantEvent.ToolCallPart
+  readonly approved: boolean
+}
+
 /**
- * Runs the calls: first a `ToolStarted` for each (stored before any runs), then their results,
- * concurrently, then `then`, told whether any of them failed.
+ * Parks a call that needs the user's decision: its preview, then its `DecisionRequested`. Only a turn parks: a
+ * specialist's call fails instead, and so does one whose preview fails.
+ */
+const park = <R>(tools: Tools<R>, call: AssistantEvent.ToolCallPart) =>
+  Effect.gen(function* () {
+    const failure = (result: CallResult) =>
+      AssistantEvent.ToolResult.make({ callId: call.id, tool: call.name, ...result })
+
+    if (Option.isNone(yield* Decisions.TurnDecisions)) {
+      return failure(
+        Toolkits.failed(
+          `${call.name} needs the user's decision, and only the assistant can ask them. Don't run it: say in your answer what needs deciding, with the details.`,
+          "needs_decision"
+        )
+      )
+    }
+
+    const preview = yield* Toolkits.previewOf(tools, call)
+
+    if (preview.outcome === "failure") return failure(preview)
+
+    return AssistantEvent.DecisionRequested.make({
+      id: DecisionId.forCall(call.id),
+      origin: AssistantEvent.CallOrigin.make({ callId: call.id, tool: call.name, params: call.params }),
+      preview: preview.result
+    })
+  }).pipe(Telemetry.toolSpan(call))
+
+/**
+ * Runs the calls: first a `ToolStarted` for each that runs (stored before any runs), then their results
+ * concurrently, with a `DecisionRequested` for each that waits for the user's decision instead, then `then`, told
+ * whether the model has to read them: one failed, or waits.
  */
 const runCalls = <R, S, E, R2>(
   tools: Tools<R>,
-  calls: ReadonlyArray<AssistantEvent.ToolCallPart>,
-  then: (failed: boolean) => Stream.Stream<Step<never, S>, E, R2>
+  pending: ReadonlyArray<Pending>,
+  history: ReadonlyArray<Prompt.Message>,
+  then: (reread: boolean) => Stream.Stream<Step<never, S>, E, R2>
 ): Stream.Stream<Step<Event, S>, E, R | R2> =>
-  Stream.fromIterable(
-    calls.map((call) => value(AssistantEvent.ToolStarted.make({ callId: call.id, tool: call.name })))
-  ).pipe(
-    Stream.concat(
-      Stream.unwrap(
-        Effect.map(
-          Effect.forEach(calls, (call) => runCall(tools, call), { concurrency: "unbounded" }),
-          (results) =>
-            Stream.fromIterable(results.map(value)).pipe(
-              Stream.concat(then(results.some((result) => result.outcome === "failure")))
-            )
+  Stream.unwrap(
+    Effect.gen(function* () {
+      const parks = yield* Effect.forEach(pending, ({ call, approved }) =>
+        approved ? Effect.succeed(false) : Toolkits.needsDecisionOf(tools, call, history)
+      )
+
+      const started = pending.flatMap(({ call }, i) =>
+        parks[i] ? [] : [value(AssistantEvent.ToolStarted.make({ callId: call.id, tool: call.name }))]
+      )
+
+      const results = Effect.forEach(pending, ({ call }, i) => (parks[i] ? park(tools, call) : runCall(tools, call)), {
+        concurrency: "unbounded"
+      })
+
+      const reread = (done: ReadonlyArray<Event>) =>
+        done.some((event) => Predicate.isTagged(event, "DecisionRequested") || isFailure(event))
+
+      return Stream.fromIterable(started).pipe(
+        Stream.concat(
+          Stream.unwrap(
+            Effect.map(results, (done) => Stream.fromIterable(done.map(value)).pipe(Stream.concat(then(reread(done)))))
+          )
         )
       )
-    )
+    })
   )
+
+const isFailure = (event: Event) => Predicate.isTagged(event, "ToolResult") && event.outcome === "failure"
 
 /**
  * What a loop body emits: a value, or what to do next.
@@ -376,14 +500,16 @@ export const loop = <S, A, E, R>(
 /**
  * One step of the agent loop, as a body for {@link loop}: it calls the model
  * with the current history and emits its `ModelOutput`, then runs the
- * output's tool calls and emits a `ToolStarted` and a `ToolResult` for each.
+ * output's tool calls and emits a `ToolStarted` and a `ToolResult` for each,
+ * or a `DecisionRequested` for one that waits for the user's decision.
  * `then` decides what comes next: `AssistantLoop.next(state)` or
  * `AssistantLoop.stop()`.
  *
  * **Details**
  *
  * A step whose history has calls a crash cut off runs those first, with the
- * same ids, and doesn't call the model. Whoever consumes the loop records each event
+ * same ids, and doesn't call the model; so does one in a turn with calls the
+ * user approved (see `Decision`), as the model made them. Whoever consumes the loop records each event
  * before pulling the next, so the next step's history has it; `then` runs
  * after the step's events are recorded.
  *
@@ -420,9 +546,23 @@ export const step = <R, S, E2 = never, R2 = never>(
       // Calls a crash cut off, with no result: they run again, with the same ids, before the model goes on.
       const cutOff = History.unansweredCalls(history)
 
-      if (cutOff.length > 0) {
-        return runCalls(toolkit, cutOff, () =>
-          after({ output: undefined, done: false, historyLength: history.length + cutOff.length })
+      // Calls the user approved: they run as the model made them, before the model goes on. Not in a loop without them.
+      const approved = yield* Option.match(yield* Decisions.TurnDecisions, {
+        onNone: () => Effect.succeed([]),
+        onSome: (decisions) =>
+          Effect.map(decisions.approved, (calls) =>
+            calls.filter((call) => toolkit.definitions.some((tool) => tool.name === call.name))
+          )
+      })
+
+      if (cutOff.length > 0 || approved.length > 0) {
+        const pending = [
+          ...cutOff.map((call) => ({ call, approved: false })),
+          ...approved.map((call) => ({ call, approved: true }))
+        ]
+
+        return runCalls(toolkit, pending, history, () =>
+          after({ output: undefined, done: false, historyLength: history.length + pending.length })
         )
       }
 
@@ -447,15 +587,20 @@ export const step = <R, S, E2 = never, R2 = never>(
       const calls = toolCalls(output.parts)
       const historyLength = history.length + Prompt.fromResponseParts(output.parts).content.length + calls.length
 
-      // A failed call doesn't end the turn: a message that failed never reached the user, so the model reads why.
+      // A failed call doesn't end the turn: a message that failed never reached the user, so the model reads why. Nor
+      // does a parked one: the model asks the user for the decision it waits for.
       return Stream.make(value(output)).pipe(
         Stream.concat(
-          runCalls(toolkit, calls, (failed) =>
-            after({
-              output,
-              done: calls.length === 0 || (!failed && calls.some(endsTurn)),
-              historyLength
-            })
+          runCalls(
+            toolkit,
+            calls.map((call) => ({ call, approved: false })),
+            history,
+            (reread) =>
+              after({
+                output,
+                done: calls.length === 0 || (!reread && calls.some(endsTurn)),
+                historyLength
+              })
           )
         )
       )

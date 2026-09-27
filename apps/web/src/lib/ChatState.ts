@@ -9,6 +9,7 @@ import * as AssistantActivity from "effect-assistant/AssistantActivity"
 import type * as AssistantEvent from "effect-assistant/AssistantEvent"
 import * as BlockKit from "effect-assistant/BlockKit"
 import type * as ChatId from "effect-assistant/ChatId"
+import * as Decision from "effect-assistant/Decision"
 import * as Match from "effect/Match"
 import * as Atom from "effect/unstable/reactivity/Atom"
 
@@ -28,6 +29,8 @@ export type ChatState = {
   readonly messages: ReadonlyArray<ChatMessage>
   /** Block states by message id. */
   readonly blocks: ReadonlyMap<string, BlockKit.BlockState>
+  /** Decisions by id: what the user decides on, and how they did. */
+  readonly decisions: ReadonlyMap<string, Decision.State>
   /** What is working: the assistant's turn, specialist runs. */
   readonly activity: AssistantActivity.Activity
   readonly working: boolean
@@ -41,6 +44,7 @@ export const initial = (chatId: ChatId.ChatId): ChatState => ({
   lastSeq: 0,
   messages: [],
   blocks: new Map(),
+  decisions: new Map(),
   activity: AssistantActivity.empty,
   working: false,
   failed: false
@@ -61,6 +65,7 @@ export const apply = (state: ChatState, entry: AssistantEvent.Entry): ChatState 
     ...state,
     lastSeq: entry.seq,
     blocks: BlockKit.nextBlockStates(state.blocks, entry.event),
+    decisions: Decision.nextStates(state.decisions, entry.event),
     activity,
     working: AssistantActivity.isWorking(activity)
   }

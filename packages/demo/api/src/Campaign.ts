@@ -2,11 +2,12 @@
  * Ordering a campaign.
  *
  * The assistant collects the audience and budget in chat, then calls
- * `start_campaign`. That starts the `CreateCampaign` workflow, which reports
- * each stage as a fact from `workflow:CreateCampaign`:
+ * `start_campaign`. That starts the `CreateCampaign` workflow, which first
+ * asks for the user's decision on the order (`Decision.durable`: the
+ * assistant asks with a decision block, and the workflow waits for the
+ * answer), then reports each stage as a fact from `workflow:CreateCampaign`:
  *
- * 1. `awaiting_approval`: the assistant asks the user with a confirm block, then
- *    calls `decide_campaign`;
+ * 1. `declined`, if the user declined: the order is cancelled;
  * 2. `creative_in_progress`, then `scheduled`;
  * 3. `live`;
  * 4. `first_results`: early numbers, a few steps after going live.
@@ -16,21 +17,19 @@
 import * as Budgets from "@acme/demo-shared/Budgets"
 import * as Locations from "@acme/demo-shared/Locations"
 import * as Orders from "@acme/demo-shared/Orders"
-import type * as AssistantEvent from "effect-assistant/AssistantEvent"
 import * as AssistantToolCall from "effect-assistant/AssistantToolCall"
 import * as AssistantChat from "effect-assistant/AssistantChat"
 import * as ChatId from "effect-assistant/ChatId"
+import * as Decision from "effect-assistant/Decision"
 import * as RunId from "effect-assistant/RunId"
 import * as ToolFailure from "effect-assistant/ToolFailure"
 import * as Effect from "effect/Effect"
-import * as Option from "effect/Option"
-import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Tool from "effect/unstable/ai/Tool"
 import * as Toolkit from "effect/unstable/ai/Toolkit"
-import * as DurableDeferred from "effect/unstable/workflow/DurableDeferred"
 import * as Workflow from "effect/unstable/workflow/Workflow"
 import type * as WorkflowEngine from "effect/unstable/workflow/WorkflowEngine"
+import { AcmeAssistant } from "./AcmeAssistant.ts"
 import * as LiveOrders from "./LiveOrders.ts"
 import * as PrintOrders from "./PrintOrders.ts"
 import * as Steps from "./Steps.ts"
@@ -117,10 +116,6 @@ export const CreateCampaign = Workflow.make("CreateCampaign", {
 
 type Payload = typeof CreateCampaign.payloadSchema.Type
 
-const Approval = DurableDeferred.make("CampaignApproval", {
-  success: Schema.Struct({ decision: Schema.Literals(["approve", "deny"]) })
-})
-
 const step = (payload: Payload, status: string, details: Steps.Step["details"] = {}) =>
   Effect.gen(function* () {
     yield* Steps.report({
@@ -158,21 +153,27 @@ const firstResults = (payload: Payload) => {
  */
 export const layerWorkflow = CreateCampaign.toLayer(
   Effect.fn(function* (payload: Payload) {
-    // The token rides along in the fact; `decide_campaign` reads it from the log.
-    const token = yield* DurableDeferred.token(Approval)
-    yield* step(payload, "awaiting_approval", {
-      approvalToken: token,
-      audience: payload.audience,
-      budget: payload.budget,
-      channels: payload.channels.join(", ")
+    yield* LiveOrders.setStatus(payload.reference, "awaiting_approval")
+
+    // The assistant asks the user, with a decision block; the workflow sleeps until they answer.
+    const outcome = yield* Decision.durable(AcmeAssistant, {
+      chatId: payload.chatId,
+      name: "approval",
+      source: "workflow:CreateCampaign",
+      preview: {
+        reference: payload.reference,
+        campaign: payload.campaignName,
+        office: payload.office,
+        audience: payload.audience,
+        budget: payload.budget,
+        channels: payload.channels
+      }
     })
 
-    const { decision } = yield* DurableDeferred.await(Approval)
+    if (outcome === "declined") {
+      yield* step(payload, "declined")
 
-    if (decision === "deny") {
-      yield* step(payload, "denied")
-
-      return yield* CampaignFailed.make({ reason: "Approval denied" })
+      return yield* CampaignFailed.make({ reason: "Declined" })
     }
 
     yield* step(payload, "creative_in_progress")
@@ -186,46 +187,6 @@ export const layerWorkflow = CreateCampaign.toLayer(
     return { reference: payload.reference }
   })
 )
-
-/**
- * Completes a run's approval.
- *
- * @category constructors
- * @since 0.1.0
- */
-export const decideApproval = (token: DurableDeferred.Token, decision: "approve" | "deny") =>
-  DurableDeferred.succeed(Approval, { token, value: { decision } })
-
-const ApprovalRequest = Schema.Struct({ approvalToken: DurableDeferred.Token })
-
-/** The approval token a run reported to this chat, if it is waiting. */
-const approvalToken = (entries: ReadonlyArray<AssistantEvent.Entry>, runId: string) =>
-  Option.fromUndefinedOr(
-    entries
-      .map(({ event }) => event)
-      .find(
-        (event): event is AssistantEvent.Fact =>
-          Predicate.isTagged(event, "Fact") && event.id === `${runId}:awaiting_approval`
-      )
-  ).pipe(
-    Option.flatMap((fact) => Schema.decodeUnknownOption(ApprovalRequest)(fact.payload)),
-    Option.map((request) => request.approvalToken)
-  )
-
-/**
- * Approves or denies a run once the user decided.
- *
- * @category tools
- * @since 0.1.0
- */
-export const DecideCampaign = Tool.make("decide_campaign", {
-  description:
-    "Approve or deny a campaign run that is awaiting approval, once the user has decided. Only call it after the user answered.",
-  parameters: Schema.Struct({ runId: Schema.String, decision: Schema.Literals(["approve", "deny"]) }),
-  success: Schema.Struct({ runId: Schema.String, decision: Schema.Literals(["approve", "deny"]) }),
-  failure: ToolFailure.ToolFailure,
-  dependencies: [AssistantChat.AssistantChat]
-})
 
 /**
  * Lists the campaign products that can be ordered.
@@ -252,7 +213,7 @@ const CampaignStarted = Schema.Struct({
  */
 export const StartCampaign = Tool.make("start_campaign", {
   description:
-    "Order a campaign. Needs the product id, the office paying, who it should reach, and the budget in USD. Ask the user for anything missing first. Checks the office's budget; the run then waits for the user's approval and reports each stage back as a fact.",
+    "Order a campaign. Needs the product id, the office paying, who it should reach, and the budget in USD. Ask the user for anything missing first. Checks the office's budget; the run then asks for the user's decision (a <decision> request) and reports each stage back as a fact.",
   parameters: Schema.Struct({
     campaignId: Schema.String,
     office: Schema.String.annotate({ description: "The office paying for it, like Amsterdam." }),
@@ -273,7 +234,7 @@ export const StartCampaign = Tool.make("start_campaign", {
  * @category toolkits
  * @since 0.1.0
  */
-export const CampaignTools = Toolkit.make(ListCampaignProducts, StartCampaign, DecideCampaign)
+export const CampaignTools = Toolkit.make(ListCampaignProducts, StartCampaign)
 
 /**
  * Layer for the campaign tools' handlers, on the orders placed through Acme
@@ -288,18 +249,6 @@ export const layerTools = CampaignTools.toLayer(
 
     return CampaignTools.of({
       list_campaign_products: () => Effect.succeed(campaignProducts),
-      decide_campaign: ({ runId, decision }) =>
-        Effect.gen(function* () {
-          const chat = yield* AssistantChat.AssistantChat
-          const token = approvalToken(yield* chat.entries, runId)
-
-          if (Option.isNone(token))
-            return yield* ToolFailure.fail(`No campaign run ${runId} is awaiting approval here.`)
-
-          yield* decideApproval(token.value, decision)
-
-          return { runId, decision }
-        }).pipe(Effect.provideContext(services)),
       start_campaign: ({ campaignId, office, audience, budget }) =>
         Effect.gen(function* () {
           // The same run for every time this call runs: after a crash it runs again, and finds its order.

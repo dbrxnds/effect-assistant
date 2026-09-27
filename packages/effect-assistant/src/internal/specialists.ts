@@ -12,6 +12,7 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as FiberMap from "effect/FiberMap"
 import * as FiberSet from "effect/FiberSet"
+import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Queue from "effect/Queue"
 import * as Ref from "effect/Ref"
@@ -30,6 +31,7 @@ import * as RunId from "../RunId.ts"
 import * as Skill from "../Skill.ts"
 import * as Specialist from "../Specialist.ts"
 import * as ToolFailure from "../ToolFailure.ts"
+import * as Decisions from "./decisions.ts"
 import { toolMessage, userText } from "./history.ts"
 import { mapText } from "./instructions.ts"
 import * as Telemetry from "./telemetry.ts"
@@ -118,9 +120,10 @@ export const runBrief = Effect.fn(
       }
     }
 
-    // A run lives in memory, so there's nothing to run again after a crash: `ToolStarted` isn't kept.
+    // A run lives in memory, so there's nothing to run again after a crash: `ToolStarted` isn't kept. A run parks no
+    // call (it has no user to ask), so there's no `DecisionRequested` either.
     const record = (event: AssistantLoop.Event) =>
-      Predicate.isTagged(event, "ToolStarted")
+      Predicate.isTagged(event, "ToolStarted") || Predicate.isTagged(event, "DecisionRequested")
         ? Effect.void
         : Predicate.isTagged(event, "ToolResult")
           ? add([toolMessage(event)])
@@ -315,6 +318,8 @@ export const makeRunner = Effect.fn(function* (options: {
       chatId: chat.chatId
     }).pipe(
       Effect.provideContext(Context.merge(options.model, services)),
+      // Spawned from a turn, a run would inherit the turn's decisions: it can't park a call or run an approved one.
+      Effect.provideService(Decisions.TurnDecisions, Option.none()),
       Effect.matchCause({
         onSuccess: (answer): Outcome => ({ status: "answered", report: answer }),
         onFailure: unanswered

@@ -1,10 +1,13 @@
 /**
  * Ordering branded products for an office.
  *
- * `order_products` checks the office's budget and starts the `PrintOrder`
- * workflow, which reports each stage as a fact from `workflow:PrintOrder`:
- * `confirmed`, `printing`, `shipped` (with a tracking number), and
- * `delivered`. The assistant decides which ones the user hears about.
+ * `order_products` needs the user's decision: when the model calls it, the
+ * call waits, and the user sees its quote (the product, units, total, and
+ * the budget left after it). Their yes runs it: it checks the budget again
+ * and starts the `PrintOrder` workflow, which reports each stage as a fact
+ * from `workflow:PrintOrder`: `confirmed`, `printing`, `shipped` (with a
+ * tracking number), and `delivered`. The assistant decides which ones the
+ * user hears about.
  *
  * @since 0.1.0
  */
@@ -128,26 +131,68 @@ const OrderPlaced = Schema.Struct({
   status: Schema.Literal("placed")
 })
 
+const OrderInput = Schema.Struct({
+  office: Schema.String.annotate({ description: "Office name, like Amsterdam." }),
+  product: Schema.String.annotate({ description: "Product name or SKU from product_catalog." }),
+  quantity: Schema.Int.annotate({ description: "Units. Rounded up to whole packs and the minimum." })
+})
+
 /**
- * Orders products for an office, within its budget.
+ * What an order comes to: what the user approves, and what the order checks
+ * again when it runs. Fails for an unknown office or product, or an order
+ * over the office's budget.
+ *
+ * @category getters
+ * @since 0.1.0
+ */
+export const quote = Effect.fn(function* ({ office, product, quantity }: typeof OrderInput.Type) {
+  const location = Locations.findByName(office)
+
+  if (location === undefined) return yield* ToolFailure.fail(`No office named ${office}.`)
+
+  const item = Products.search(product)
+
+  if (item === undefined) return yield* ToolFailure.fail(`No product like "${product}". Check product_catalog.`)
+
+  const units = Products.orderableQuantity(item, quantity)
+  const total = Math.round(units * item.unitPrice * 100) / 100
+  const budget = yield* officeBudget(location)
+
+  if (total > budget.remaining) {
+    return yield* ToolFailure.fail(
+      `That's $${total}, and ${location.name} has $${budget.remaining} left in ${budget.quarter}. Ask about a smaller order or another office's budget.`,
+      { kind: "over_budget" }
+    )
+  }
+
+  return {
+    office: location.name,
+    locationId: location.locationId,
+    product: item.name,
+    quantity: units,
+    total,
+    remainingBudget: Math.round((budget.remaining - total) * 100) / 100,
+    leadTimeDays: item.leadTimeDays
+  }
+})
+
+/**
+ * Orders products for an office, within its budget, once the user approves.
  *
  * @category tools
  * @since 0.1.0
  */
 export const OrderProducts = Tool.make("order_products", {
   description:
-    "Order branded products for an office. Checks the office's budget, then starts production; progress arrives as facts from workflow:PrintOrder.",
-  parameters: Schema.Struct({
-    office: Schema.String.annotate({ description: "Office name, like Amsterdam." }),
-    product: Schema.String.annotate({ description: "Product name or SKU from product_catalog." }),
-    quantity: Schema.Int.annotate({ description: "Units. Rounded up to whole packs and the minimum." })
-  }),
+    "Order branded products for an office. It waits for the user's decision, with the total and the budget left; once they approve, production starts and progress arrives as facts from workflow:PrintOrder.",
+  parameters: OrderInput,
   success: Schema.Union([
     Schema.Struct({ reference: Schema.String, status: Schema.String, note: Schema.String }),
     OrderPlaced
   ]),
   failure: ToolFailure.ToolFailure,
-  dependencies: [AssistantChat.AssistantChat, AssistantToolCall.AssistantToolCall]
+  dependencies: [AssistantChat.AssistantChat, AssistantToolCall.AssistantToolCall],
+  needsApproval: true
 })
 
 /**
@@ -172,7 +217,7 @@ export const layerTools = PrintTools.toLayer(
     return PrintTools.of({
       product_catalog: ({ category }) =>
         Effect.succeed(Products.all.filter((product) => category === undefined || product.category === category)),
-      order_products: ({ office, product, quantity }) =>
+      order_products: (order) =>
         Effect.gen(function* () {
           // The same run for every time this call runs: after a crash it runs again, and finds its order.
           const runId = RunId.fromKey(yield* AssistantToolCall.idempotencyKey)
@@ -182,25 +227,8 @@ export const layerTools = PrintTools.toLayer(
 
           if (placed !== undefined) return { reference, status: placed.status, note: "Already placed by this call." }
 
-          const location = Locations.findByName(office)
-
-          if (location === undefined) return yield* ToolFailure.fail(`No office named ${office}.`)
-
-          const item = Products.search(product)
-
-          if (item === undefined) return yield* ToolFailure.fail(`No product like "${product}". Check product_catalog.`)
-
-          const units = Products.orderableQuantity(item, quantity)
-          const total = Math.round(units * item.unitPrice * 100) / 100
-          const budget = yield* officeBudget(location)
-
-          if (total > budget.remaining) {
-            return yield* ToolFailure.fail(
-              `That's $${total}, and ${location.name} has $${budget.remaining} left in ${budget.quarter}. Ask about a smaller order or another office's budget.`,
-              { kind: "over_budget" }
-            )
-          }
-
+          // The budget may have moved since the user approved the quote.
+          const quoted = yield* quote(order)
           const chat = yield* AssistantChat.AssistantChat
 
           yield* orders.put(
@@ -208,27 +236,34 @@ export const layerTools = PrintTools.toLayer(
               reference,
               chatId: chat.chatId,
               kind: "product",
-              office: location.name,
-              locationId: location.locationId,
-              description: `${units} × ${item.name}`,
-              total,
+              office: quoted.office,
+              locationId: quoted.locationId,
+              description: `${quoted.quantity} × ${quoted.product}`,
+              total: quoted.total,
               status: "placed",
               placedOn: new Date().toISOString().slice(0, 10),
               updatedAt: Date.now()
             })
           )
           yield* PrintOrder.execute(
-            { runId, chatId: chat.chatId, reference, office: location.name, productName: item.name, quantity: units },
+            {
+              runId,
+              chatId: chat.chatId,
+              reference,
+              office: quoted.office,
+              productName: quoted.product,
+              quantity: quoted.quantity
+            },
             { discard: true }
           )
 
           const placedNow: typeof OrderPlaced.Type = {
             reference,
-            product: item.name,
-            quantity: units,
-            total,
-            remainingBudget: Math.round((budget.remaining - total) * 100) / 100,
-            leadTimeDays: item.leadTimeDays,
+            product: quoted.product,
+            quantity: quoted.quantity,
+            total: quoted.total,
+            remainingBudget: quoted.remainingBudget,
+            leadTimeDays: quoted.leadTimeDays,
             status: "placed"
           }
 
@@ -237,3 +272,29 @@ export const layerTools = PrintTools.toLayer(
     })
   })
 )
+
+/**
+ * What the user sees before they approve a product order: its quote, on the
+ * orders placed through Acme.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const previews = Effect.gen(function* () {
+  const orders = yield* LiveOrders.LiveOrders
+
+  return {
+    order_products: ({ office, product, quantity }: typeof OrderInput.Type) =>
+      quote({ office, product, quantity }).pipe(
+        Effect.map((quoted) => ({
+          office: quoted.office,
+          product: quoted.product,
+          quantity: quoted.quantity,
+          total: quoted.total,
+          remainingBudget: quoted.remainingBudget,
+          leadTimeDays: quoted.leadTimeDays
+        })),
+        Effect.provideService(LiveOrders.LiveOrders, orders)
+      )
+  }
+})

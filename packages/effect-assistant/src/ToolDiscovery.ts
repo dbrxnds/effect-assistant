@@ -96,7 +96,9 @@ const ExecuteTool = Tool.make("execute_tool", {
  * Search scores the query's words against tool names and descriptions and
  * returns the top five. `execute_tool` runs the tool the way a model call
  * would, so its input is validated, and a failure of the tool is a failure
- * of `execute_tool`, with the tool's result.
+ * of `execute_tool`, with the tool's result. It doesn't run a tool that
+ * needs the user's decision (see `Decision`): put those in the toolkit
+ * itself.
  *
  * @category constructors
  * @since 0.1.0
@@ -119,6 +121,16 @@ export const make = <R>(tools: AssistantLoop.Tools<R>): AssistantLoop.Tools<R> =
           params: input,
           providerExecuted: false
         })
+
+        // A call that needs the user's decision parks only as a call the model made itself, where it can ask for it.
+        if (yield* Toolkits.needsDecisionOf(tools, call, [])) {
+          return yield* Effect.fail(
+            Toolkits.failed(
+              `${name} needs the user's decision, so it can't run through execute_tool.`,
+              "needs_decision"
+            ).result
+          )
+        }
 
         const { outcome, result } = yield* tools.run(call)
 

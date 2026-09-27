@@ -8,9 +8,11 @@
 import type * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as AiError from "effect/unstable/ai/AiError"
+import type * as Prompt from "effect/unstable/ai/Prompt"
 import type * as Tool from "effect/unstable/ai/Tool"
 import type * as Toolkit from "effect/unstable/ai/Toolkit"
 import type * as AssistantEvent from "../AssistantEvent.ts"
@@ -49,9 +51,87 @@ const failure = (result: Schema.Json): AssistantLoop.CallResult => ({
 })
 
 const hasTool = <Tools extends Record<string, Tool.Any>>(
-  toolkit: Toolkit.WithHandler<Tools>,
+  toolkit: { readonly tools: Tools },
   name: PropertyKey
 ): name is keyof Tools => Object.hasOwn(toolkit.tools, name)
+
+/**
+ * What a parked call shows the user when its tool has no preview.
+ *
+ * @internal
+ */
+export const noPreview: AssistantLoop.CallResult = { outcome: "success", result: null }
+
+const decodeParams = <Tools extends Record<string, Tool.Any>>(tool: Tools[keyof Tools], params: Schema.Json) =>
+  Schema.decodeUnknownEffect(tool.parametersSchema)(params)
+
+/**
+ * Whether a call waits for the user's decision: its tool's `needsApproval`,
+ * with the params decoded when it's a function. Params that don't fit the
+ * tool don't park: the call runs, and fails with why.
+ *
+ * @internal
+ */
+export const needsDecision = <Tools extends Record<string, Tool.Any>>(
+  toolkit: { readonly tools: Tools },
+  call: AssistantEvent.ToolCallPart,
+  history: ReadonlyArray<Prompt.Message>
+): Effect.Effect<boolean, never, AssistantLoop.ToolServices<Tools>> => {
+  const name: PropertyKey = call.name
+
+  if (!hasTool(toolkit, name)) return Effect.succeed(false)
+
+  const tool = toolkit.tools[name]
+  const needs = tool.needsApproval
+
+  if (needs === undefined || Predicate.isBoolean(needs)) return Effect.succeed(needs === true)
+
+  return decodeParams(tool, call.params).pipe(
+    Effect.flatMap((params) => {
+      const decided = needs(params, { toolCallId: call.id, messages: history })
+
+      return Effect.isEffect(decided) ? decided : Effect.succeed(decided)
+    }),
+    Effect.orElseSucceed(() => false)
+  )
+}
+
+/**
+ * Computes a parked call's preview, as `AssistantToolCall` for the call: its
+ * value in JSON, or its `ToolFailure` as a failed result the model reads.
+ *
+ * @internal
+ */
+export const preview = <Tools extends Record<string, Tool.Any>, R>(
+  toolkit: { readonly tools: Tools },
+  previews: AssistantLoop.Previews<Tools, R> | undefined,
+  call: AssistantEvent.ToolCallPart
+): Effect.Effect<
+  AssistantLoop.CallResult,
+  never,
+  AssistantLoop.ToolServices<Tools> | Exclude<R, AssistantToolCall>
+> => {
+  const name: PropertyKey = call.name
+
+  if (previews === undefined || !hasTool(toolkit, name)) return Effect.succeed(noPreview)
+
+  const make = previews[name]
+
+  if (make === undefined) return Effect.succeed(noPreview)
+
+  return decodeParams(toolkit.tools[name], call.params).pipe(
+    Effect.flatMap(make),
+    Effect.map((value): AssistantLoop.CallResult => ({ outcome: "success", result: toJson(value) })),
+    Effect.catch((error) =>
+      Effect.succeed(
+        Predicate.isTagged(error, "ToolFailure")
+          ? failed(error.message, error.kind ?? "ToolFailure")
+          : failed(`Invalid parameters for ${call.name}.`, "ToolParameterValidationError")
+      )
+    ),
+    Effect.provideService(AssistantToolCall, { callId: call.id, tool: call.name })
+  )
+}
 
 // The toolkit decodes the params with the tool's schema before its handler sees them, and a call whose params don't
 // fit fails with a validation error the model reads: the model's JSON is what `handle` takes.
@@ -107,11 +187,14 @@ export const runNative = <Tools extends Record<string, Tool.Any>>(
  *
  * @internal
  */
-export const fromWithHandler = <Tools extends Record<string, Tool.Any>>(
-  toolkit: Toolkit.WithHandler<Tools>
-): AssistantLoop.Tools<AssistantLoop.ToolServices<Tools>> => ({
+export const fromWithHandler = <Tools extends Record<string, Tool.Any>, R = never>(
+  toolkit: Toolkit.WithHandler<Tools>,
+  previews?: AssistantLoop.Previews<Tools, R>
+): AssistantLoop.Tools<AssistantLoop.ToolServices<Tools> | Exclude<R, AssistantToolCall>> => ({
   definitions: Object.values(toolkit.tools),
-  run: (call) => runNative(toolkit, call)
+  run: (call) => runNative(toolkit, call),
+  needsDecision: (call, history) => needsDecision(toolkit, call, history),
+  preview: (call) => preview(toolkit, previews, call)
 })
 
 /**
@@ -123,7 +206,8 @@ export const fromToolkit = <Tools extends Record<string, Tool.Any>>(
   toolkit: Toolkit.Toolkit<Tools>
 ): AssistantLoop.Tools<AssistantLoop.ToolServices<Tools> | Tool.HandlersFor<Tools>> => ({
   definitions: Object.values(toolkit.tools),
-  run: (call) => Effect.flatMap(toolkit, (resolved) => runNative(resolved, call))
+  run: (call) => Effect.flatMap(toolkit, (resolved) => runNative(resolved, call)),
+  needsDecision: (call, history) => needsDecision(toolkit, call, history)
 })
 
 /**
@@ -131,16 +215,19 @@ export const fromToolkit = <Tools extends Record<string, Tool.Any>>(
  *
  * @internal
  */
-export const withHandlers = <Tools extends Record<string, Tool.Any>>(
+export const withHandlers = <Tools extends Record<string, Tool.Any>, R = never>(
   toolkit: Toolkit.Toolkit<Tools>,
-  handlers: Toolkit.HandlersFrom<Tools>
-): AssistantLoop.Tools<AssistantLoop.ToolServices<Tools>> => ({
+  handlers: Toolkit.HandlersFrom<Tools>,
+  previews?: AssistantLoop.Previews<Tools, R>
+): AssistantLoop.Tools<AssistantLoop.ToolServices<Tools> | Exclude<R, AssistantToolCall>> => ({
   definitions: Object.values(toolkit.tools),
   run: (call) =>
     toolkit.toHandlers(handlers).pipe(
       Effect.flatMap((context) => Effect.provideContext(toolkit, context)),
       Effect.flatMap((resolved) => runNative(resolved, call))
-    )
+    ),
+  needsDecision: (call, history) => needsDecision(toolkit, call, history),
+  preview: (call) => preview(toolkit, previews, call)
 })
 
 /**
@@ -160,7 +247,8 @@ export const withContext = <Tools extends Record<string, Tool.Any>, R>(
       const resolved = yield* Effect.provideContext(toolkit, yield* toolkit.toHandlers(handlers(context)))
 
       return yield* runNative(resolved, call)
-    })
+    }),
+  needsDecision: (call, history) => needsDecision(toolkit, call, history)
 })
 
 /**
@@ -178,13 +266,40 @@ export const empty: AssistantLoop.Tools = {
  *
  * @internal
  */
-export const merge = <A, B>(
-  self: AssistantLoop.Tools<A>,
-  that: AssistantLoop.Tools<B>
-): AssistantLoop.Tools<A | B> => ({
-  definitions: [...self.definitions, ...that.definitions],
-  run: (call) => (self.definitions.some((tool) => tool.name === call.name) ? self.run(call) : that.run(call))
-})
+export const merge = <A, B>(self: AssistantLoop.Tools<A>, that: AssistantLoop.Tools<B>): AssistantLoop.Tools<A | B> => {
+  const inSelf = (call: AssistantEvent.ToolCallPart) => self.definitions.some((tool) => tool.name === call.name)
+
+  return {
+    definitions: [...self.definitions, ...that.definitions],
+    run: (call) => (inSelf(call) ? self.run(call) : that.run(call)),
+    needsDecision: (call, history) =>
+      inSelf(call) ? needsDecisionOf(self, call, history) : needsDecisionOf(that, call, history),
+    preview: (call) => (inSelf(call) ? previewOf(self, call) : previewOf(that, call))
+  }
+}
+
+/**
+ * Whether these tools park a call: never, unless they say how.
+ *
+ * @internal
+ */
+export const needsDecisionOf = <R>(
+  tools: AssistantLoop.Tools<R>,
+  call: AssistantEvent.ToolCallPart,
+  history: ReadonlyArray<Prompt.Message>
+): Effect.Effect<boolean, never, R> =>
+  tools.needsDecision === undefined ? Effect.succeed(false) : tools.needsDecision(call, history)
+
+/**
+ * A parked call's preview from these tools: none, unless they have one.
+ *
+ * @internal
+ */
+export const previewOf = <R>(
+  tools: AssistantLoop.Tools<R>,
+  call: AssistantEvent.ToolCallPart
+): Effect.Effect<AssistantLoop.CallResult, never, R> =>
+  tools.preview === undefined ? Effect.succeed(noPreview) : tools.preview(call)
 
 /**
  * The names used by more than one tool.
@@ -204,5 +319,8 @@ export const duplicateNames = (tools: AssistantLoop.Tools<unknown>): ReadonlyArr
  */
 export const only = <R>(tools: AssistantLoop.Tools<R>, names: ReadonlyArray<string>): AssistantLoop.Tools<R> => ({
   definitions: tools.definitions.filter((tool) => names.includes(tool.name)),
-  run: (call) => (names.includes(call.name) ? tools.run(call) : empty.run(call))
+  run: (call) => (names.includes(call.name) ? tools.run(call) : empty.run(call)),
+  needsDecision: (call, history) =>
+    names.includes(call.name) ? needsDecisionOf(tools, call, history) : Effect.succeed(false),
+  preview: (call) => previewOf(tools, call)
 })

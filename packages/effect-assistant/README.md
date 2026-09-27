@@ -77,6 +77,13 @@ const send = (userId: string, chatId: ChatId.ChatId, message: AssistantEvent.Use
   checkAccess(userId, chatId).pipe(Effect.andThen(MyAssistant.submit(chatId, message)))
 ```
 
+What the assistant can't do on its own waits for the user's decision: a tool
+with Effect's `needsApproval` is parked when the model calls it, with a
+preview of what it will do, and a workflow asks with `Decision.durable`. The
+model asks the user with the decision block (`Decision.block`), and only the
+user's answer to it runs the call or resumes the workflow. See the
+[decisions guide](../../apps/docs/guide/decisions.md).
+
 Docs: [`apps/docs`](../../apps/docs) (`pnpm docs:dev`). Start with the
 [introduction](../../apps/docs/guide/introduction.md), or go straight to the
 [API reference](../../apps/docs/api/index.md), generated from this package's

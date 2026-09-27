@@ -68,8 +68,10 @@ const report = (payload: Payload, status: string) =>
 ```
 
 The assistant tells the user in one line that it started, and follows up when the
-facts arrive. If a step needs the user (an approval), the fact says so, and
-the assistant asks, maybe with a confirm [block](./blocks).
+facts arrive. If a step needs something from the user, the fact says so,
+and the assistant asks, maybe with a [block](./blocks). If it needs the
+user's approval, the workflow asks for a
+[decision](./decisions#a-decision-that-work-asks-for) and waits for it.
 
 ## Whom a fact acts for
 

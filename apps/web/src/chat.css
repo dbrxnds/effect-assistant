@@ -598,6 +598,34 @@ body,
   opacity: 0.4;
 }
 
+.block-decision {
+  margin-top: 6px;
+}
+
+.block-preview {
+  display: grid;
+  gap: 2px;
+  margin: 0 0 6px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.04);
+  font-size: 14px;
+}
+
+.block-preview div {
+  display: flex;
+  gap: 8px;
+}
+
+.block-preview dt {
+  min-width: 8em;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.block-preview dd {
+  margin: 0;
+}
+
 .block-input {
   display: flex;
   gap: 6px;

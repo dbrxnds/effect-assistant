@@ -2,8 +2,9 @@
  * The library's contract with a real model (Haiku): what the library tells
  * the model (`Instructions.protocol`, its tools' descriptions, how the
  * history reads) is enough for it to reply, use a tool, hand work to a
- * specialist, fill in a block, and go on after a crash, and the provider
- * accepts what the library sends. Needs ANTHROPIC_API_KEY.
+ * specialist, fill in a block, ask for a decision a call waits for, and go
+ * on after a crash, and the provider accepts what the library sends. Needs
+ * ANTHROPIC_API_KEY.
  *
  * Which tool an app's model should pick for a request is the app's to test,
  * with its own prompts and tools; the mechanics are tested on a scripted
@@ -29,7 +30,9 @@ import {
   BlockKit,
   ChatId,
   ChatLog,
-  Specialist
+  Decision,
+  Specialist,
+  ToolFailure
 } from "../src/index.ts"
 import {
   collectUntil,
@@ -155,6 +158,69 @@ describe("with a real model", () => {
       expect(block?.kind).toBe("choose_one")
       expect(Schema.is(ChooseOne.props)(block?.props)).toBe(true)
     }).pipe(Effect.provide(runMemory(Blocks.toLayer(simple({ instructions })), realModel)))
+  })
+
+  it.live("asks for the decision a parked call waits for, and goes on once the user approves", () => {
+    const PlaceOrder = Tool.make("place_order", {
+      description: "Places an order for branded products.",
+      parameters: Schema.Struct({ product: Schema.String, quantity: Schema.Int }),
+      success: Schema.Struct({ reference: Schema.String }),
+      failure: ToolFailure.ToolFailure,
+      needsApproval: true
+    })
+
+    const Deciding = Assistant.make("contract-decisions", { blocks: BlockKit.make([Decision.block]) })
+
+    return Effect.gen(function* () {
+      const ran = yield* Deferred.make<string>()
+
+      const toolkit = AssistantLoop.tools(
+        Toolkit.make(PlaceOrder),
+        {
+          place_order: ({ product, quantity }) =>
+            Deferred.succeed(ran, `${quantity} ${product}`).pipe(Effect.as({ reference: "ACM-7K2Q9X" }))
+        },
+        {
+          previews: {
+            place_order: ({ product, quantity }) => Effect.succeed({ product, quantity, total: quantity * 2 })
+          }
+        }
+      )
+
+      yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* Deciding.submit(chat, say("Order 300 tote bags."))
+        const first = yield* collectUntil(Deciding, chat, (es) => turnsDone(es) >= 1)
+
+        const requested = first.flatMap(({ event }) =>
+          Predicate.isTagged(event, "DecisionRequested") ? [event.id] : []
+        )
+
+        const message = first.flatMap(({ event }) =>
+          Predicate.isTagged(event, "AssistantMessage") && event.block?.kind === Decision.kind ? [event] : []
+        )[0]
+
+        expect(failures(first), traceEntries(first)).toEqual([])
+        expect(requested).toHaveLength(1)
+        expect(message?.block?.props).toMatchObject({ decisionIds: requested })
+
+        const answers: Array<AssistantEvent.BlockAnswer> = []
+
+        BlockKit.toClient(BlockKit.make([Decision.block]), {
+          decision: ({ props, respond }) => respond(Decision.answerAll(props, "approved"))
+        })(message!, { respond: (answer) => answers.push(answer) })
+
+        yield* Deciding.submit(chat, answers[0]!)
+
+        expect(yield* Deferred.await(ran)).toBe("300 tote bags")
+
+        const entries = yield* collectUntil(Deciding, chat, (es) => turnsDone(es) >= 2)
+
+        // The provider took the parked call and its decision's result, and the model told the user.
+        expect(failures(entries), traceEntries(entries)).toEqual([])
+        expect(text(entries)).toContain("acm-7k2q9x")
+      }).pipe(Effect.provide(runMemory(Deciding.toLayer(simple({ instructions, toolkit })), realModel)))
+    })
   })
 
   it.live("runs a call a crash cut off again, then goes on", () =>

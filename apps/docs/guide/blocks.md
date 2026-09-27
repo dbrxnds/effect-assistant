@@ -1,18 +1,20 @@
 # UI blocks
 
 A block is a bit of UI the assistant can put in a message when a structured answer
-is easier than typing: options to pick from, approve/deny, a small input.
-It's only a shortcut. The user can always type instead, and the assistant reads
-either.
+is easier than typing: options to pick from, a small input. It's only a
+shortcut. The user can always type instead, and the assistant reads either.
+
+What the user must approve, like an order, is a [decision](./decisions): the
+library's own block, `Decision.block`, and only its answer decides.
 
 ## Define a catalog
 
 Blocks are defined once and shared by server and client.
 
-**Example** (Two blocks)
+**Example** (A choice, and decisions)
 
 ```ts
-import { Block, BlockKit } from "effect-assistant"
+import { Block, BlockKit, Decision } from "effect-assistant"
 import * as Schema from "effect/Schema"
 
 export const ChooseOne = Block.make("choose_one", {
@@ -21,13 +23,7 @@ export const ChooseOne = Block.make("choose_one", {
   answer: Schema.Struct({ choice: Schema.String })
 })
 
-export const Confirm = Block.make("confirm", {
-  description: "Approve / deny buttons for a yes-or-no decision.",
-  props: Schema.Struct({ confirmLabel: Schema.String, denyLabel: Schema.String }),
-  answer: Schema.Struct({ confirmed: Schema.Boolean })
-})
-
-export const Blocks = BlockKit.make([ChooseOne, Confirm])
+export const Blocks = BlockKit.make([ChooseOne, Decision.block])
 ```
 
 - `description` is what the assistant reads to decide when to use it.
@@ -63,13 +59,13 @@ const render = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
         {answer?.choice === option ? `✓ ${option}` : option}
       </button>
     )),
-  confirm: ({ props, open, respond }) => (
+  decision: ({ props, open, respond }) => (
     <>
-      <button disabled={!open} onClick={() => respond({ confirmed: true })}>
-        {props.confirmLabel}
+      <button disabled={!open} onClick={() => respond(Decision.answerAll(props, "approved"))}>
+        {props.approveLabel ?? "Approve"}
       </button>
-      <button disabled={!open} onClick={() => respond({ confirmed: false })}>
-        {props.denyLabel}
+      <button disabled={!open} onClick={() => respond(Decision.answerAll(props, "declined"))}>
+        {props.declineLabel ?? "Decline"}
       </button>
     </>
   )
@@ -102,6 +98,8 @@ event, so every client folds them closed. `BlockKit.staleBlocks(entries,
 
 ## Asking for things from outside
 
-A workflow that needs the user's approval doesn't build the UI. It notifies the
-assistant with a fact that says what it needs ("get the user's approval for the budget"), and
-the assistant writes the message and picks the block.
+A workflow that needs something from the user doesn't build the UI. It notifies the
+assistant with a fact that says what it needs ("ask which delivery date works"), and
+the assistant writes the message and picks the block. A workflow that needs the
+user's approval asks for a [decision](./decisions#a-decision-that-work-asks-for),
+and waits for it.

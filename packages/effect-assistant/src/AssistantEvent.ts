@@ -17,6 +17,9 @@
  * - Specialist runs: {@link SpecialistStarted}, {@link SpecialistFinished}. A
  *   finished run is an input too: its report wakes a turn.
  * - Blocks closed without an answer: {@link BlocksClosed}.
+ * - Decisions the user is asked to make: {@link DecisionRequested}, when a
+ *   tool call waits for one or work asks for one (that one is an input), and
+ *   {@link DecisionResolved}, once the user answered its decision block.
  * - The app's own events and inputs, like a summary for compaction or an
  *   uploaded file: {@link AppEvent}, as they're stored. An assistant's
  *   `events` and `inputs` decode them to their own types.
@@ -41,6 +44,7 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Response from "effect/unstable/ai/Response"
 import { ChatId } from "./ChatId.ts"
+import { DecisionId } from "./DecisionId.ts"
 import { InputId } from "./InputId.ts"
 import { RunId } from "./RunId.ts"
 
@@ -116,12 +120,108 @@ export class SpecialistFinished extends Schema.TaggedClass<SpecialistFinished>()
 }) {}
 
 /**
- * Schema for everything `Assistant.submit` accepts.
+ * Schema for how the user decided: `"approved"` or `"declined"`.
+ *
+ * @category decisions
+ * @since 0.1.0
+ */
+export const DecisionOutcome = Schema.Literals(["approved", "declined"])
+
+/**
+ * How the user decided.
+ *
+ * @category decisions
+ * @since 0.1.0
+ */
+export type DecisionOutcome = typeof DecisionOutcome.Type
+
+/**
+ * Schema for a decision a tool call waits for: the call, as the model wrote
+ * it. Approving it runs exactly this call.
+ *
+ * @category decisions
+ * @since 0.1.0
+ */
+export const CallOrigin = Schema.TaggedStruct("Call", {
+  callId: Schema.String,
+  tool: Schema.String,
+  params: Schema.Json
+})
+
+/**
+ * A decision a tool call waits for.
+ *
+ * @category decisions
+ * @since 0.1.0
+ */
+export type CallOrigin = typeof CallOrigin.Type
+
+/**
+ * Schema for a decision that running work asks for, like a workflow: who
+ * asks (`source`, as for a fact), and, for a workflow waiting on it, the
+ * `DurableDeferred` token the answer completes.
+ *
+ * @category decisions
+ * @since 0.1.0
+ */
+export const WorkOrigin = Schema.TaggedStruct("Work", {
+  source: Schema.String,
+  token: Schema.optional(Schema.String)
+})
+
+/**
+ * A decision that running work asks for.
+ *
+ * @category decisions
+ * @since 0.1.0
+ */
+export type WorkOrigin = typeof WorkOrigin.Type
+
+/**
+ * The user is asked to decide something: approve or decline.
+ *
+ * - From a tool call (`origin: Call`): the model called a tool that needs
+ *   the user's decision, and the loop parked the call instead of running it.
+ *   The model reads this as the call's result. It's not an input.
+ * - From work (`origin: Work`): something already running asks, like a
+ *   workflow. It's an input: it wakes a turn, like a fact.
+ *
+ * Either way the user sees nothing yet: the model sends a message with a
+ * decision block for its id. `preview` is what they decide on, like an
+ * order's total, in JSON.
+ *
+ * @category decisions
+ * @since 0.1.0
+ */
+export class DecisionRequested extends Schema.TaggedClass<DecisionRequested>()("DecisionRequested", {
+  id: DecisionId,
+  origin: Schema.Union([CallOrigin, WorkOrigin]),
+  preview: Schema.Json
+}) {}
+
+/**
+ * A decision is made: the user answered a decision block for it (`answer` is
+ * that `BlockAnswer`'s id). An approved call runs next, at the turn's next
+ * step; a workflow's decision is passed on to it before this is stored.
+ *
+ * @category decisions
+ * @since 0.1.0
+ */
+export class DecisionResolved extends Schema.TaggedClass<DecisionResolved>()("DecisionResolved", {
+  id: DecisionId,
+  outcome: DecisionOutcome,
+  answer: InputId
+}) {}
+
+/**
+ * Schema for everything `Assistant.submit` accepts. A `DecisionRequested` is
+ * one only when work requests it (`origin: Work`); the chat refuses a parked
+ * call submitted from outside.
  *
  * @category inputs
  * @since 0.1.0
  */
-export const Input = Schema.Union([UserMessage, BlockAnswer, Fact, SpecialistFinished])
+export const Input = Schema.Union([UserMessage, BlockAnswer, Fact, SpecialistFinished, DecisionRequested])
 
 /**
  * An input to an assistant.
@@ -370,7 +470,9 @@ export const AssistantEvent = Schema.Union([
   TurnFailed,
   SpecialistStarted,
   SpecialistFinished,
-  BlocksClosed
+  BlocksClosed,
+  DecisionRequested,
+  DecisionResolved
 ])
 
 /**
@@ -462,7 +564,7 @@ export type Entry = typeof Entry.Type
 
 /**
  * Returns whether an event is an input: a user message, a block answer, a
- * fact, or a finished specialist run.
+ * fact, a finished specialist run, or a decision that work requests.
  *
  * @category guards
  * @since 0.1.0
@@ -471,7 +573,10 @@ export const isInput = (event: { readonly _tag: string }): event is Input =>
   Predicate.isTagged(event, "UserMessage") ||
   Predicate.isTagged(event, "BlockAnswer") ||
   Predicate.isTagged(event, "Fact") ||
-  Predicate.isTagged(event, "SpecialistFinished")
+  Predicate.isTagged(event, "SpecialistFinished") ||
+  (Predicate.isTagged(event, "DecisionRequested") &&
+    Predicate.hasProperty(event, "origin") &&
+    Predicate.isTagged(event.origin, "Work"))
 
 /**
  * Returns whether an input starts a turn: every one but a run the assistant

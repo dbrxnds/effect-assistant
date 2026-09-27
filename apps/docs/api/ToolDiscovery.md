@@ -41,7 +41,9 @@ Creates `search_tools` and `execute_tool` for these tools.
 Search scores the query's words against tool names and descriptions and
 returns the top five. `execute_tool` runs the tool the way a model call
 would, so its input is validated, and a failure of the tool is a failure
-of `execute_tool`, with the tool's result.
+of `execute_tool`, with the tool's result. It doesn't run a tool that
+needs the user's decision (see `Decision`): put those in the toolkit
+itself.
 
 ```ts
 const make: <R>(tools: AssistantLoop.Tools<R>) => AssistantLoop.Tools<R>

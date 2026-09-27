@@ -10,12 +10,14 @@ const modules = [
   "AssistantLoop",
   "Block",
   "BlockKit",
+  "Decision",
   "Instructions",
   "Skill",
   "Specialist",
   "ToolDiscovery",
   "ToolFailure",
   "ChatId",
+  "DecisionId",
   "InputId",
   "RunId"
 ]
@@ -59,6 +61,7 @@ export default defineConfig({
             { text: "Specialists", link: "/guide/specialists" },
             { text: "Skills", link: "/guide/skills" },
             { text: "UI blocks", link: "/guide/blocks" },
+            { text: "Decisions", link: "/guide/decisions" },
             { text: "Instructions and prompts", link: "/guide/instructions" }
           ]
         },
