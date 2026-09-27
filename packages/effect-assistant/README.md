@@ -75,6 +75,10 @@ export const AppLive = MyAssistantLive.pipe(
 // Whom a chat is for is the app's data. At the edge, check the signed-in user may use it:
 const send = (userId: string, chatId: ChatId.ChatId, message: AssistantEvent.UserInput) =>
   checkAccess(userId, chatId).pipe(Effect.andThen(MyAssistant.submit(chatId, message)))
+
+// What the user's client gets: the chat as they see it, never the assistant's own work.
+const view = (userId: string, chatId: ChatId.ChatId) =>
+  Stream.unwrap(checkAccess(userId, chatId).pipe(Effect.as(MyAssistant.subscribeView(chatId))))
 ```
 
 What the assistant can't do on its own waits for the user's decision: a tool
@@ -83,6 +87,19 @@ preview of what it will do, and a workflow asks with `Decision.durable`. The
 model asks the user with the decision block (`Decision.block`), and only the
 user's answer to it runs the call or resumes the workflow. See the
 [decisions guide](../../apps/docs/guide/decisions.md).
+
+What background work reports is the app's own event: registered with
+`AppEvent.make(schema, { wakes: true, render })`, it wakes a turn and reads
+in the model's history as its `render` says, and the user sees it only if
+the assistant tells them. Events that don't wake a turn are the app's
+bookkeeping. See [your own events](../../apps/docs/guide/app-events.md).
+
+A chat client gets the chat as its user sees it, `MyAssistant.subscribeView(chatId)`
+(a `ChatView`): the messages, their blocks (with a decision's preview and
+outcome), and whether the assistant or a specialist is working. Never the
+model's output, tool calls, or results; `subscribe` streams the whole log,
+for the server. See [the chat client](../../apps/docs/guide/client.md).
+`MyAssistant.delete(chatId)` deletes a chat: its log, and what works in it.
 
 Docs: [`apps/docs`](../../apps/docs) (`pnpm docs:dev`). Start with the
 [introduction](../../apps/docs/guide/introduction.md), or go straight to the

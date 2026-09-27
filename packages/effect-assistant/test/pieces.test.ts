@@ -1,10 +1,20 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as Prompt from "effect/unstable/ai/Prompt"
-import { Assistant, AssistantChat, AssistantEvent, AssistantLoop, ChatId, ChatLog, InputId } from "../src/index.ts"
-import { collectUntil, newChat, runMemory, say, turnsDone } from "./fixtures.ts"
+import {
+  AppEvent,
+  Assistant,
+  AssistantChat,
+  AssistantEvent,
+  AssistantLoop,
+  ChatId,
+  ChatLog,
+  InputId
+} from "../src/index.ts"
+import { collectUntil, failures, newChat, runMemory, say, turnsDone } from "./fixtures.ts"
 import * as Scripted from "./scripted.ts"
 
 class Summary extends Schema.TaggedClass<Summary>()("Summary", {
@@ -18,7 +28,18 @@ class FileUploaded extends Schema.TaggedClass<FileUploaded>()("FileUploaded", {
   name: Schema.String
 }) {}
 
-const Compacting = Assistant.make("compacting", { events: [Summary], inputs: [FileUploaded] })
+const Compacting = Assistant.make("compacting", {
+  events: [AppEvent.make(Summary), AppEvent.make(FileUploaded, { wakes: true })]
+})
+
+// Not registered with any assistant.
+const Unknown = Schema.TaggedStruct("Unknown", { n: Schema.Int })
+
+class DraftOpened extends Schema.TaggedClass<DraftOpened>()("DraftOpened", { draftId: Schema.String }) {}
+
+const Drafting = Assistant.make("drafting", {
+  events: [AppEvent.make(DraftOpened, { render: (opened) => `The user opened draft ${opened.draftId}.` })]
+})
 
 const summary = Summary.make({ throughSeq: 1, text: "They asked about pens.", at: new Date(0) })
 
@@ -88,6 +109,53 @@ describe("the app's own events", () => {
 
       expect(entries.flatMap(({ event }) => (event instanceof FileUploaded ? [event] : []))).toEqual([upload])
       expect(Scripted.lastInput(request!)).toBe('<FileUploaded>\n{"id":"upload-1","name":"brief.pdf"}\n</FileUploaded>')
+    })
+  )
+
+  it.live("an event that doesn't wake a turn starts none, and the next turn reads it as its render says", () =>
+    Effect.gen(function* () {
+      const model = yield* Scripted.make(() => Scripted.reply("On it."))
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* Drafting.submit(chat, DraftOpened.make({ draftId: "d1" }))
+        yield* Drafting.submit(chat, say("finish it"))
+
+        return yield* collectUntil(Drafting, chat, (es) => turnsDone(es) >= 1)
+      }).pipe(
+        Effect.provide(
+          runMemory(
+            Drafting.toLayer((turn) => turn.loop({ instructions: "Be brief." })),
+            model.layer
+          )
+        )
+      )
+
+      const [request] = yield* model.requests
+
+      expect(entries.filter(({ event }) => Predicate.isTagged(event, "TurnStarted"))).toHaveLength(1)
+      expect(Scripted.inputs(request!)).toEqual(["The user opened draft d1.", "finish it"])
+    })
+  )
+
+  it.live("the chat stores no app event its assistant didn't register", () =>
+    Effect.gen(function* () {
+      const other = yield* Schema.decodeUnknownEffect(AssistantEvent.StoredAppEvent)(Unknown.make({ n: 1 }))
+
+      const handlers = Drafting.toLayer(() =>
+        Stream.fromEffect(AssistantChat.AssistantChat.use((chat) => chat.append([other]))).pipe(Stream.drain)
+      )
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* Drafting.submit(chat, say("hi"))
+        yield* collectUntil(Drafting, chat, (es) => turnsDone(es) >= 1)
+
+        return yield* ChatLog.ChatLog.use((log) => log.read(chat))
+      }).pipe(Effect.provide(runMemory(handlers, Scripted.unused)))
+
+      expect(entries.map(({ event }) => event._tag)).toEqual(["UserMessage", "TurnStarted", "TurnFailed"])
+      expect(failures(entries)[0]).toContain("Unknown isn't one of the drafting assistant's events")
     })
   )
 

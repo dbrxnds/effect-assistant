@@ -71,9 +71,6 @@ export const unansweredCalls = (history: ReadonlyArray<Prompt.Message>): Readonl
   )
 }
 
-const factText = (fact: AssistantEvent.Fact) =>
-  `<fact source="${fact.source}">\nAn update from a tool or workflow. The user hasn't seen it: tell them if it matters to them.\n${toJsonText(fact.payload)}\n</fact>`
-
 /**
  * What a tool call gets as its result when its handler's stream stopped
  * before the call ran.
@@ -138,9 +135,6 @@ const finishedText = (
     "\n"
   )}\n</specialist>`
 }
-
-/** One of the app's own inputs as the model reads it: its tag, and its fields as JSON. */
-const appInputText = ({ _tag, ...fields }: { readonly _tag: string }) => `<${_tag}>\n${toJsonText(fields)}\n</${_tag}>`
 
 const answerText = (answer: AssistantEvent.BlockAnswer) =>
   `<answer message="${answer.messageId}" kind="${answer.kind}">\nThe user answered with the block on your message ${answer.messageId}.\n${toJsonText(answer.value)}\n</answer>`
@@ -234,12 +228,14 @@ const approvedResultText = (
  *   ran, since the call already has one.
  * - A result whose call isn't in these entries (a view that starts after it)
  *   reads as text, where it is.
+ * - The app's own events read as `readApp` says (their `render`), placed
+ *   like inputs; the ones it gives no text aren't read.
  *
  * @internal
  */
 export const fromEntries = (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
-  inputs: ReadonlySet<string>
+  readApp: (event: { readonly _tag: string }) => string | undefined
 ): ReadonlyArray<Prompt.Message> => {
   const history: Array<Prompt.Message> = []
   const held: Array<Prompt.Message> = []
@@ -271,8 +267,9 @@ export const fromEntries = (
 
   entries.forEach(({ event }, index) => {
     if (!AssistantEvent.isLibraryEvent(event)) {
-      // The app's own events: its inputs the model reads; the rest are the app's records.
-      if (inputs.has(event._tag)) input(index, userText(appInputText(event)))
+      const text = readApp(event)
+
+      if (text !== undefined) input(index, userText(text))
 
       return
     }
@@ -285,7 +282,6 @@ export const fromEntries = (
             index,
             userText(answer.kind === Decision.kind ? decisionAnswerText(answer, requests) : answerText(answer))
           ),
-        Fact: (fact) => input(index, userText(factText(fact))),
         ModelOutput: (output) => {
           history.push(...Prompt.fromResponseParts(output.parts).content)
 
@@ -344,12 +340,12 @@ export const fromEntries = (
 
 /**
  * Returns whether an event is an input: one of the library's, or one of the
- * app's own `inputs`.
+ * app's own that wakes a turn (their tags are `wakes`).
  *
  * @internal
  */
-export const isInput = (event: { readonly _tag: string }, inputs: ReadonlySet<string>): boolean =>
-  AssistantEvent.isInput(event) || inputs.has(event._tag)
+export const isInput = (event: { readonly _tag: string }, wakes: ReadonlySet<string>): boolean =>
+  AssistantEvent.isInput(event) || (!AssistantEvent.isLibraryEvent(event) && wakes.has(event._tag))
 
 /**
  * Returns the `seq` the last finished turn read through, or 0.
@@ -370,12 +366,12 @@ export const handledThrough = (entries: ReadonlyArray<AssistantEvent.AnyEntry>):
  */
 export const unhandledInputs = (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
-  inputs: ReadonlySet<string>
+  wakes: ReadonlySet<string>
 ): ReadonlyArray<{ readonly _tag: string }> => {
   const seen = handledThrough(entries)
 
   return entries.flatMap(({ event, seq }) =>
-    seq > seen && isInput(event, inputs) && !(AssistantEvent.isInput(event) && !AssistantEvent.wakes(event))
+    seq > seen && isInput(event, wakes) && !(AssistantEvent.isInput(event) && !AssistantEvent.wakes(event))
       ? [event]
       : []
   )
@@ -386,8 +382,8 @@ export const unhandledInputs = (
  *
  * @internal
  */
-export const needsTurn = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, inputs: ReadonlySet<string>): boolean =>
-  unhandledInputs(entries, inputs).length > 0
+export const needsTurn = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, wakes: ReadonlySet<string>): boolean =>
+  unhandledInputs(entries, wakes).length > 0
 
 /**
  * Returns whether the user's latest message (or block answer) read through
@@ -418,5 +414,5 @@ export const owesReply = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, throu
 export const unreadAfter = (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
   throughSeq: number,
-  inputs: ReadonlySet<string>
-): boolean => entries.some(({ event, seq }) => seq > throughSeq && isInput(event, inputs))
+  wakes: ReadonlySet<string>
+): boolean => entries.some(({ event, seq }) => seq > throughSeq && isInput(event, wakes))

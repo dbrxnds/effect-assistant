@@ -47,9 +47,11 @@ It's stored as an `AssistantMessage` with a `block`.
 
 ## On the client
 
+The client gets the chat's [view](./client): each assistant message comes with
+its block, and where the block stands.
 [`BlockKit.toClient`](/api/BlockKit#toclient) maps each kind to a renderer.
 It's type-checked, so every kind in the kit is covered, and each renderer gets
-typed `props` and `answer`:
+typed `props` and `answer`, and whether the block is `open`:
 
 ```tsx
 const render = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
@@ -71,8 +73,8 @@ const render = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
   )
 })
 
-// For each AssistantMessage:
-render(message, { state: blockStates.get(message.id), respond: (answer) => submit(answer) })
+// For each AssistantMessage in the view:
+render(message, { respond: (answer) => submit(answer) })
 ```
 
 `respond` builds a `BlockAnswer` input (encoding the answer with the block's
@@ -85,10 +87,11 @@ can't show; show just the text then.
 A block stays open until it's answered: with the block itself, or in words.
 When the user types the answer instead, the assistant lists the block's
 message id in a later message's `closes`. Anything else the user sends, like another
-block's answer or a question about something else, leaves it open.
-[`BlockKit.blockStates(entries)`](/api/BlockKit#blockstates) computes that
-for a whole log, and `BlockKit.nextBlockStates` does it one event at a time
-for clients that fold the stream.
+block's answer or a question about something else, leaves it open. The
+view's block `status` says which: `"open"`, `"answered"`, or `"closed"`
+(without an answer). On the server,
+[`BlockKit.blockStates(entries)`](/api/BlockKit#blockstates) computes the
+same from a log, and `BlockKit.nextBlockStates` one event at a time.
 
 In case the assistant doesn't close a block the user moved on from, the turn
 can: `yield* BlockKit.closeStale({ messages: 3 })` in the handler, before
@@ -99,7 +102,7 @@ event, so every client folds them closed. `BlockKit.staleBlocks(entries,
 ## Asking for things from outside
 
 A workflow that needs something from the user doesn't build the UI. It notifies the
-assistant with a fact that says what it needs ("ask which delivery date works"), and
-the assistant writes the message and picks the block. A workflow that needs the
+assistant with an [event](./app-events) that says what it needs ("ask which delivery
+date works"), and the assistant writes the message and picks the block. A workflow that needs the
 user's approval asks for a [decision](./decisions#a-decision-that-work-asks-for),
 and waits for it.

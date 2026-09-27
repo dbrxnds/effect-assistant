@@ -20,11 +20,14 @@ ask for reports.
   user's decision (`Decision.durable`) before the campaign goes ahead.
 - `api/src/PrintOrders.ts`: `order_products`, which waits for the user's decision with its quote as
   the preview, and the `PrintOrder` workflow.
-- `api/src/Steps.ts`: what the workflows share: reporting a step to the chat as a fact, and
-  durable waits at demo pace.
+- `api/src/WorkflowStep.ts`: a workflow's step, one of Acme's own events: it wakes a turn, and the
+  model reads it as a `<workflow>` update.
+- `api/src/Steps.ts`: what the workflows share: reporting a step to the chat, and durable waits at
+  demo pace.
 - `api/src/LiveOrders.ts`: orders placed through Acme, kept up to date by the workflows.
-- `api/src/Chats.ts`: the thread list.
-- `api/src/Server.ts`: `/health`, `/rpc`, and the web app.
+- `api/src/Chats.ts`: the thread list. Deleting a thread deletes its chat (`AcmeAssistant.delete`).
+- `api/src/Server.ts`: `/health`, `/rpc`, and the web app. `Subscribe` streams the chat's view
+  (`AcmeAssistant.subscribeView`): what the user sees, never the assistant's own work.
 - `api/src/main.ts`: wires it together on Postgres (`DATABASE_URL`) or in memory.
 - `api/scripts/smoke.ts`: an end-to-end check against a running server. It deletes the chats it
   creates.

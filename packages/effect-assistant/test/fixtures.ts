@@ -11,17 +11,20 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
+import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import type * as LanguageModel from "effect/unstable/ai/LanguageModel"
 import * as TestRunner from "effect/unstable/cluster/TestRunner"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import {
+  AppEvent,
   Assistant,
   AssistantActivity,
   AssistantEngine,
   AssistantEvent,
   ChatId,
   ChatLog,
+  ChatView,
   InputId
 } from "../src/index.ts"
 import { toJsonText } from "../src/internal/schema.ts"
@@ -35,8 +38,24 @@ export const realModel = AnthropicLanguageModel.model(testModel, { cache_control
   Layer.provide(FetchHttpClient.layer)
 )
 
-/** The assistant most tests use: no blocks, no specialists. */
+/** What a workflow or a webhook reports in the tests: an app event that wakes a turn. */
+export class Update extends Schema.TaggedClass<Update>()("Update", {
+  id: InputId.InputId,
+  source: Schema.String,
+  payload: Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Finite]))
+}) {}
+
+/** How the model reads an update. */
+export const updateText = (update: Update) =>
+  `<update source="${update.source}">\nThe user hasn't seen it: tell them if it matters to them.\n${toJsonText(update.payload)}\n</update>`
+
+export const UpdateEvent = AppEvent.make(Update, { wakes: true, render: updateText })
+
+/** The assistant most tests use: no blocks, no specialists, no events of its own. */
 export const TestAssistant = Assistant.make("test")
+
+/** Like `TestAssistant`, with updates: what background work reports. */
+export const Updating = Assistant.make("updating", { events: [UpdateEvent] })
 
 /** The event log, in memory. */
 export const layerStorage = ChatLog.layerMemory
@@ -68,6 +87,16 @@ export const memoryAssistant = (
   model: Model
 ) => runMemory(TestAssistant.toLayer(handler), model)
 
+/** An in-memory `Updating` assistant with this handler, its own event log, and this model. */
+export const updatingAssistant = (
+  handler: Assistant.Handler<
+    Assistant.TurnServices | LanguageModel.LanguageModel,
+    Assistant.TurnServices | LanguageModel.LanguageModel,
+    Update
+  >,
+  model: Model
+) => runMemory(Updating.toLayer(handler), model)
+
 /** A new chat's id. */
 export const newChat = ChatId.make
 
@@ -76,8 +105,14 @@ const inputId = () => Effect.runSync(InputId.make)
 
 export const say = (text: string) => AssistantEvent.UserMessage.make({ id: inputId(), text })
 
-export const fact = (source: string, payload: Record<string, string | number>) =>
-  AssistantEvent.Fact.make({ id: inputId(), source, payload })
+export const update = (source: string, payload: Record<string, string | number>) =>
+  Update.make({ id: inputId(), source, payload })
+
+/** An update as it's stored, for a test that writes the chat itself. */
+export const storedUpdate = (source: string, payload: Record<string, string | number>) =>
+  Schema.decodeUnknownSync(AssistantEvent.StoredAppEvent)(
+    Schema.encodeSync(Schema.toCodecJson(Update))(update(source, payload))
+  )
 
 /** One line per entry, for a failure message. */
 export const traceEntries = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
@@ -90,9 +125,9 @@ export const traceEntries = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
             ? event.parts.flatMap((part) => (part.type === "tool-call" ? [part.name] : [])).join(",")
             : Predicate.isTagged(event, "ToolResult")
               ? `${event.tool}: ${toJsonText(event.result).slice(0, 80)}`
-              : Predicate.isTagged(event, "Fact")
-                ? toJsonText(event.payload).slice(0, 120)
-                : ""
+              : AssistantEvent.isLibraryEvent(event)
+                ? ""
+                : toJsonText(event).slice(0, 120)
 
       return `${seq} ${event._tag} ${detail}`
     })
@@ -137,8 +172,8 @@ export const toolsRun = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
 export const finished = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
   entries.flatMap(({ event }) => (Predicate.isTagged(event, "SpecialistFinished") ? [event] : []))
 
-export const facts = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
-  entries.flatMap(({ event }) => (Predicate.isTagged(event, "Fact") ? [event] : []))
+export const updates = (entries: ReadonlyArray<Assistant.Entry<Update>>) =>
+  entries.flatMap(({ event }) => (event instanceof Update ? [event] : []))
 
 /** Whether the last entry ends a turn: the assistant is idle. */
 export const idle = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
@@ -150,3 +185,9 @@ export const notWorking = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
 
 export const text = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
   AssistantEvent.assistantTexts(entries).join(" ").toLowerCase()
+
+/** The assistant's messages in a chat's view, as a client gets them. */
+export const viewedMessages = (entries: ReadonlyArray<AssistantEvent.AnyEntry>) =>
+  ChatView.fromEntries(entries).messages.flatMap((message) =>
+    Predicate.isTagged(message, "AssistantMessage") ? [message] : []
+  )

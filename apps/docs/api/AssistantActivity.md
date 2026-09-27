@@ -14,7 +14,10 @@ turn from `TurnStarted` to `TurnCompleted` or `TurnFailed`, a specialist
 run from `SpecialistStarted` to `SpecialistFinished`. An input is open until a
 turn that read it ends, so the gap before its turn starts counts too.
 Anything merely waiting, like a workflow on an approval, isn't working: the
-assistant took its last step, and the workflow wakes it with a fact.
+assistant took its last step, and the workflow wakes it with an event.
+
+A chat client gets this from its chat view (`ChatView`); these folds are
+for server-side code, over the log.
 
 **Example** (A working indicator)
 
@@ -45,7 +48,7 @@ const empty: Activity
 Returns what is working after these entries.
 
 ```ts
-const fromEntries: (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => Activity
+const fromEntries: (entries: ReadonlyArray<AssistantEvent.AnyEntry>, options?: Options) => Activity
 ```
 
 <small>Since 0.1.0</small>
@@ -58,7 +61,7 @@ Returns the activity after one more entry. Fold a chat's entries in order,
 or use `fromEntries`.
 
 ```ts
-const apply: (activity: Activity, entry: AssistantEvent.AnyEntry) => Activity
+const apply: (activity: Activity, entry: AssistantEvent.AnyEntry, options?: Options) => Activity
 ```
 
 <small>Since 0.1.0</small>
@@ -138,17 +141,42 @@ const withoutRun = (activity: Activity, runId: RunId): Activity => {
 }
 
 /**
+ * Options for folding activity.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface Options {
+  /** The tags of the app's events that wake a turn (see `AppEvent`): inputs too. Default: none. */
+  readonly wakes?: ReadonlySet<string> | undefined
+}
+```
+
+<small>Since 0.1.0</small>
+
+### Options
+
+Options for folding activity.
+
+```ts
+interface Options {
+  /** The tags of the app's events that wake a turn (see `AppEvent`): inputs too. Default: none. */
+  readonly wakes?: ReadonlySet<string> | undefined
+}
+
+/**
  * Returns the activity after one more entry. Fold a chat's entries in order,
  * or use {@link fromEntries}.
  *
  * @category combinators
  * @since 0.1.0
  */
-export const apply = (activity: Activity, entry: AssistantEvent.AnyEntry): Activity => {
+export const apply = (activity: Activity, entry: AssistantEvent.AnyEntry, options?: Options): Activity => {
   const event = entry.event
 
-  // The app's own events aren't the library's to track; its inputs get a turn a moment later.
-  if (!AssistantEvent.isLibraryEvent(event)) return activity
+  if (!AssistantEvent.isLibraryEvent(event)) {
+    return options?.wakes?.has(event._tag) === true ? { ...activity, queued: true, lastInputSeq: entry.seq } : activity
+  }
 
   if (AssistantEvent.isInput(event)) {
     // A finished run's report is an input, and ends the run.
@@ -184,7 +212,8 @@ export const apply = (activity: Activity, entry: AssistantEvent.AnyEntry): Activ
  * @category constructors
  * @since 0.1.0
  */
-export const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): Activity => entries.reduce(apply, empty)
+export const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, options?: Options): Activity =>
+  entries.reduce((activity, entry) => apply(activity, entry, options), empty)
 
 /**
  * Returns whether anything is working: a turn (or one about to start), or a

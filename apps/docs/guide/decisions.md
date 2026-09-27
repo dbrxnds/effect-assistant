@@ -113,18 +113,20 @@ A decision block may only ask for decisions that wait: an id that doesn't is
 a failure the model reads (kind `not_waiting_for_decision`).
 
 On the client, render it with the rest of the kit. The block's props only
-have ids: [`Decision.states`](/api/Decision#states) (or
-`Decision.nextStates`, one entry at a time) has each decision's request,
-with its preview, and how it was decided. `Decision.answerAll` is the answer
-an Approve or Decline button sends.
+have ids; the [chat's view](./client) has each decision the block asks for,
+with its preview and how it was decided, and its renderer gets them as
+`decisions`. (A parked call's params and the model's reading of it stay on
+the server.) `Decision.answerAll` is the answer an Approve or Decline button
+sends. On the server, [`Decision.states`](/api/Decision#states) folds the
+same from a log.
 
 ```tsx
 const render = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
   choose_one: ({ props, respond }) => …,
-  decision: ({ props, open, respond }) => (
+  decision: ({ props, decisions, open, respond }) => (
     <>
-      {props.decisionIds.map((id) => (
-        <Preview key={id} value={decisions.get(id)?.request.preview} />
+      {decisions.map((decision) => (
+        <Preview key={decision.id} value={decision.preview} />
       ))}
       <button disabled={!open} onClick={() => respond(Decision.answerAll(props, "approved"))}>
         {props.approveLabel ?? "Approve"}

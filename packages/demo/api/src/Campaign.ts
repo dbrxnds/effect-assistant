@@ -5,7 +5,7 @@
  * `start_campaign`. That starts the `CreateCampaign` workflow, which first
  * asks for the user's decision on the order (`Decision.durable`: the
  * assistant asks with a decision block, and the workflow waits for the
- * answer), then reports each stage as a fact from `workflow:CreateCampaign`:
+ * answer), then reports each stage as a `WorkflowStep`:
  *
  * 1. `declined`, if the user declined: the order is cancelled;
  * 2. `creative_in_progress`, then `scheduled`;
@@ -119,7 +119,7 @@ type Payload = typeof CreateCampaign.payloadSchema.Type
 const step = (payload: Payload, status: string, details: Steps.Step["details"] = {}) =>
   Effect.gen(function* () {
     yield* Steps.report({
-      source: "workflow:CreateCampaign",
+      workflow: "CreateCampaign",
       runId: payload.runId,
       chatId: payload.chatId,
       status,
@@ -213,7 +213,7 @@ const CampaignStarted = Schema.Struct({
  */
 export const StartCampaign = Tool.make("start_campaign", {
   description:
-    "Order a campaign. Needs the product id, the office paying, who it should reach, and the budget in USD. Ask the user for anything missing first. Checks the office's budget; the run then asks for the user's decision (a <decision> request) and reports each stage back as a fact.",
+    "Order a campaign. Needs the product id, the office paying, who it should reach, and the budget in USD. Ask the user for anything missing first. Checks the office's budget; the run then asks for the user's decision (a <decision> request) and reports each stage back as a <workflow> update.",
   parameters: Schema.Struct({
     campaignId: Schema.String,
     office: Schema.String.annotate({ description: "The office paying for it, like Amsterdam." }),

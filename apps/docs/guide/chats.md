@@ -7,7 +7,7 @@ handler looks the user up from `turn.chatId` every turn.
 Why not pass the user along with the message? A turn doesn't run inside the
 request that caused it. `submit` stores the input and returns, and the turn
 runs later, in the background, maybe again after a restart. Some turns have
-no request at all: a specialist's answer, a workflow's fact.
+no request at all: a specialist's answer, a workflow's event.
 
 ## Your app keeps the chats
 
@@ -51,7 +51,7 @@ const send = (userId: string, chatId: ChatId.ChatId, input: AssistantEvent.UserI
 ```
 
 Answer "not found" for another user's chat, so it looks like one that
-doesn't exist. Do the same before `subscribe`.
+doesn't exist. Do the same before `subscribeView`.
 
 ## Look up the user in the handler
 
@@ -108,7 +108,7 @@ const MyAssistantLive = MyAssistant.toLayer(
 ```
 
 This works for every turn, however it started: a user's message, a
-specialist's answer, a workflow's fact, or a restart. The lookup is by chat,
+specialist's answer, a workflow's event, or a restart. The lookup is by chat,
 so nothing has to carry the user.
 
 `ChatUsers` is yielded in the build Effect, so it's a requirement of the
@@ -117,7 +117,7 @@ that `Stream.provideService`, the `greet` tool's `CurrentUser` would be a
 type error (see [what a handler may use](./assistant#what-a-handler-may-use)).
 
 Look the user up every turn, not once: a turn after a restart, or one for a
-fact hours later, sees current permissions. It's one indexed query, and a
+workflow's event hours later, sees current permissions. It's one indexed query, and a
 turn takes seconds of model calls, so it needs no cache. If it ever matters,
 look it up once in the build, which runs once per chat activation, and
 accept that permissions can be a few idle minutes old.
@@ -185,6 +185,42 @@ The turn for its answer is in the same chat, so it finds the same user.
 
 ## Workflows
 
-A workflow that reports back just calls `submit` with the chat id and a fact. It
-doesn't carry the user: the handler looks the user up from the chat, as for
-any turn. See [facts](./facts#whom-a-fact-acts-for).
+A workflow that reports back just calls `submit` with the chat id and one of
+the assistant's [events](./app-events). It doesn't carry the user: the
+handler looks the user up from the chat, as for any turn. See
+[whom an event acts for](./app-events#whom-an-event-acts-for).
+
+## Deleting a chat
+
+When the user deletes a chat, delete it from your table and from the
+assistant:
+
+```ts
+const deleteChat = (userId: string, chatId: ChatId.ChatId) =>
+  Effect.gen(function* () {
+    const chat = yield* chats.get(chatId)
+
+    if (chat?.ownerId !== userId) return yield* Effect.fail("not_found" as const)
+
+    yield* chats.remove(chatId)
+    yield* MyAssistant.delete(chatId)
+  })
+```
+
+`MyAssistant.delete` goes through the engine to the chat, which:
+
+- removes its log (`ChatLog.delete`), and remembers it was deleted;
+- stops what works in it: a turn, specialist runs, what the handler's build
+  set up;
+- ends its subscribers' streams.
+
+After that the chat stores nothing, also after a restart: a later `submit`,
+a specialist's report, or a workflow's event for it is dropped, quietly (no
+failure, no turn). Work that reports into it, like a workflow, goes on and
+ends as it would; what it reports does nothing. A workflow waiting on one
+of the chat's [decisions](./decisions) gets `"declined"`: no one can answer
+it now, and declining runs nothing. Deleting a chat again does nothing.
+
+Your own records about the chat (orders it placed, say) are yours to
+delete. The demo deletes a thread's orders with it
+(`packages/demo/api/src/Server.ts`).

@@ -1,7 +1,49 @@
+import * as SqliteClient from "@effect/sql-sqlite-node/SqliteClient"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import { AssistantEvent, ChatId, ChatLog } from "../src/index.ts"
 import { say } from "./fixtures.ts"
+
+const stores = {
+  layerMemory: ChatLog.layerMemory,
+  layerSql: ChatLog.layerSql.pipe(Layer.provide(SqliteClient.layer({ filename: ":memory:" })))
+}
+
+for (const [name, store] of Object.entries(stores)) {
+  describe(`ChatLog.${name}`, () => {
+    it.effect("stores and reads a chat's entries, in order", () =>
+      Effect.gen(function* () {
+        const log = yield* ChatLog.ChatLog
+        const chat = yield* ChatId.make
+        yield* log.append(chat, [say("one"), AssistantEvent.TurnStarted.make({ assistant: "test" })])
+
+        expect((yield* log.read(chat)).map(({ seq, event }) => [seq, event._tag])).toEqual([
+          [1, "UserMessage"],
+          [2, "TurnStarted"]
+        ])
+      }).pipe(Effect.provide(store))
+    )
+
+    it.effect("deletes a chat: its entries go, it's remembered as deleted, and the others stay", () =>
+      Effect.gen(function* () {
+        const log = yield* ChatLog.ChatLog
+        const [gone, kept] = yield* Effect.all([ChatId.make, ChatId.make])
+        yield* log.append(gone, [say("one"), say("two")])
+        yield* log.append(kept, [say("other")])
+
+        yield* log.delete(gone)
+        yield* log.delete(gone)
+
+        expect(yield* log.read(gone)).toEqual([])
+        expect(yield* log.isDeleted(gone)).toBe(true)
+        expect(yield* log.isDeleted(kept)).toBe(false)
+        expect((yield* log.read(kept)).length).toBe(1)
+        expect(yield* log.unfinished).toEqual([kept])
+      }).pipe(Effect.provide(store))
+    )
+  })
+}
 
 describe("ChatLog.layerMemory", () => {
   it.effect("numbers entries per chat from 1", () =>

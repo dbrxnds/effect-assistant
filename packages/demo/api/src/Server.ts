@@ -30,7 +30,7 @@ const layerRpcHandlers = AcmeRpcs.toLayer(
 
     return AcmeRpcs.of({
       Subscribe: ({ chatId }) =>
-        AcmeAssistant.subscribe(chatId).pipe(Stream.provideService(AssistantEngine.AssistantEngine, engine)),
+        AcmeAssistant.subscribeView(chatId).pipe(Stream.provideService(AssistantEngine.AssistantEngine, engine)),
       Submit: ({ chatId, input }) =>
         (Predicate.isTagged(input, "UserMessage") ? chats.titleFromMessage(chatId, input.text) : Effect.void).pipe(
           Effect.andThen(AcmeAssistant.submit(chatId, input)),
@@ -38,8 +38,15 @@ const layerRpcHandlers = AcmeRpcs.toLayer(
         ),
       ListChats: () => chats.list,
       CreateChat: () => chats.create.pipe(Effect.map((chat) => ({ chatId: chat.chatId }))),
-      // A deleted chat takes its demo orders along, so budgets don't drift with every test run.
-      DeleteChat: ({ chatId }) => chats.delete(chatId).pipe(Effect.andThen(orders.removeChat(chatId)))
+      // A deleted chat takes its log and its demo orders along, so budgets don't drift with every test run.
+      DeleteChat: ({ chatId }) =>
+        chats
+          .delete(chatId)
+          .pipe(
+            Effect.andThen(AcmeAssistant.delete(chatId)),
+            Effect.andThen(orders.removeChat(chatId)),
+            Effect.provideService(AssistantEngine.AssistantEngine, engine)
+          )
     })
   })
 )

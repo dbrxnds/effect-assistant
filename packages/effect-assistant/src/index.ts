@@ -13,6 +13,11 @@
 /**
  * @since 0.1.0
  */
+export * as AppEvent from "./AppEvent.ts"
+
+/**
+ * @since 0.1.0
+ */
 export * as Block from "./Block.ts"
 
 /**
@@ -49,6 +54,11 @@ export * as AssistantEvent from "./AssistantEvent.ts"
  * @since 0.1.0
  */
 export * as ChatLog from "./ChatLog.ts"
+
+/**
+ * @since 0.1.0
+ */
+export * as ChatView from "./ChatView.ts"
 
 /**
  * @since 0.1.0

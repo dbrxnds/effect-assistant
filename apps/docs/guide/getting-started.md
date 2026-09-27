@@ -26,7 +26,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 
-// The definition: submit and subscribe are on it.
+// The definition: submit and subscribeView are on it.
 export const MyAssistant = Assistant.make("my-assistant")
 
 // The handler: every turn runs the agent loop with these instructions.
@@ -67,16 +67,15 @@ workflow:
 ## Send it a message
 
 A chat is a `ChatId`. `submit` stores a message in it and returns at once;
-the assistant works in the background. `subscribe` streams the chat's events,
-stored ones first, then live ones.
+the assistant works in the background. `subscribeView` streams the chat as
+its user sees it: the messages, and whether the assistant is working.
 
 **Example** (Submit, then read the reply)
 
 ```ts
-import { AssistantEvent, ChatId, InputId } from "effect-assistant"
+import { AssistantEvent, ChatId, ChatView, InputId } from "effect-assistant"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
-import * as Predicate from "effect/Predicate"
 import * as Stream from "effect/Stream"
 
 const program = Effect.gen(function* () {
@@ -87,21 +86,39 @@ const program = Effect.gen(function* () {
     AssistantEvent.UserMessage.make({ id: yield* InputId.make, text: "Hi! What can you do?" })
   )
 
-  yield* MyAssistant.subscribe(chatId).pipe(
-    Stream.takeUntil(({ event }) => Predicate.isTagged(event, "TurnCompleted")),
-    Stream.runForEach(({ event }) =>
-      Predicate.isTagged(event, "AssistantMessage") ? Console.log(`assistant: ${event.text}`) : Effect.void
-    )
+  const view = yield* MyAssistant.subscribeView(chatId).pipe(
+    Stream.scan(() => ChatView.empty, ChatView.apply),
+    Stream.takeUntil((view) => view.messages.length > 1 && ChatView.isIdle(view)),
+    Stream.runLast
   )
+
+  yield* Console.log(view)
 })
 
 Effect.runPromise(program.pipe(Effect.provide(MyAssistantLive)))
-// assistant: Hi! I can help with campaigns, copy, and planning. What are you working on?
+// { messages: [{ _tag: "UserMessage", text: "Hi! What can you do?" }, { _tag: "AssistantMessage", text: "Hi! I can help with …" }], … }
 ```
 
-A chat UI does the same: it renders the `UserMessage` and `AssistantMessage`
-events, and shows a working indicator while
-[`AssistantActivity`](./events#what-is-working) says something is working.
+A chat UI does the same over RPC: it folds the updates and renders the
+messages, and shows a working indicator while the view's `activity` says
+something works. See [the chat client](./client).
+
+`subscribe` streams the chat's whole log instead, every event the
+assistant stored, for server-side code and tests:
+
+**Example** (The log, for the server)
+
+```ts
+yield *
+  MyAssistant.subscribe(chatId).pipe(
+    Stream.takeUntil(({ event }) => Predicate.isTagged(event, "TurnCompleted")),
+    Stream.runForEach(({ seq, event }) => Console.log(seq, event._tag))
+  )
+// 1 UserMessage
+// 2 TurnStarted
+// 3 ModelOutput
+// …
+```
 
 ::: tip The assistant talks only through a tool
 The model's plain text never reaches the user, and neither do its tool calls

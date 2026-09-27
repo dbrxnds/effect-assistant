@@ -6,7 +6,7 @@ assertions about what the user was shown. Test two things separately.
 ## The mechanics, on a scripted model
 
 What your tools and handlers do with what the model answers doesn't depend
-on the model: a tool's side effects, a workflow's facts, a custom loop.
+on the model: a tool's side effects, a workflow's events, a custom loop.
 Script the model's answers and assert on the log: `LanguageModel.make` from
 `effect/unstable/ai` takes a `generateText` that returns the response parts
 you want (tool calls, text), and sees each request's prompt and tools. These
@@ -111,6 +111,7 @@ const inputsOf = (chatId: ChatId.ChatId) =>
 
 ## Test the pure parts directly
 
-The history rules, block states, and client renderers are plain functions:
-test them without a model. `BlockKit.blockStates` and `BlockKit.toClient` take
-entries and messages you build with the `AssistantEvent` constructors.
+The history rules, block states, the chat's view, and client renderers are
+plain functions: test them without a model. `BlockKit.blockStates` and
+`ChatView.fromEntries` take entries you build with the `AssistantEvent`
+constructors, and `BlockKit.toClient` renders the messages of the view.

@@ -125,7 +125,7 @@ const answerVerdict = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, answer: 
  */
 export const verdict = (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
-  input: AssistantEvent.Input | AssistantEvent.AppEvent
+  input: AssistantEvent.Input | AssistantEvent.StoredAppEvent
 ): Verdict => {
   if (!AssistantEvent.isLibraryEvent(input)) return store
 

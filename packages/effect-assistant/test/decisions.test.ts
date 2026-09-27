@@ -26,6 +26,7 @@ import {
   BlockKit,
   ChatId,
   ChatLog,
+  type ChatView,
   Decision,
   DecisionId,
   InputId,
@@ -46,7 +47,8 @@ import {
   simple,
   text,
   toolsRun,
-  traceEntries
+  traceEntries,
+  viewedMessages
 } from "./fixtures.ts"
 import * as Scripted from "./scripted.ts"
 
@@ -161,10 +163,10 @@ const events = {
 
 /** The message with the decision block. */
 const asked = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
-  events.AssistantMessage(entries).find((message) => message.block?.kind === Decision.kind)
+  viewedMessages(entries).find((message) => message.block?.kind === Decision.kind)
 
 /** The answer a client sends for the message's decision block: through `BlockKit.toClient`, like the UI. */
-const answerWith = (message: AssistantEvent.AssistantMessage, outcome: AssistantEvent.DecisionOutcome) => {
+const answerWith = (message: ChatView.AssistantMessage, outcome: AssistantEvent.DecisionOutcome) => {
   const answers: Array<AssistantEvent.BlockAnswer> = []
 
   const render = BlockKit.toClient(Blocks, {
@@ -177,10 +179,7 @@ const answerWith = (message: AssistantEvent.AssistantMessage, outcome: Assistant
 }
 
 /** A second answer to the same block, as a client that didn't know it was answered would send. */
-const anotherAnswer = (
-  message: AssistantEvent.AssistantMessage,
-  decisions: Record<string, AssistantEvent.DecisionOutcome>
-) =>
+const anotherAnswer = (message: ChatView.AssistantMessage, decisions: Record<string, AssistantEvent.DecisionOutcome>) =>
   AssistantEvent.BlockAnswer.make({
     id: InputId.fromKey(`${message.id}:${Object.values(decisions).join(",")}:again`),
     messageId: message.id,
@@ -593,6 +592,29 @@ describe("a decision that running work asks for", () => {
         outcome: "approved",
         resolved: true
       })
+    })
+  )
+
+  it.live("deleting the chat declines the decision the workflow waits on, and the workflow goes on", () =>
+    Effect.gen(function* () {
+      const layer = layerLaunch.pipe(
+        Layer.provideMerge(Launcher.toLayer(simple({ instructions }))),
+        Layer.provideMerge(WorkflowEngine.layerMemory),
+        Layer.provideMerge(AssistantEngine.layerMemory),
+        Layer.provideMerge(layerStorage),
+        Layer.provide(Scripted.layer(workScript))
+      )
+
+      const outcome = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        const run = yield* Effect.forkChild(Launch.execute({ chatId: chat }))
+        yield* collectUntil(Launcher, chat, waitingFor, "10 seconds")
+        yield* Launcher.delete(chat)
+
+        return yield* Fiber.join(run).pipe(Effect.timeout("5 seconds"))
+      }).pipe(Effect.provide(layer))
+
+      expect(outcome).toBe("declined")
     })
   )
 

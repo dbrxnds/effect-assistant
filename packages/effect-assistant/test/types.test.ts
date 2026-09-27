@@ -10,6 +10,7 @@ import type * as Prompt from "effect/unstable/ai/Prompt"
 import * as Tool from "effect/unstable/ai/Tool"
 import * as Toolkit from "effect/unstable/ai/Toolkit"
 import {
+  AppEvent,
   Assistant,
   type AssistantEngine,
   type AssistantEvent,
@@ -229,7 +230,7 @@ describe("types", () => {
 
     class Other extends Schema.TaggedClass<Other>()("Other", { n: Schema.Number }) {}
 
-    const Compacting = Assistant.make("types-compacting", { events: [Summary] })
+    const Compacting = Assistant.make("types-compacting", { events: [AppEvent.make(Summary)] })
 
     const handlers = Compacting.toLayer((turn) => {
       expectTypeOf(turn.entries).toEqualTypeOf<Effect.Effect<ReadonlyArray<Assistant.Entry<Summary>>>>()
@@ -244,6 +245,16 @@ describe("types", () => {
       return turn.loop({ instructions: "Help." })
     })
 
+    const submit = (chatId: ChatId.ChatId) => {
+      const ok = Compacting.submit(chatId, Summary.make({ text: "so far" }))
+
+      // @ts-expect-error: Other isn't one of this assistant's events
+      const wrong = Compacting.submit(chatId, Other.make({ n: 1 }))
+
+      return [ok, wrong]
+    }
+
     expectTypeOf(handlers).toBeObject()
+    expectTypeOf(submit).toBeFunction()
   })
 })

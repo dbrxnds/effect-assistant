@@ -55,7 +55,7 @@ class AssistantChat extends Context.Service<
     readonly entries: Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
     /** Appends events after the chat's last entry, sends them to its subscribers, and returns them as stored. */
     readonly append: (
-      events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.AppEvent>
+      events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>
     ) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
   }
 >()("effect-assistant/AssistantChat")

@@ -49,7 +49,8 @@ import {
   text,
   toolsRun,
   traceEntries,
-  turnsDone
+  turnsDone,
+  viewedMessages
 } from "./fixtures.ts"
 
 const instructions = "You help a small team. Be brief."
@@ -208,7 +209,10 @@ describe("with a real model", () => {
 
         BlockKit.toClient(BlockKit.make([Decision.block]), {
           decision: ({ props, respond }) => respond(Decision.answerAll(props, "approved"))
-        })(message!, { respond: (answer) => answers.push(answer) })
+        })(
+          viewedMessages(first).find(({ id }) => id === message!.id)!,
+          { respond: (answer) => answers.push(answer) }
+        )
 
         yield* Deciding.submit(chat, answers[0]!)
 

@@ -61,7 +61,7 @@ export interface Definition {
   readonly name: string
   readonly blocks: BlockKit.BlockKit | undefined
   readonly specialists: ReadonlyArray<Specialist.Any>
-  /** The app's own events and inputs. */
+  /** The app's own events. */
   readonly app: AppEvents.AppEvents
 }
 
@@ -165,13 +165,13 @@ const lastSeq = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, otherwise: num
  */
 const toHistory = (
   viewed: ReadonlyArray<Assistant.Entry<any> | Prompt.Message>,
-  inputs: ReadonlySet<string>
+  app: AppEvents.AppEvents
 ): ReadonlyArray<Prompt.Message> => {
   const out: Array<Prompt.Message> = []
   let run: Array<AssistantEvent.AnyEntry> = []
 
   const flush = () => {
-    out.push(...History.fromEntries(run, inputs))
+    out.push(...History.fromEntries(run, (event) => AppEvents.read(app, event)))
     run = []
   }
 
@@ -207,7 +207,7 @@ const closeOpenCalls = Effect.fn(function* (chat: AssistantChat["Service"], star
   // Approved calls this turn started that have no result are cut off like any other; one not started yet waits.
   const all = yield* chat.entries
   const approved = Decisions.approvedCalls(all).filter((call) => started.has(call.id))
-  const open = [...History.unansweredCalls(History.fromEntries(entries, new Set())), ...approved]
+  const open = [...History.unansweredCalls(History.fromEntries(entries, () => undefined)), ...approved]
 
   if (open.length === 0) return
 
@@ -230,11 +230,11 @@ const closeOpenCalls = Effect.fn(function* (chat: AssistantChat["Service"], star
  * input got no reply; an input that arrived after the turn's last read gets
  * the next turn, which replies.
  */
-const finishTurn = Effect.fn(function* (chat: AssistantChat["Service"], read: number, inputs: ReadonlySet<string>) {
+const finishTurn = Effect.fn(function* (chat: AssistantChat["Service"], read: number, wakes: ReadonlySet<string>) {
   const entries = yield* chat.entries
 
   const end =
-    History.owesReply(entries, read) && !History.unreadAfter(entries, read, inputs)
+    History.owesReply(entries, read) && !History.unreadAfter(entries, read, wakes)
       ? AssistantEvent.TurnFailed.make({ throughSeq: read, message: silentTurnMessage })
       : AssistantEvent.TurnCompleted.make({ throughSeq: read })
 
@@ -260,17 +260,14 @@ const makeTurnApi = (
   const { definition, builtins } = registration
   const { app } = definition
 
-  const decoded = (all: ReadonlyArray<AssistantEvent.AnyEntry>) =>
-    all.flatMap((entry) => Option.toArray(AppEvents.decodeEntry(app, entry)))
-
   // Reading the chat, for the history or the entries, moves how far the turn read.
   const entries = Effect.map(
     Effect.tap(chat.entries, (all) => Ref.update(read, (seq) => lastSeq(all, seq))),
-    decoded
+    (all) => AppEvents.decodeEntries(app, all)
   )
 
   const history = (view: Assistant.HistoryView<any> = identity) =>
-    Effect.map(entries, (all) => toHistory(view(all), app.inputs))
+    Effect.map(entries, (all) => toHistory(view(all), app))
 
   const instructions = (given: string | Instructions.Resolved) =>
     mapText(given, (text) => `${Instructions.protocol}\n\n${text}${running}`)
@@ -285,7 +282,7 @@ const makeTurnApi = (
         const through = yield* Ref.get(read)
 
         // Something arrived after the loop's last read: the next turn reads it with the full loop, and replies.
-        if (History.unreadAfter(all, through, app.inputs) || !History.owesReply(all, through)) return Stream.empty
+        if (History.unreadAfter(all, through, app.wakes) || !History.owesReply(all, through)) return Stream.empty
 
         return AssistantLoop.stream({
           instructions: mapText(
@@ -294,7 +291,7 @@ const makeTurnApi = (
           ),
           toolkit: replyOnly,
           // Not `history`: what the reply pass reads, it can only reply to, so it doesn't move how far the turn read.
-          history: Effect.map(chat.entries, (all) => History.fromEntries(all, app.inputs)),
+          history: Effect.map(chat.entries, (all) => toHistory(AppEvents.decodeEntries(app, all), app)),
           maxSteps: 1,
           // Named, not just required: a model used to calling wait would otherwise call a tool that isn't there.
           toolChoice: { tool: Tools.sendUserMessageName }
@@ -359,7 +356,7 @@ export const runTurn = Effect.fn(
     const { chat } = options
     const before = yield* chat.entries
 
-    yield* Telemetry.agentInput(History.unhandledInputs(before, options.registration.definition.app.inputs))
+    yield* Telemetry.agentInput(History.unhandledInputs(before, options.registration.definition.app.wakes))
 
     const assistant = options.registration.definition.name
     const traceId = yield* Telemetry.currentTraceId
@@ -399,7 +396,7 @@ export const runTurn = Effect.fn(
       Effect.matchCauseEffect({
         onSuccess: () =>
           Effect.flatMap(Ref.get(read), (through) =>
-            finishTurn(chat, through, options.registration.definition.app.inputs)
+            finishTurn(chat, through, options.registration.definition.app.wakes)
           ),
         onFailure: (cause) => failTurn(chat, cause)
       })

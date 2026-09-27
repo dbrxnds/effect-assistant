@@ -108,17 +108,18 @@ it ends, so every call keeps its result.
 Instead of dropping the start of a long chat, summarize it. Store the summary
 as an event of your own, and start the history at the last one.
 
-Declare the event with the assistant's `events` option. `turn.append` writes
-it to the chat, and `turn.entries` reads it back as a `Summary`. The model
-doesn't read it unless a view puts it in.
+Register the event with the assistant's `events` option (see
+[your own events](./app-events)). `turn.append` writes it to the chat, and
+`turn.entries` reads it back as a `Summary`. It doesn't wake a turn, and
+with no `render` the model doesn't read it unless a view puts it in.
 
 ```ts
-import { Assistant } from "effect-assistant"
+import { AppEvent, Assistant } from "effect-assistant"
 import * as Schema from "effect/Schema"
 
 class Summary extends Schema.TaggedClass<Summary>()("Summary", { text: Schema.String }) {}
 
-export const MyAssistant = Assistant.make("my-assistant", { events: [Summary] })
+export const MyAssistant = Assistant.make("my-assistant", { events: [AppEvent.make(Summary)] })
 ```
 
 The view starts at the last summary: its text first, then the entries after

@@ -1,8 +1,8 @@
 # The event log
 
 Every chat is an append-only log of [`AssistantEvent`](/api/AssistantEvent)s.
-The chat UI renders it, and the model's history is rebuilt from it before
-every model call.
+A chat client gets what its user sees of it (its [view](./client)), and the
+model's history is rebuilt from it before every model call.
 
 **Example** (Print a chat's log)
 
@@ -26,14 +26,13 @@ Each event is stored as an `AssistantEvent.Entry`: the chat id, a `seq`
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `UserMessage`                                | Text the user typed.                                                                                                     |
 | `BlockAnswer`                                | The user used a [block](./blocks).                                                                                       |
-| `Fact`                                       | Something the assistant should know that the user didn't type: a workflow step, a specialist's answer, a webhook.        |
 | `AssistantMessage`                           | A message the assistant sent, optionally with a block.                                                                   |
 | `ModelOutput`, `ToolStarted`, `ToolResult`   | The assistant's own work, which the user doesn't see: each model step, then each tool call as it starts, and its result. |
 | `TurnStarted`, `TurnCompleted`, `TurnFailed` | [Turn](./turns) bookkeeping.                                                                                             |
 | `SpecialistStarted`, `SpecialistFinished`    | A [specialist](./specialists) run working, and done; a finished run's report wakes a turn.                               |
 | `BlocksClosed`                               | [Blocks](./blocks) closed without an answer.                                                                             |
 | `DecisionRequested`, `DecisionResolved`      | A [decision](./decisions) the user is asked to make (for a parked call, or by running work), and how they decided.       |
-| Your own events and inputs                   | [Yours](#your-own-events-and-inputs), like a summary or an uploaded file, stored as themselves.                          |
+| Your own events                              | [Yours](./app-events), like a workflow's progress or a summary, stored as themselves.                                    |
 
 A `ModelOutput` is one model call: its response parts (text, reasoning, and
 tool calls, as `effect/unstable/ai`'s `Response` parts), the model, the
@@ -43,11 +42,13 @@ writes), and how long it took. A `ToolResult` is a call's `outcome`
 `TurnStarted` has the turn's trace id when a tracer records it, to go from
 the log to the trace.
 
-The first three are **inputs**: submitting one starts a turn, or joins the
-one that is running. So is a `SpecialistFinished`, and a `DecisionRequested`
-that running work submits (not one for a parked call, which the turn records). A chat client may submit `UserMessage` and
-`BlockAnswer` (`AssistantEvent.UserInput`); facts come from your server,
-which submits them itself.
+The first two are **inputs**: submitting one starts a turn, or joins the
+one that is running. So is a `SpecialistFinished`, a `DecisionRequested`
+that running work submits (not one for a parked call, which the turn
+records), and each of your events registered with `wakes: true`. A chat
+client may submit `UserMessage` and `BlockAnswer`
+(`AssistantEvent.UserInput`); your events come from your server, which
+submits them itself.
 
 ## Input ids make retries safe
 
@@ -64,10 +65,14 @@ InputId.fromKey(`${orderId}:shipped`)
 
 ## Reading a chat
 
-- `MyAssistant.subscribe(chatId)` streams stored entries, then live ones. It goes
-  through the engine, so it works with the cluster engine too. Use it for a
-  chat UI. A client that reconnects passes the last `seq` it has,
-  `subscribe(chatId, { after: seq })`, and gets only what's new.
+- `MyAssistant.subscribeView(chatId)` streams what the chat's user sees, for a
+  [chat client](./client). It never has the assistant's own work.
+- `MyAssistant.subscribe(chatId)` streams the whole log: stored entries, then
+  live ones, with your events decoded. It goes through the engine, so it
+  works with the cluster engine too. It's for server-side code, tests, and
+  debugging, not for a client. A reader that reconnects passes the last
+  `seq` it has, `subscribe(chatId, { after: seq })`, and gets only what's
+  new.
 - An open chat keeps its entries in memory: turns and tools read them with
   `AssistantChat`'s `entries`, not from the log.
 - The `ChatLog` service's `read(chatId)` (or `read(chatId, { after })`) returns
@@ -83,7 +88,13 @@ The log is the `ChatLog` service:
 - `ChatLog.layerMemory` keeps chats in memory, for tests and local
   runs.
 - `ChatLog.layerSql` stores them with a `SqlClient`, in a
-  `chat_log` table it creates if it doesn't exist.
+  `chat_log` table it creates if it doesn't exist, and remembers deleted
+  chats in `chat_log_deleted`.
+
+`ChatLog.delete(chatId)` removes a chat's entries and remembers it was
+deleted, so nothing is stored in it again. Delete through the assistant,
+`MyAssistant.delete(chatId)`, so an open chat stops too (see
+[deleting a chat](./chats#deleting-a-chat)).
 
 Each chat writes its log one append at a time, so a turn and a specialist
 run writing at once get entries in order. The `ChatLog` a handler, tool, or
@@ -108,40 +119,23 @@ AssistantActivity.isWorking(activity) // a turn, one about to start, or a specia
 activity.specialists // which specialists, since when
 ```
 
-A client that folds the stream one entry at a time uses
-`AssistantActivity.apply`. A workflow waiting on an approval or a timer isn't
-working: the assistant took its last step, and the workflow's next fact wakes
-it.
+Server-side code that folds the log one entry at a time uses
+`AssistantActivity.apply`; pass `{ wakes }`, the tags of your events that
+wake a turn, so they count as inputs. A chat client gets the same from its
+[view](./client)'s `activity`. A workflow waiting on an approval or a timer
+isn't working: the assistant took its last step, and the workflow's next
+event wakes it.
 
-## Your own events and inputs
+## Your own events
 
-An assistant can store events of its own in the chat, and take inputs of its
-own. Declare them as tagged schemas (`Schema.TaggedStruct` or
-`Schema.TaggedClass`):
-
-```ts
-class Summary extends Schema.TaggedClass<Summary>()("Summary", { text: Schema.String }) {}
-
-class FileUploaded extends Schema.TaggedClass<FileUploaded>()("FileUploaded", {
-  id: InputId.InputId,
-  name: Schema.String
-}) {}
-
-export const MyAssistant = Assistant.make("my-assistant", { events: [Summary], inputs: [FileUploaded] })
-```
-
-- **Events** are the app's records, like a summary for
-  [compaction](./loops#compaction). `turn.append` stores one; the model
-  doesn't read it unless a history view puts it in.
-- **Inputs** come from outside, like an uploaded file. `MyAssistant.submit`
-  takes one; it wakes a turn like a fact, and the model reads it as
-  `<FileUploaded>` with its fields in JSON. One with an `id` is stored once
-  per id.
-
-Both are stored as themselves, in their schema's JSON form: a `Date` or a
-`bigint` survives. `turn.entries` and `MyAssistant.subscribe` decode them to
-their types. For an RPC that streams a chat, use `MyAssistant.Entry` as the
-schema: it covers the assistant's own events too.
+An assistant stores events of its own in the chat, registered with
+`AppEvent.make(schema, { wakes, render })`: what background work reports,
+which wakes a turn, or the app's bookkeeping, which doesn't. Each is stored
+as itself, in its schema's JSON form, and `turn.entries` and
+`MyAssistant.subscribe` decode it to its type. See
+[your own events](./app-events). For an RPC that streams the log to other
+server code, `MyAssistant.Entry` is the schema: it covers the assistant's
+own events too.
 
 ## History order
 
@@ -155,4 +149,4 @@ coherent when things arrive mid-step:
   so the model doesn't read its own reply as an answer to a message it never
   saw.
 
-Facts appear in the history as `<fact source="…">…</fact>`.
+Your events appear in the history as their `render` says, placed like inputs.

@@ -4,7 +4,7 @@
  * `order_products` needs the user's decision: when the model calls it, the
  * call waits, and the user sees its quote (the product, units, total, and
  * the budget left after it). Their yes runs it: it checks the budget again
- * and starts the `PrintOrder` workflow, which reports each stage as a fact
+ * and starts the `PrintOrder` workflow, which reports each stage as a `WorkflowStep`
  * from `workflow:PrintOrder`: `confirmed`, `printing`, `shipped` (with a
  * tracking number), and `delivered`. The assistant decides which ones the
  * user hears about.
@@ -53,7 +53,7 @@ type Payload = typeof PrintOrder.payloadSchema.Type
 const step = (payload: Payload, status: string, details: Steps.Step["details"] = {}) =>
   Effect.gen(function* () {
     yield* Steps.report({
-      source: "workflow:PrintOrder",
+      workflow: "PrintOrder",
       runId: payload.runId,
       chatId: payload.chatId,
       status,
@@ -184,7 +184,7 @@ export const quote = Effect.fn(function* ({ office, product, quantity }: typeof 
  */
 export const OrderProducts = Tool.make("order_products", {
   description:
-    "Order branded products for an office. It waits for the user's decision, with the total and the budget left; once they approve, production starts and progress arrives as facts from workflow:PrintOrder.",
+    'Order branded products for an office. It waits for the user\'s decision, with the total and the budget left; once they approve, production starts and progress arrives as <workflow name="PrintOrder"> updates.',
   parameters: OrderInput,
   success: Schema.Union([
     Schema.Struct({ reference: Schema.String, status: Schema.String, note: Schema.String }),

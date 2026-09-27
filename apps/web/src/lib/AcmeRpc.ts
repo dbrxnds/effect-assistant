@@ -43,7 +43,7 @@ export class AcmeRpc extends AtomRpc.Service<AcmeRpc>()("AcmeRpc", {
     )
 }) {}
 
-/** A chat's state from its `Subscribe` stream. Resubscribes every 2s after it drops. */
+/** A chat's state from its `Subscribe` stream of view updates. Resubscribes every 2s after it drops. */
 export const chatSessionAtom = Atom.family((chatId: ChatId.ChatId) =>
   AcmeRpc.runtime.atom(
     Stream.unwrap(
@@ -53,14 +53,14 @@ export const chatSessionAtom = Atom.family((chatId: ChatId.ChatId) =>
           Stream.repeat(Schedule.spaced("2 seconds"))
         )
       )
-    ).pipe(Stream.scan(() => ChatState.initial(chatId), ChatState.apply)),
-    { initialValue: ChatState.initial(chatId) }
+    ).pipe(Stream.scan(() => ChatState.initial, ChatState.apply)),
+    { initialValue: ChatState.initial }
   )
 )
 
 /** A chat's state, or its initial state while loading. */
-export const chatSession = (result: AsyncResult.AsyncResult<ChatState.ChatState, unknown>, chatId: ChatId.ChatId) =>
-  AsyncResult.getOrElse(result, () => ChatState.initial(chatId))
+export const chatSession = (result: AsyncResult.AsyncResult<ChatState.ChatState, unknown>) =>
+  AsyncResult.getOrElse(result, () => ChatState.initial)
 
 /** Refreshes the thread list after a mutation. */
 export const chatListKeys = ["chats"]

@@ -8,7 +8,7 @@ import * as Stream from "effect/Stream"
 import * as Tool from "effect/unstable/ai/Tool"
 import * as Toolkit from "effect/unstable/ai/Toolkit"
 import { Assistant, AssistantLoop, ChatId, Specialist } from "../src/index.ts"
-import { fact, runEntity, runMemory, say } from "./fixtures.ts"
+import { runEntity, runMemory, say, update, type Update, UpdateEvent } from "./fixtures.ts"
 import * as Scripted from "./scripted.ts"
 
 interface User {
@@ -86,7 +86,7 @@ const recording = (seen: Queue.Queue<Seen>) =>
   Effect.gen(function* () {
     const users = yield* ChatUsers
 
-    return Effect.fn(function* (turn: Assistant.Turn) {
+    return Effect.fn(function* (turn: Assistant.Turn<Update>) {
       const user = yield* users.forChat(turn.chatId)
 
       return Effect.gen(function* () {
@@ -117,7 +117,7 @@ const recording = (seen: Queue.Queue<Seen>) =>
     })
   })
 
-const Helper = Assistant.make("helper", { specialists: [Clerk] })
+const Helper = Assistant.make("helper", { specialists: [Clerk], events: [UpdateEvent] })
 
 const handlers = (seen: Queue.Queue<Seen>) =>
   Helper.toLayer(recording(seen)).pipe(Layer.provide(clerkLive(seen)), Layer.provide(ChatUsersLive))
@@ -157,18 +157,18 @@ for (const [name, engine] of Object.entries(engines)) {
           yield* Queue.take(seen)
 
           expect(yield* Queue.take(seen)).toEqual({ by: "clerk", instructions: "You file for Bob.", tools: [] })
-          // The clerk's answer is a fact in the chat: a turn reads it, for Bob too.
+          // The clerk's answer is an input in the chat: a turn reads it, for Bob too.
           expect((yield* Queue.take(seen)).instructions).toContain("You help Bob.")
         }).pipe(Effect.provide(engine(seen)))
       })
     )
 
-    it.live("gives a fact's turn the chat's user", () =>
+    it.live("gives the turn for a workflow's update the chat's user", () =>
       Effect.gen(function* () {
         const seen = yield* Queue.unbounded<Seen>()
 
         yield* Effect.gen(function* () {
-          yield* Helper.submit(yield* chatFor(bob), fact("workflow:Export", { status: "done" }))
+          yield* Helper.submit(yield* chatFor(bob), update("workflow:Export", { status: "done" }))
 
           expect((yield* Queue.take(seen)).instructions).toContain("You help Bob.")
         }).pipe(Effect.provide(engine(seen)))

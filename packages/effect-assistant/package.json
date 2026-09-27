@@ -46,6 +46,7 @@
   },
   "devDependencies": {
     "@effect/ai-anthropic": "4.0.0-rc.117",
+    "@effect/sql-sqlite-node": "4.0.0-rc.117",
     "@effect/vitest": "4.0.0-rc.117",
     "@types/node": "^22.15.3",
     "effect": "4.0.0-rc.117",

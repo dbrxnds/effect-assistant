@@ -19,22 +19,24 @@ export const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
 ## The definition
 
 `Assistant.make(name, options?)` is what the rest of your app imports:
-the server calls `submit` and `subscribe` on it, and the UI reads
+the server calls `submit` and `subscribeView` on it, and the UI reads
 its blocks. It holds no code that runs turns.
 
 ```ts
 export const MyAssistant = Assistant.make("my-assistant", {
   blocks: Blocks, // UI the assistant may put in messages: see UI blocks
   specialists: [Research], // agents it may hand work to: see Specialists
-  events: [Summary] // events of your own: see the event log
+  events: [AppEvent.make(OrderShipped, { wakes: true })] // events of your own: see Your own events
 })
 ```
 
-| Member               | What it does                                                                                       |
-| -------------------- | -------------------------------------------------------------------------------------------------- |
-| `submit(chatId, in)` | Stores an input and returns: a message, a block answer, or a [fact](./facts).                      |
-| `subscribe(chatId)`  | Streams the chat's [events](./events): stored ones first (or those after `after`), then live ones. |
-| `toLayer(handler)`   | The handler's layer. It registers the assistant with the [engine](./engines).                      |
+| Member                  | What it does                                                                                                             |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `submit(chatId, in)`    | Stores an input and returns: a message, a block answer, or one of the app's [events](./app-events).                      |
+| `subscribeView(chatId)` | Streams the chat as its user sees it, for a [chat client](./client).                                                     |
+| `subscribe(chatId)`     | Streams the chat's whole [log](./events), for the server: stored entries first (or those after `after`), then live ones. |
+| `delete(chatId)`        | [Deletes the chat](./chats#deleting-a-chat): its log, and what works in it.                                              |
+| `toLayer(handler)`      | The handler's layer. It registers the assistant with the [engine](./engines).                                            |
 
 The name is also the assistant's name in [traces](./observability)
 (`invoke_agent my-assistant`) and, with the cluster engine, in its entity type.
@@ -75,7 +77,7 @@ the loop themselves (see [custom loops](./loops)):
 
 `toLayer` also takes an Effect that returns the handler: a build. Like an
 Effect cluster entity's, the build runs once per chat activation, when the
-chat wakes up (a message, a specialist's report, a workflow's fact), and its
+chat wakes up (a message, a specialist's report, a workflow's event), and its
 scope closes when the chat goes idle. The handler it returns runs every turn.
 Inside the build, `AssistantChat` says which chat it is.
 
@@ -147,5 +149,5 @@ usage, with the cache's reads and writes.
 - each of its specialists' handlers (`Research.toLayer(...)`);
 - what its build Effect required.
 
-`submit` and `subscribe` need `AssistantEngine` too, so provide the
+`submit`, `subscribeView`, `subscribe`, and `delete` need `AssistantEngine` too, so provide the
 engine with `Layer.provideMerge`, where your server can reach it.

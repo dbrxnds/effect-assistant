@@ -291,7 +291,7 @@ export interface Submitter {
  * @since 0.1.0
  */
 export interface RequestOptions {
-  /** Who asks, like `workflow:CreateCampaign`, as for a fact. */
+  /** Who asks, like `workflow:CreateCampaign`. */
   readonly source: string
   /** What the user decides on, like the order: any value with a JSON form. */
   readonly preview: unknown

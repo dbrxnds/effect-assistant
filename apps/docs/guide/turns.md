@@ -21,7 +21,7 @@ them: their message and the assistant's.
 
 ## How a turn runs
 
-1. `submit` appends an input (a message, a block answer, or a fact). If no turn is
+1. `submit` appends an input (a message, a block answer, or an [event](./app-events) that wakes a turn). If no turn is
    running for the chat, one starts.
 2. The handler runs the loop, usually `turn.loop(...)`. It rebuilds the
    model's history from the log, calls the model, and runs its tool calls.
@@ -58,18 +58,18 @@ writes on its own never reaches the user. It's private reasoning.
 
 ## Telling the user, or keeping it internal
 
-A [fact](./facts) goes into the model's history, never the chat. For each
-one, the assistant decides whether the user needs to know: results,
-questions, and problems get a `send_user_message`; routine progress gets just
-`wait`.
+What a workflow or a webhook reports (one of your [events](./app-events))
+goes into the model's history, never to the user. For each one, the
+assistant decides whether the user needs to know: results, questions, and
+problems get a `send_user_message`; routine progress gets just `wait`.
 
-So a fact can say what it needs rather than what to say:
+So an event can say what it needs rather than what to say:
 
 ```ts
-AssistantEvent.Fact.make({
-  id: InputId.fromKey(`${runId}:needs_date`),
-  source: "workflow:PrintOrder",
-  payload: { status: "needs_date", next: "Ask the user which delivery date works: Tuesday or Thursday." }
+const NeedsDate = AppEvent.make(DeliveryQuestion, {
+  wakes: true,
+  render: (question) =>
+    `<order reference="${question.reference}">Ask the user which delivery date works: ${question.options.join(" or ")}.</order>`
 })
 ```
 

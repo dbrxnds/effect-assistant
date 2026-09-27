@@ -6,8 +6,9 @@
  *   take a block from the kit. Answers need no server code: they arrive as
  *   `BlockAnswer` inputs.
  * - Client: {@link toClient} maps each kind to a renderer, type-checked so
- *   every kind is covered, and {@link blockStates} says which blocks are still
- *   open.
+ *   every kind is covered, and renders the blocks of a chat's view
+ *   (`ChatView`), which says where each one stands. {@link blockStates}
+ *   folds the same from the log, for server-side code.
  *
  * @since 0.1.0
  */
@@ -18,6 +19,7 @@ import * as Schema from "effect/Schema"
 import * as AssistantEvent from "./AssistantEvent.ts"
 import { AssistantChat } from "./AssistantChat.ts"
 import type * as Block from "./Block.ts"
+import type * as ChatView from "./ChatView.ts"
 import * as InputId from "./InputId.ts"
 
 /**
@@ -190,6 +192,8 @@ export interface RenderArgs<B> {
   readonly open: boolean
   /** The user's answer, if they used the block. */
   readonly answer: AnswerOf<B> | undefined
+  /** For the decision block: what each decision is about (its preview), and how it was decided. Empty otherwise. */
+  readonly decisions: ReadonlyArray<ChatView.Decision>
   /** Sends an answer. Only call it while `open`. */
   readonly respond: (answer: AnswerOf<B>) => void
 }
@@ -211,20 +215,20 @@ export type Renderers<Kit extends BlockKit, Out> = {
  * @since 0.1.0
  */
 export interface RenderOptions {
-  /** This message's block state, from {@link blockStates}. Default: open, unanswered. */
-  readonly state?: BlockState | undefined
   /** Submits an answer, for example over RPC. */
   readonly respond: (answer: AssistantEvent.BlockAnswer) => void
 }
 
 /**
- * Creates a client-side renderer for the blocks in a kit's messages.
+ * Creates a client-side renderer for the blocks on a chat view's messages
+ * (`ChatView.AssistantMessage`).
  *
  * **Details**
  *
  * The renderer returns `undefined` when a message has no block, or one this
  * client can't show (an unknown kind, or props that don't decode). Show just
- * the text then. `respond` encodes the answer with the block's answer schema
+ * the text then. A block is `open` while its status is, and its `answer` is
+ * the user's, decoded with the block's answer schema. `respond` encodes the answer with the block's answer schema
  * and passes a `BlockAnswer` to {@link RenderOptions.respond}. Answers cross
  * the wire in their schema's JSON form, so dates and the like survive.
  *
@@ -254,12 +258,12 @@ export interface RenderOptions {
 export function toClient<Kit extends BlockKit, Out>(
   kit: Kit,
   renderers: Renderers<Kit, Out>
-): (message: AssistantEvent.AssistantMessage, options: RenderOptions) => Out | undefined
+): (message: ChatView.AssistantMessage, options: RenderOptions) => Out | undefined
 // The overload above checks that every kind has a renderer; here each one takes any block's arguments.
 export function toClient<Out>(
   kit: BlockKit,
   renderers: Readonly<Record<string, (args: RenderArgs<Block.Any>) => Out>>
-): (message: AssistantEvent.AssistantMessage, options: RenderOptions) => Out | undefined {
+): (message: ChatView.AssistantMessage, options: RenderOptions) => Out | undefined {
   return (message, options) => {
     if (message.block === undefined) return undefined
 
@@ -273,19 +277,18 @@ export function toClient<Out>(
 
     if (Option.isNone(props)) return undefined
 
-    const given = options.state?.answer
+    const given = message.block.answer
     const answerCodec = block.answer === undefined ? undefined : Schema.toCodecJson(block.answer)
 
     const answer =
-      given === undefined || answerCodec === undefined
-        ? Option.none()
-        : Schema.decodeUnknownOption(answerCodec)(given.value)
+      given === undefined || answerCodec === undefined ? Option.none() : Schema.decodeUnknownOption(answerCodec)(given)
 
     return render({
       text: message.text,
       props: props.value,
-      open: options.state?.open ?? true,
+      open: message.block.status === "open",
       answer: Option.getOrUndefined(answer),
+      decisions: message.block.decisions ?? [],
       respond: (value) =>
         options.respond(
           AssistantEvent.BlockAnswer.make({

@@ -9,6 +9,11 @@
  * subscribers; an assistant's `subscribe` streams them. One process writes
  * each chat: the cluster engine sends a chat to one entity.
  *
+ * `delete` removes a chat's entries and remembers that it was deleted, so
+ * nothing is stored in it again. Delete through the assistant
+ * (`MyAssistant.delete`), which also has an open chat drop its state; use
+ * `delete` on its own only for a chat nothing has open.
+ *
  * @since 0.1.0
  */
 import * as Clock from "effect/Clock"
@@ -33,12 +38,16 @@ export class ChatLog extends Context.Service<
     /** Appends events to a chat and returns them as stored entries. */
     readonly append: (
       chatId: ChatId,
-      events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.AppEvent>
+      events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>
     ) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
     /** Reads a chat's stored entries, in order: all of them, or those after a `seq`. */
     readonly read: (chatId: ChatId, options?: ReadOptions) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
     /** Chats whose last entry doesn't end a turn: the ones that may still owe one, after a restart. */
     readonly unfinished: Effect.Effect<ReadonlyArray<ChatId>>
+    /** Removes a chat's entries, and remembers it was deleted. Deleting it again does nothing. */
+    readonly delete: (chatId: ChatId) => Effect.Effect<void>
+    /** Whether the chat was deleted. A chat the engine opens reads this first: a deleted one takes nothing. */
+    readonly isDeleted: (chatId: ChatId) => Effect.Effect<boolean>
   }
 >()("effect-assistant/ChatLog") {}
 
@@ -55,7 +64,7 @@ export interface ReadOptions {
 
 /**
  * The storage a `ChatLog` is built on: read a chat, find its last `seq`,
- * write new entries, and find every chat's last entry.
+ * write new entries, find every chat's last entry, and delete a chat.
  *
  * @category models
  * @since 0.1.0
@@ -66,6 +75,9 @@ export interface Storage {
   readonly write: (chatId: ChatId, entries: ReadonlyArray<AssistantEvent.Entry>) => Effect.Effect<void>
   /** Every chat's last entry. */
   readonly lastEntries: Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
+  /** Removes the chat's entries and keeps a record that it was deleted, at this time (epoch milliseconds). */
+  readonly delete: (chatId: ChatId, at: number) => Effect.Effect<void>
+  readonly isDeleted: (chatId: ChatId) => Effect.Effect<boolean>
 }
 
 /**
@@ -90,7 +102,7 @@ export const make = (storage: Storage): ChatLog["Service"] =>
     read: storage.read,
     append: Effect.fn(function* (
       chatId: ChatId,
-      events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.AppEvent>
+      events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>
     ) {
       if (events.length === 0) return []
 
@@ -104,7 +116,9 @@ export const make = (storage: Storage): ChatLog["Service"] =>
     }),
     unfinished: Effect.map(storage.lastEntries, (last) =>
       last.flatMap((entry) => (AssistantEvent.isTurnEnd(entry.event) ? [] : [entry.chatId]))
-    )
+    ),
+    delete: (chatId) => Effect.flatMap(Clock.currentTimeMillis, (at) => storage.delete(chatId, at)),
+    isDeleted: storage.isDeleted
   })
 
 /**
@@ -117,6 +131,7 @@ export const layerMemory: Layer.Layer<ChatLog> = Layer.effect(
   ChatLog,
   Effect.gen(function* () {
     const chats = yield* Ref.make(new Map<ChatId, ReadonlyArray<AssistantEvent.Entry>>())
+    const deleted = yield* Ref.make(new Set<ChatId>())
 
     return make({
       read: (chatId, options) =>
@@ -126,12 +141,23 @@ export const layerMemory: Layer.Layer<ChatLog> = Layer.effect(
       lastSeq: (chatId) => Effect.map(Ref.get(chats), (all) => all.get(chatId)?.at(-1)?.seq ?? 0),
       write: (chatId, entries) =>
         Ref.update(chats, (all) => new Map(all).set(chatId, [...(all.get(chatId) ?? []), ...entries])),
-      lastEntries: Effect.map(Ref.get(chats), (all) => [...all.values()].flatMap((entries) => entries.slice(-1)))
+      lastEntries: Effect.map(Ref.get(chats), (all) => [...all.values()].flatMap((entries) => entries.slice(-1))),
+      delete: (chatId) =>
+        Effect.andThen(
+          Ref.update(deleted, (all) => new Set(all).add(chatId)),
+          Ref.update(chats, (all) => {
+            const next = new Map(all)
+            next.delete(chatId)
+
+            return next
+          })
+        ),
+      isDeleted: (chatId) => Effect.map(Ref.get(deleted), (all) => all.has(chatId))
     })
   })
 )
 
-const EventJson = Schema.fromJsonString(Schema.Union([AssistantEvent.AssistantEvent, AssistantEvent.AppEvent]))
+const EventJson = Schema.fromJsonString(Schema.Union([AssistantEvent.AssistantEvent, AssistantEvent.StoredAppEvent]))
 
 // Postgres returns BIGINT and DOUBLE PRECISION columns as strings; other databases as numbers.
 const SqlNumber = Schema.Union([Schema.Finite, Schema.FiniteFromString])
@@ -147,7 +173,8 @@ const decodeLastSeq = Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ se
  * **Details**
  *
  * One row per entry: `chat_id`, `seq`, `at`, and `event` as JSON, keyed by
- * `(chat_id, seq)`.
+ * `(chat_id, seq)`. Deleting a chat removes its rows and records it in
+ * `chat_log_deleted` (`chat_id`, `at`), created the same way.
  *
  * @category layers
  * @since 0.1.0
@@ -166,6 +193,19 @@ export const layerSql: Layer.Layer<ChatLog, never, SqlClient.SqlClient> = Layer.
         PRIMARY KEY (chat_id, seq)
       )
     `.pipe(Effect.orDie)
+
+    yield* sql`
+      CREATE TABLE IF NOT EXISTS chat_log_deleted (
+        chat_id TEXT NOT NULL PRIMARY KEY,
+        at DOUBLE PRECISION NOT NULL
+      )
+    `.pipe(Effect.orDie)
+
+    const isDeleted = Effect.fn(function* (chatId: ChatId) {
+      const rows = yield* sql`SELECT chat_id FROM chat_log_deleted WHERE chat_id = ${chatId}`
+
+      return rows.length > 0
+    }, Effect.orDie)
 
     const toEntries = Effect.fn(function* (rows: ReadonlyArray<unknown>) {
       const decoded = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(rows)
@@ -207,7 +247,15 @@ export const layerSql: Layer.Layer<ChatLog, never, SqlClient.SqlClient> = Layer.
         `
 
         return yield* toEntries(rows)
-      }).pipe(Effect.orDie)
+      }).pipe(Effect.orDie),
+      delete: (chatId, at) =>
+        Effect.gen(function* () {
+          if (!(yield* isDeleted(chatId)))
+            yield* sql`INSERT INTO chat_log_deleted ${sql.insert({ chat_id: chatId, at })}`
+
+          yield* sql`DELETE FROM chat_log WHERE chat_id = ${chatId}`
+        }).pipe(sql.withTransaction, Effect.orDie),
+      isDeleted
     })
   })
 )
