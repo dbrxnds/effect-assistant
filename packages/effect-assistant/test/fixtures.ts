@@ -24,6 +24,7 @@ import {
   AssistantEvent,
   ChatId,
   ChatLog,
+  ChatView,
   InputId
 } from "../src/index.ts"
 import { toJsonText } from "../src/internal/schema.ts"
@@ -184,3 +185,9 @@ export const notWorking = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
 
 export const text = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
   AssistantEvent.assistantTexts(entries).join(" ").toLowerCase()
+
+/** The assistant's messages in a chat's view, as a client gets them. */
+export const viewedMessages = (entries: ReadonlyArray<AssistantEvent.AnyEntry>) =>
+  ChatView.fromEntries(entries).messages.flatMap((message) =>
+    Predicate.isTagged(message, "AssistantMessage") ? [message] : []
+  )

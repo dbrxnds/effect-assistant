@@ -45,7 +45,8 @@ import {
   text,
   toolsRun,
   traceEntries,
-  turnsDone
+  turnsDone,
+  viewedMessages
 } from "./fixtures.ts"
 import * as Scripted from "./scripted.ts"
 
@@ -477,7 +478,10 @@ describe("UI blocks", () => {
         choose_one: ({ respond }) => respond({ choice: "blue" })
       })
 
-      render(message!, { respond: (answer) => answers.push(answer) })
+      render(
+        viewedMessages(first).find(({ id }) => id === message!.id)!,
+        { respond: (answer) => answers.push(answer) }
+      )
       yield* BlockAssistant.submit(chat, answers[0]!)
 
       const entries = yield* collectUntil(BlockAssistant, chat, (es) => text(es).includes("blue it is") && idle(es))

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import { AssistantEvent, Block, BlockKit, ChatId, InputId } from "../src/index.ts"
+import * as Predicate from "effect/Predicate"
+import { AssistantEvent, Block, BlockKit, ChatId, ChatView, InputId } from "../src/index.ts"
 import { say } from "./fixtures.ts"
 
 const Choose = Block.make("choose_one", {
@@ -22,6 +23,16 @@ const message = (id: string, block?: AssistantEvent.MessageBlock) =>
   block === undefined
     ? AssistantEvent.AssistantMessage.make({ id, text: "Pick one" })
     : AssistantEvent.AssistantMessage.make({ id, text: "Pick one", block })
+
+/** A message as a client's view has it, after these events. */
+const viewed = (id: string, events: ReadonlyArray<AssistantEvent.AssistantEvent>) =>
+  ChatView.fromEntries(
+    events.map((event, i) =>
+      AssistantEvent.Entry.make({ chatId: Effect.runSync(ChatId.make), seq: i + 1, at: 0, event })
+    )
+  ).messages.find(
+    (shown): shown is ChatView.AssistantMessage => shown.id === id && Predicate.isTagged(shown, "AssistantMessage")
+  )!
 
 const choice = (options: ReadonlyArray<string>) =>
   AssistantEvent.MessageBlock.make({ kind: "choose_one", props: { options } })
@@ -50,7 +61,7 @@ describe("BlockKit.toClient", () => {
 
   it("renders a block and sends its answer", () => {
     const sent: Array<AssistantEvent.BlockAnswer> = []
-    const out = render(message("m1", choice(["red", "blue"])), { respond: (a) => sent.push(a) })
+    const out = render(viewed("m1", [message("m1", choice(["red", "blue"]))]), { respond: (a) => sent.push(a) })
 
     expect(out).toBe("Pick one: red/blue")
     expect(sent[0]).toBeInstanceOf(AssistantEvent.BlockAnswer)
@@ -59,16 +70,18 @@ describe("BlockKit.toClient", () => {
 
   it("encodes answers in their JSON form and decodes them back", () => {
     const sent: Array<AssistantEvent.BlockAnswer> = []
-    render(message("m2", AssistantEvent.MessageBlock.make({ kind: "pick_date", props: { label: "Launch" } })), {
-      respond: (a) => sent.push(a)
-    })
+    render(
+      viewed("m2", [
+        message("m2", AssistantEvent.MessageBlock.make({ kind: "pick_date", props: { label: "Launch" } }))
+      ]),
+      { respond: (a) => sent.push(a) }
+    )
 
     expect(sent[0]!.value).toEqual({ date: "2026-10-01T00:00:00.000Z" })
   })
 
   it("passes the answer once there is one", () => {
-    const out = render(message("m1", choice(["red", "blue"])), {
-      state: { open: false, answer: answer("m1", "red") },
+    const out = render(viewed("m1", [message("m1", choice(["red", "blue"])), answer("m1", "red")]), {
       respond: () => {}
     })
 
@@ -78,15 +91,12 @@ describe("BlockKit.toClient", () => {
   it("returns undefined for no block, unknown kinds, and bad props", () => {
     const respond = () => undefined
 
-    expect(render(message("m3"), { respond })).toBeUndefined()
-    expect(
-      render(message("m4", AssistantEvent.MessageBlock.make({ kind: "mystery", props: {} })), { respond })
-    ).toBeUndefined()
-    expect(
-      render(message("m5", AssistantEvent.MessageBlock.make({ kind: "choose_one", props: { options: 1 } })), {
-        respond
-      })
-    ).toBeUndefined()
+    const shown = (id: string, block?: AssistantEvent.MessageBlock) =>
+      render(viewed(id, [message(id, block)]), { respond })
+
+    expect(shown("m3")).toBeUndefined()
+    expect(shown("m4", AssistantEvent.MessageBlock.make({ kind: "mystery", props: {} }))).toBeUndefined()
+    expect(shown("m5", AssistantEvent.MessageBlock.make({ kind: "choose_one", props: { options: 1 } }))).toBeUndefined()
   })
 })
 

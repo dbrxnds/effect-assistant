@@ -1,8 +1,8 @@
 /**
  * The `AssistantEvent` module defines everything that can happen in a chat. A chat
  * is an append-only log of these events, and the log is the source of truth:
- * the chat UI renders it, and the model's history is rebuilt from it before
- * every model call.
+ * a chat client gets what its user sees of it (`ChatView`), and the model's
+ * history is rebuilt from it before every model call.
  *
  * - Inputs from the user: {@link UserMessage}, {@link BlockAnswer}. Submitting
  *   one starts a turn, or joins the turn that is running.
@@ -10,8 +10,7 @@
  *   {@link MessageBlock}.
  * - What the model did: {@link ModelOutput}, then {@link ToolStarted} and
  *   {@link ToolResult} for each tool call. These are the assistant's own
- *   work: a chat UI shows the user only `AssistantMessage`s (and whether the
- *   assistant is working).
+ *   work: a chat client never gets them (see `ChatView`).
  * - Turn bookkeeping: {@link TurnStarted}, {@link TurnCompleted},
  *   {@link TurnFailed}.
  * - Specialist runs: {@link SpecialistStarted}, {@link SpecialistFinished}. A

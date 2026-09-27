@@ -3,8 +3,10 @@
  *
  * An assistant has three parts, like an Effect workflow:
  *
- * - **Definition**: {@link make} names the assistant, its UI blocks, and its
- *   specialists. `submit` and `subscribe` are on the definition.
+ * - **Definition**: {@link make} names the assistant, its UI blocks, its
+ *   specialists, and the app's events it stores. `submit`, `subscribeView`
+ *   (for a chat client), `subscribe` (the whole log, for the server), and
+ *   `delete` are on the definition.
  * - **Handler**: `toLayer` takes a function of the {@link Turn} that returns
  *   the turn's loop as a stream, usually `turn.loop({ instructions, toolkit })`,
  *   and registers it with the engine. The build Effect runs once per chat
@@ -82,6 +84,7 @@ import { AssistantEngine } from "./AssistantEngine.ts"
 import * as AssistantEvent from "./AssistantEvent.ts"
 import type * as AssistantLoop from "./AssistantLoop.ts"
 import type * as BlockKit from "./BlockKit.ts"
+import * as ChatView from "./ChatView.ts"
 import { ChatId } from "./ChatId.ts"
 import type * as Instructions from "./Instructions.ts"
 import * as AppEvents from "./internal/events.ts"
@@ -314,6 +317,16 @@ export interface Assistant<Name extends string = string, Specs extends Specialis
     options?: { readonly after?: number | undefined }
   ) => Stream.Stream<Entry<Events>, never, AssistantEngine>
   /**
+   * Streams the chat as its user sees it, for a chat client: what changed in
+   * its messages, blocks, and activity (see `ChatView`), from the start, then
+   * live. A client that has the view up to a `seq` passes it as `after`, and
+   * gets only what changed since.
+   */
+  readonly subscribeView: (
+    chatId: ChatId,
+    options?: { readonly after?: number | undefined }
+  ) => Stream.Stream<ChatView.Update, never, AssistantEngine>
+  /**
    * Deletes a chat: its log, and what works in it. A turn or specialist run
    * working in it stops, subscribers' streams end, and the chat stores
    * nothing again: a later `submit`, a run's report, or a workflow's event
@@ -465,6 +478,11 @@ export const make = <
         )
       ),
     delete: (chatId) => AssistantEngine.use((engine) => engine.delete(name, chatId)),
+    subscribeView: (chatId, options) =>
+      ChatView.updates(Stream.unwrap(AssistantEngine.useSync((engine) => engine.subscribe(name, chatId, 0))), {
+        wakes: definition.app.wakes,
+        after: options?.after
+      }),
     Entry: entrySchema(events)
   }
 

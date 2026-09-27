@@ -58,6 +58,11 @@ export * as ChatLog from "./ChatLog.ts"
 /**
  * @since 0.1.0
  */
+export * as ChatView from "./ChatView.ts"
+
+/**
+ * @since 0.1.0
+ */
 export * as AssistantLoop from "./AssistantLoop.ts"
 
 /**
