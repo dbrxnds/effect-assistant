@@ -66,7 +66,7 @@ export const report = (step: Step) =>
       yield* AcmeAssistant.submit(
         step.chatId,
         AssistantEvent.Fact.make({
-          id: InputId.make(`${step.runId}:${step.status}`),
+          id: InputId.fromKey(`${step.runId}:${step.status}`),
           source: step.source,
           payload: { runId: step.runId, status: step.status, ...step.details }
         })

@@ -1,21 +1,22 @@
 /**
  * The `ChatId` module defines the id of one conversation: `chat:` followed by
- * a nanoid. A chat id keys everything about a chat: its event log, its cluster
+ * a UUID. A chat id keys everything about a chat: its log, its cluster
  * entity, and its trace session.
  *
  * @since 0.1.0
  */
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import * as Nanoid from "./internal/nanoid.ts"
+import * as Uuid from "./internal/uuid.ts"
 
 /**
- * Schema for chat ids: `` `chat:${nanoid}` ``, branded so a run id or a plain
+ * Schema for chat ids: `` `chat:${uuid}` ``, branded so a run id or a plain
  * string can't be passed where a chat id is required.
  *
  * @category schemas
  * @since 0.1.0
  */
-export const ChatId = Schema.TemplateLiteral(["chat:", Nanoid.Nanoid]).pipe(Schema.brand("effect-assistant/ChatId"))
+export const ChatId = Schema.TemplateLiteral(["chat:", Uuid.Uuid]).pipe(Schema.brand("effect-assistant/ChatId"))
 
 /**
  * A chat id.
@@ -26,9 +27,9 @@ export const ChatId = Schema.TemplateLiteral(["chat:", Nanoid.Nanoid]).pipe(Sche
 export type ChatId = typeof ChatId.Type
 
 /**
- * Creates a new random chat id.
+ * Creates a new random chat id, with Effect's `Random`.
  *
  * @category constructors
  * @since 0.1.0
  */
-export const make = (): ChatId => Schema.decodeSync(ChatId)(`chat:${Nanoid.make()}`)
+export const make: Effect.Effect<ChatId> = Effect.map(Uuid.random, (uuid) => ChatId.make(`chat:${uuid}`))

@@ -72,23 +72,21 @@ import type { AssistantChat } from "./AssistantChat.ts"
 import { AssistantEngine } from "./AssistantEngine.ts"
 import type * as AssistantEvent from "./AssistantEvent.ts"
 import type * as AssistantLoop from "./AssistantLoop.ts"
-import type { AssistantToolCall } from "./AssistantToolCall.ts"
-import type { AssistantTurn } from "./AssistantTurn.ts"
 import type * as BlockKit from "./BlockKit.ts"
 import type { ChatId } from "./ChatId.ts"
-import type { ChatLog } from "./ChatLog.ts"
 import type * as Instructions from "./Instructions.ts"
 import * as Turns from "./internal/turns.ts"
 import type { Skill } from "./Skill.ts"
 import type * as Specialist from "./Specialist.ts"
 
 /**
- * Services a turn provides to its tools, loop, and specialists.
+ * Services a turn provides to its tools, loop, and specialists: its chat, and
+ * the chat's specialist runner.
  *
  * @category models
  * @since 0.1.0
  */
-export type TurnServices = AssistantTurn | Specialist.Runner | ChatLog
+export type TurnServices = AssistantChat | Specialist.Runner
 
 /**
  * Options for `turn.loop`.
@@ -172,8 +170,8 @@ export interface Turn<Events = never> {
     options: LoopOptions<Tools, R>
   ) => Stream.Stream<
     AssistantLoop.Event,
-    AiError.AiError,
-    LanguageModel.LanguageModel | Exclude<Toolkit.ToolkitR<Tools>, AssistantToolCall> | R
+    AiError.AiError | AssistantLoop.ToolErrors<Tools>,
+    LanguageModel.LanguageModel | AssistantLoop.ToolServices<Tools> | R
   >
   /**
    * One more pass, when the turn would end without replying to the user's
@@ -213,6 +211,13 @@ export type Handler<R = never, RE = R, Events = never> = (
 export type HandlerServices<R> = Exclude<R, TurnServices | LanguageModel.LanguageModel>
 
 const TypeId = "~effect-assistant/Assistant"
+
+/** A handler's result as a stream: it may return the stream from an Effect. */
+const toStream = <R, RE>(
+  result:
+    | Stream.Stream<AssistantLoop.Event, unknown, R>
+    | Effect.Effect<Stream.Stream<AssistantLoop.Event, unknown, R>, unknown, RE>
+): Stream.Stream<AssistantLoop.Event, unknown, R | RE> => (Effect.isEffect(result) ? Stream.unwrap(result) : result)
 
 /**
  * An assistant's definition: what callers and the UI need to know, and its
@@ -309,23 +314,41 @@ export const make = <
     events: options?.events ?? []
   }
 
-  // The build runs per chat activation, in the chat; here it only keeps the layer's services for it.
-  const toLayer = (build: Handler<any, any, any> | Effect.Effect<Handler<any, any, any>, any, any>) =>
-    Layer.effectDiscard(
+  // The signature checks what the handler uses (`CheckServices`); the layer's services, which the build
+  // required, are provided to it and to every turn's stream, so what's left is the turn services.
+  function toLayer<R = never, RE = never, E = never, RX = never>(
+    build: (Handler<R, RE, Events[number]["Type"]> | Effect.Effect<Handler<R, RE, Events[number]["Type"]>, E, RX>) &
+      Specialist.CheckServices<Exclude<HandlerServices<R | RE>, RX>>
+  ): Layer.Layer<
+    never,
+    never,
+    | AssistantEngine
+    | LanguageModel.LanguageModel
+    | Specialist.HandlerOf<Specs[number]>
+    | Exclude<RX, Scope.Scope | AssistantChat>
+  >
+  function toLayer(
+    build: Handler<any, any, any> | Effect.Effect<Handler<any, any, any>, unknown, any>
+  ): Layer.Layer<never, never, any> {
+    return Layer.effectDiscard(
       Effect.gen(function* () {
-        const setup = yield* Turns.makeSetup(definition, {
-          build: Effect.isEffect(build) ? build : Effect.succeed(build),
-          context: yield* Effect.context<never>()
+        const context = yield* Effect.context<never>()
+
+        const registration = yield* Turns.makeRegistration(definition, {
+          // The build runs per chat activation, in the chat; here it only keeps the layer's services for it.
+          open: (Effect.isEffect(build) ? build : Effect.succeed(build)).pipe(
+            Effect.map((handler) => (turn: Turn<any>) => Stream.provideContext(toStream(handler(turn)), context)),
+            Effect.provideContext(context),
+            Effect.orDie
+          )
         })
 
-        const engine = yield* AssistantEngine
-
-        yield* engine.register({ definition, setup })
+        yield* (yield* AssistantEngine).register(registration)
       })
     )
+  }
 
-  // SAFETY: the members are built from this definition, so their types are the ones `Assistant` gives them.
-  return {
+  const assistant: Assistant<Name, Specs[number], Events[number]["Type"]> = {
     [TypeId]: { definition },
     name,
     blocks: options?.blocks,
@@ -333,5 +356,7 @@ export const make = <
     toLayer,
     submit: (chatId, input) => AssistantEngine.use((engine) => engine.submit(name, chatId, input)),
     subscribe: (chatId) => Stream.unwrap(AssistantEngine.useSync((engine) => engine.subscribe(name, chatId)))
-  } as Assistant<Name, Specs[number], Events[number]["Type"]>
+  }
+
+  return assistant
 }

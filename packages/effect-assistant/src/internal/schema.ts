@@ -12,6 +12,8 @@ import type * as Schema from "effect/Schema"
  *
  * @internal
  */
-export const withoutServices = <T, E>(schema: Schema.Codec<T, E, unknown, unknown>): Schema.Codec<T, E> =>
-  // SAFETY: callers only pass codecs that need no services at runtime.
-  schema as Schema.Codec<T, E>
+export function withoutServices<T, E>(schema: Schema.Codec<T, E, unknown, unknown>): Schema.Codec<T, E>
+// The overload states what callers get; the codec itself is returned as it is.
+export function withoutServices(schema: Schema.Top): Schema.Top {
+  return schema
+}

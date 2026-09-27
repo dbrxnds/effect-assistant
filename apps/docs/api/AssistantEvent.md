@@ -279,8 +279,8 @@ A turn started.
 
 ```ts
 class TurnStarted extends Schema.TaggedClass<TurnStarted>()("TurnStarted", {
-  /** The assistant that runs it. Unset in logs from before it was recorded. */
-  assistant: Schema.optional(Schema.String)
+  /** The assistant that runs it. */
+  assistant: Schema.String
 })
 ```
 
@@ -408,8 +408,8 @@ its report arrives as a `SpecialistFinished`.
 class SpecialistStarted extends Schema.TaggedClass<SpecialistStarted>()("SpecialistStarted", {
   runId: RunId,
   specialist: Schema.String,
-  /** The goal it's working on. Unset in logs from before it was recorded. */
-  goal: Schema.optional(Schema.String)
+  /** The goal it's working on. */
+  goal: Schema.String
 })
 ```
 

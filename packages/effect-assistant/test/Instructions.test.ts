@@ -3,7 +3,7 @@ import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
-import { AssistantTurn, Instructions } from "../src/index.ts"
+import { AssistantChat, Instructions } from "../src/index.ts"
 import { memoryAssistant, newChat, say, TestAssistant } from "./fixtures.ts"
 
 class Version extends Context.Service<Version, { readonly current: number }>()("test/Version") {}
@@ -34,7 +34,7 @@ describe("Instructions.resolve", () => {
       // No model call: the test only needs what the handler was given.
       const layer = memoryAssistant(
         Effect.fn(function* (turn) {
-          const service = yield* AssistantTurn.AssistantTurn
+          const service = yield* AssistantChat.AssistantChat
           yield* Deferred.succeed(seen, `${turn.chatId} ${service.chatId}`)
 
           return Stream.empty
@@ -42,7 +42,7 @@ describe("Instructions.resolve", () => {
       )
 
       const [chatId, got] = yield* Effect.gen(function* () {
-        const chatId = yield* newChat()
+        const chatId = yield* newChat
         yield* TestAssistant.submit(chatId, say("hi"))
 
         return [chatId, yield* Deferred.await(seen)] as const

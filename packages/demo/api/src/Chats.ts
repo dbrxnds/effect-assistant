@@ -6,6 +6,7 @@
  */
 import { ChatSummary, newChatTitle, seededChat, sortChats, titleFromText } from "@acme/demo-shared/ChatList"
 import * as ChatId from "effect-assistant/ChatId"
+import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -45,7 +46,12 @@ export const layerMemory: Layer.Layer<Chats> = Layer.effect(
     return Chats.of({
       list: Ref.get(store).pipe(Effect.map((m) => sortChats([...m.values()]))),
       create: Effect.gen(function* () {
-        const chat = ChatSummary.make({ chatId: ChatId.make(), title: newChatTitle, createdAt: Date.now() })
+        const chat = ChatSummary.make({
+          chatId: yield* ChatId.make,
+          title: newChatTitle,
+          createdAt: yield* Clock.currentTimeMillis
+        })
+
         yield* Ref.update(store, (m) => new Map(m).set(chat.chatId, chat))
 
         return chat
@@ -105,7 +111,12 @@ export const layerSql: Layer.Layer<Chats, never, SqlClient.SqlClient> = Layer.ef
         Effect.orDie
       ),
       create: Effect.gen(function* () {
-        const chat = ChatSummary.make({ chatId: ChatId.make(), title: newChatTitle, createdAt: Date.now() })
+        const chat = ChatSummary.make({
+          chatId: yield* ChatId.make,
+          title: newChatTitle,
+          createdAt: yield* Clock.currentTimeMillis
+        })
+
         yield* sql`INSERT INTO demo_chats ${sql.insert({
           chat_id: chat.chatId,
           title: chat.title,

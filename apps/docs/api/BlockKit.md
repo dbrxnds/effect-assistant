@@ -28,43 +28,6 @@ const make: <const Blocks extends ReadonlyArray<Block.Any>>(blocks: Blocks) => B
 
 <small>Since 0.1.0</small>
 
-### toClient
-
-Creates a client-side renderer for the blocks in a kit's messages.
-
-**Details**
-
-The renderer returns `undefined` when a message has no block, or one this
-client can't show (an unknown kind, or props that don't decode). Show just
-the text then. `respond` encodes the answer with the block's answer schema
-and passes a `BlockAnswer` to `RenderOptions.respond`.
-
-**Example** (Rendering blocks in React)
-
-```tsx
-import { BlockKit } from "effect-assistant"
-import type { ReactNode } from "react"
-import { Blocks } from "./blocks"
-
-const render = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
-  choose_one: ({ props, open, answer, respond }) =>
-    props.options.map((option) => (
-      <button key={option} disabled={!open} onClick={() => respond({ choice: option })}>
-        {answer?.choice === option ? `✓ ${option}` : option}
-      </button>
-    )),
-  confirm: ({ props, open, respond }) => (
-    <button disabled={!open} onClick={() => respond({ confirmed: true })}>{props.confirmLabel}</button>
-  )
-})
-```
-
-```ts
-const toClient: <Kit extends BlockKit, Out>(kit: Kit, renderers: Renderers<Kit, Out>) => …
-```
-
-<small>Since 0.1.0</small>
-
 ## Models
 
 ### BlockKit
@@ -145,10 +108,6 @@ interface RenderOptions {
   readonly respond: (answer: AssistantEvent.BlockAnswer) => void
 }
 
-// Answers cross the wire in their schema's JSON form, so dates and the like survive.
-// SAFETY: block schemas are only used to decode and encode their own values here.
-const jsonCodec = (schema: Schema.Top) => Schema.toCodecJson(schema as Schema.Codec<unknown, unknown>)
-
 /**
  * Creates a client-side renderer for the blocks in a kit's messages.
  *
@@ -157,7 +116,8 @@ const jsonCodec = (schema: Schema.Top) => Schema.toCodecJson(schema as Schema.Co
  * The renderer returns `undefined` when a message has no block, or one this
  * client can't show (an unknown kind, or props that don't decode). Show just
  * the text then. `respond` encodes the answer with the block's answer schema
- * and passes a `BlockAnswer` to {@link RenderOptions.respond}.
+ * and passes a `BlockAnswer` to {@link RenderOptions.respond}. Answers cross
+ * the wire in their schema's JSON form, so dates and the like survive.
  *
  * **Example** (Rendering blocks in React)
  *
@@ -182,48 +142,6 @@ const jsonCodec = (schema: Schema.Top) => Schema.toCodecJson(schema as Schema.Co
  * @category constructors
  * @since 0.1.0
  */
-export const toClient =
-  <Kit extends BlockKit, Out>(kit: Kit, renderers: Renderers<Kit, Out>) =>
-  (message: AssistantEvent.AssistantMessage, options: RenderOptions): Out | undefined => {
-    if (message.block === undefined) return undefined
-
-    const { kind } = message.block
-    const block = kit.byKind.get(kind)
-    // SAFETY: `Renderers` has a function for every kind in the kit.
-    const render = (renderers as Record<string, (args: RenderArgs<Block.Any>) => Out>)[kind]
-
-    if (block === undefined || render === undefined) return undefined
-
-    // SAFETY: the props schema only decodes the message's props.
-    const props = Schema.decodeUnknownOption(block.props as Schema.Codec<unknown, unknown>)(message.block.props)
-
-    if (Option.isNone(props)) return undefined
-
-    const given = options.state?.answer
-
-    const answer =
-      given === undefined || block.answer === undefined
-        ? Option.none()
-        : Schema.decodeUnknownOption(jsonCodec(block.answer))(given.value)
-
-    return render({
-      text: message.text,
-      // SAFETY: decoded with this kind's props schema just above.
-      props: props.value as never,
-      open: options.state?.open ?? true,
-      // SAFETY: decoded with this kind's answer schema just above.
-      answer: Option.getOrUndefined(answer) as never,
-      respond: (value) =>
-        options.respond(
-          AssistantEvent.BlockAnswer.make({
-            id: InputId.make(),
-            messageId: message.id,
-            kind,
-            value: block.answer === undefined ? value : Schema.encodeUnknownSync(jsonCodec(block.answer))(value)
-          })
-        )
-    })
-  }
 ```
 
 <small>Since 0.1.0</small>
@@ -247,9 +165,7 @@ const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
 ```
 
 ```ts
-const closeStale: (options: {
-  readonly messages: number
-}) => Effect.Effect<void, never, AssistantTurn | ChatLog>
+const closeStale = Effect.fn(function* (options: { readonly messages: number }) { …
 ```
 
 <small>Since 0.1.0</small>

@@ -12,6 +12,7 @@ import { useNavigate } from "@tanstack/react-router"
 import * as AssistantEvent from "effect-assistant/AssistantEvent"
 import type * as ChatId from "effect-assistant/ChatId"
 import * as InputId from "effect-assistant/InputId"
+import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import { useCallback, useMemo, useState } from "react"
 import * as AcmeRpc from "~/lib/AcmeRpc.ts"
@@ -154,7 +155,9 @@ export function AcmeChatPage() {
                         <button
                           key={text}
                           type="button"
-                          onClick={() => void send(AssistantEvent.UserMessage.make({ id: InputId.make(), text }))}
+                          onClick={() =>
+                            void send(AssistantEvent.UserMessage.make({ id: Effect.runSync(InputId.make), text }))
+                          }
                         >
                           {text}
                         </button>

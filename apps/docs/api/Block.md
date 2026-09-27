@@ -50,7 +50,7 @@ message. `answer` is what the client sends back when the block is used.
 Leave it out for display-only cards.
 
 ```ts
-const make: <const Kind extends string, Props extends Schema.Top, Answer extends Schema.Top = Schema.Never>(
+const make: <const Kind extends string, Props extends Codec, Answer extends Codec = Schema.Never>(
   kind: Kind,
   options: {
     readonly description: string
@@ -64,16 +64,23 @@ const make: <const Kind extends string, Props extends Schema.Top, Answer extends
 
 ## Models
 
+### Codec
+
+A schema a block's props or answer can use: any codec that needs no
+services, since the client decodes and encodes with it too.
+
+```ts
+type Codec = Schema.Codec<any, any>
+```
+
+<small>Since 0.1.0</small>
+
 ### Block
 
 A kind of UI block.
 
 ```ts
-interface Block<
-  Kind extends string = string,
-  Props extends Schema.Top = Schema.Top,
-  Answer extends Schema.Top = Schema.Top
-> {
+interface Block<Kind extends string = string, Props extends Codec = Codec, Answer extends Codec = Codec> {
   readonly kind: Kind
   /** When to use it. The assistant sees this. */
   readonly description: string

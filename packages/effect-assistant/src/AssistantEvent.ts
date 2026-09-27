@@ -216,8 +216,8 @@ export class ToolResult extends Schema.TaggedClass<ToolResult>()("ToolResult", {
  * @since 0.1.0
  */
 export class TurnStarted extends Schema.TaggedClass<TurnStarted>()("TurnStarted", {
-  /** The assistant that runs it. Unset in logs from before it was recorded. */
-  assistant: Schema.optional(Schema.String)
+  /** The assistant that runs it. */
+  assistant: Schema.String
 }) {}
 
 /**
@@ -254,8 +254,8 @@ export class TurnFailed extends Schema.TaggedClass<TurnFailed>()("TurnFailed", {
 export class SpecialistStarted extends Schema.TaggedClass<SpecialistStarted>()("SpecialistStarted", {
   runId: RunId,
   specialist: Schema.String,
-  /** The goal it's working on. Unset in logs from before it was recorded. */
-  goal: Schema.optional(Schema.String)
+  /** The goal it's working on. */
+  goal: Schema.String
 }) {}
 
 /**

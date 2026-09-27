@@ -8,11 +8,10 @@ import * as Tool from "@effect-uai/core/Tool"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
-import { nanoid } from "nanoid"
 import * as AssistantEvent from "../AssistantEvent.ts"
-import { AssistantTurn } from "../AssistantTurn.ts"
+import { AssistantChat } from "../AssistantChat.ts"
 import type * as BlockKit from "../BlockKit.ts"
-import { ChatLog } from "../ChatLog.ts"
+import * as Uuid from "./uuid.ts"
 
 /**
  * Calling a tool with this name ends the turn once the step's tool calls have
@@ -33,17 +32,17 @@ export const wait = Tool.make({
 
 const description = "Send a chat message to the user. This is the only way the user sees anything you write."
 
-const append = Effect.fn(function* (message: AssistantEvent.AssistantMessage) {
-  const turn = yield* AssistantTurn
-  const log = yield* ChatLog
-  yield* log.append(turn.chatId, [message])
-})
+const append = (message: AssistantEvent.AssistantMessage) => AssistantChat.use((chat) => chat.append([message]))
 
 const plainMessage = Tool.make({
   name: "send_user_message",
   description,
   inputSchema: Schema.Struct({ text: Schema.String }),
-  run: ({ text }) => append(AssistantEvent.AssistantMessage.make({ id: nanoid(), text })).pipe(Effect.as("sent"))
+  run: Effect.fn(function* ({ text }: { readonly text: string }) {
+    yield* append(AssistantEvent.AssistantMessage.make({ id: yield* Uuid.random, text }))
+
+    return "sent"
+  })
 })
 
 interface BlockInput {
@@ -61,22 +60,15 @@ export const sendUserMessage = (kit: BlockKit.BlockKit | undefined) => {
   if (kit === undefined || kit.blocks.length === 0) return plainMessage
 
   const catalog = kit.blocks.map((block) => `- ${block.kind}: ${block.description}`).join("\n")
-  // SAFETY: a kit always has at least one block here (checked above).
-  const kinds = kit.blocks.map((block) => block.kind) as [string, ...Array<string>]
+  const kinds = kit.blocks.map((block) => block.kind)
 
-  // SAFETY: as above. Block props are checked against their kind in `run`, so
-  // here they only need to decode to something.
-  const propsSchemas = kit.blocks.map((block) => block.props) as [
-    Schema.Codec<unknown, unknown>,
-    ...Array<Schema.Codec<unknown, unknown>>
-  ]
-
+  // Props are checked against their kind's schema in `run`; the model sees every kind's in the input schema.
   const Input = Schema.Struct({
     text: Schema.String,
     block: Schema.optional(
       Schema.Struct({
         kind: Schema.Literals(kinds),
-        props: propsSchemas.length === 1 ? propsSchemas[0] : Schema.Union(propsSchemas)
+        props: Schema.Union(kit.blocks.map((block) => block.props))
       })
     ),
     closes: Schema.optional(Schema.Array(Schema.String)).annotate({
@@ -85,10 +77,8 @@ export const sendUserMessage = (kit: BlockKit.BlockKit | undefined) => {
     })
   })
 
-  const propsByKind = new Map(kinds.map((kind, i) => [kind, propsSchemas[i]!]))
-
   const checkProps = (block: BlockInput) => {
-    const props = propsByKind.get(block.kind)
+    const props = kit.byKind.get(block.kind)?.props
 
     return props !== undefined && Option.isSome(Schema.decodeUnknownOption(props)(block.props))
   }
@@ -101,7 +91,7 @@ Blocks:
 ${catalog}`,
     inputSchema: Input,
     run: Effect.fn(function* ({ text, block, closes }: typeof Input.Type) {
-      const id = nanoid()
+      const id = yield* Uuid.random
       const closed = closes === undefined || closes.length === 0 ? {} : { closes }
 
       if (block === undefined) {

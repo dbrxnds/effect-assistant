@@ -162,11 +162,9 @@ export const fromEntries = (entries: ReadonlyArray<AssistantEvent.Entry>): Reado
  * @internal
  */
 export const handledThrough = (entries: ReadonlyArray<AssistantEvent.Entry>): number => {
-  let seen = 0
+  const last = entries.findLast(({ event }) => AssistantEvent.isTurnEnd(event))?.event
 
-  for (const { event } of entries) if (AssistantEvent.isTurnEnd(event)) seen = event.throughSeq
-
-  return seen
+  return last !== undefined && AssistantEvent.isTurnEnd(last) ? last.throughSeq : 0
 }
 
 /**
@@ -188,3 +186,32 @@ export const unhandledInputs = (entries: ReadonlyArray<AssistantEvent.Entry>): R
  * @internal
  */
 export const needsTurn = (entries: ReadonlyArray<AssistantEvent.Entry>): boolean => unhandledInputs(entries).length > 0
+
+/**
+ * Returns whether the user's latest message (or block answer) read through
+ * `throughSeq` has nothing after it for them: no reply, and no failure they
+ * were shown.
+ *
+ * @internal
+ */
+export const owesReply = (entries: ReadonlyArray<AssistantEvent.Entry>, throughSeq: number): boolean => {
+  const latest = entries.findLast(
+    ({ event, seq }) => seq <= throughSeq && AssistantEvent.isInput(event) && AssistantEvent.isClientInput(event)
+  )
+
+  return (
+    latest !== undefined &&
+    !entries.some(
+      ({ event, seq }) =>
+        seq > latest.seq && (Predicate.isTagged(event, "AssistantMessage") || Predicate.isTagged(event, "TurnFailed"))
+    )
+  )
+}
+
+/**
+ * Returns whether an input arrived after `throughSeq`: another turn will read it.
+ *
+ * @internal
+ */
+export const unreadAfter = (entries: ReadonlyArray<AssistantEvent.Entry>, throughSeq: number): boolean =>
+  entries.some(({ event, seq }) => seq > throughSeq && AssistantEvent.isInput(event))

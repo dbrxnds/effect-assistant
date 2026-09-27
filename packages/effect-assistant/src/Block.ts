@@ -35,16 +35,21 @@
 import type * as Schema from "effect/Schema"
 
 /**
+ * A schema a block's props or answer can use: any codec that needs no
+ * services, since the client decodes and encodes with it too.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Codec = Schema.Codec<any, any>
+
+/**
  * A kind of UI block.
  *
  * @category models
  * @since 0.1.0
  */
-export interface Block<
-  Kind extends string = string,
-  Props extends Schema.Top = Schema.Top,
-  Answer extends Schema.Top = Schema.Top
-> {
+export interface Block<Kind extends string = string, Props extends Codec = Codec, Answer extends Codec = Codec> {
   readonly kind: Kind
   /** When to use it. The assistant sees this. */
   readonly description: string
@@ -74,7 +79,7 @@ export type Any = Block
  * @category constructors
  * @since 0.1.0
  */
-export const make = <const Kind extends string, Props extends Schema.Top, Answer extends Schema.Top = Schema.Never>(
+export const make = <const Kind extends string, Props extends Codec, Answer extends Codec = Schema.Never>(
   kind: Kind,
   options: {
     readonly description: string

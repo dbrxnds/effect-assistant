@@ -15,7 +15,7 @@ mentions Ottawa", "it called `spawn_specialist`"), not exact wording.
 
 Everything runs in one process with `AssistantEngine.layerMemory` and the
 memory event log. That's all an engine needs. A chat is just a new id,
-`ChatId.make()`:
+`ChatId.make`:
 
 ```ts
 import { describe, expect, it } from "@effect/vitest"
@@ -30,10 +30,10 @@ const AssistantTest = MyAssistant.toLayer((turn) =>
 
 it.live("uses a tool and reports its result", () =>
   Effect.gen(function* () {
-    const chatId = ChatId.make()
+    const chatId = yield* ChatId.make
     yield* MyAssistant.submit(
       chatId,
-      AssistantEvent.UserMessage.make({ id: InputId.make(), text: "What's the weather in Oslo?" })
+      AssistantEvent.UserMessage.make({ id: yield* InputId.make, text: "What's the weather in Oslo?" })
     )
 
     const entries = yield* MyAssistant.subscribe(chatId).pipe(
@@ -69,6 +69,7 @@ const QuietAssistant = MyAssistant.toLayer(() => Stream.empty).pipe(
   Layer.provideMerge(ChatLog.layerMemory)
 )
 
+// The log is the storage underneath; a test can read it directly.
 const inputsOf = (chatId: ChatId.ChatId) =>
   ChatLog.ChatLog.use((log) => log.read(chatId)).pipe(
     Effect.map((entries) => entries.flatMap(({ event }) => (AssistantEvent.isInput(event) ? [event] : [])))

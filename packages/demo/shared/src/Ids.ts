@@ -13,7 +13,7 @@ import * as Schema from "effect/Schema"
  * @category constants
  * @since 0.1.0
  */
-export const demoChatId = ChatId.ChatId.make("chat:AcmeDemoChat000000001")
+export const demoChatId = ChatId.ChatId.make("chat:00000000-0000-4000-8000-000000000001")
 
 /**
  * Reads a chat id from a route parameter, or returns `undefined`.

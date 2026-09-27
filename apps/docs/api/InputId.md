@@ -13,17 +13,27 @@ Input ids make submitting idempotent: an assistant stores an input once, so a
 client or workflow can retry with the same id safely. Unlike chat and run
 ids they have no fixed format. Derive them from what the input stands for
 when that is stable (for example `${runId}:order_placed`), or let
-`make` pick a random one.
+`make` pick a random one. `fromKey` takes the key as the id.
 
 ## Constructors
 
 ### make
 
-Creates an input id: this one, like `${runId}:order_placed` for an input
-that may be sent again, or a new random one.
+Creates a new random input id, with Effect's `Random`.
 
 ```ts
-const make: (value?: string) => InputId
+const make: Effect.Effect<InputId>
+```
+
+<small>Since 0.1.0</small>
+
+### fromKey
+
+Creates the input id for a key, like `${runId}:order_placed`: the same key
+gives the same id, so sending the input again stores it once.
+
+```ts
+const fromKey: (key: string) => InputId
 ```
 
 <small>Since 0.1.0</small>

@@ -76,10 +76,10 @@ describe("CreateCampaign", () => {
   it.live("waits for approval, then goes live and reports first results", () =>
     Effect.gen(function* () {
       yield* Effect.gen(function* () {
-        const chatId = ChatId.make()
+        const chatId = yield* ChatId.make
         yield* Campaign.CreateCampaign.execute(
           {
-            runId: RunId.make(),
+            runId: yield* RunId.make,
             chatId,
             reference: "ACM-TEST01",
             campaignName: "Summer Campaign",
@@ -111,7 +111,7 @@ describe("PrintOrder", () => {
   it.live("reports confirmed, printing, shipped with tracking, and delivered, and updates the order", () =>
     Effect.gen(function* () {
       yield* Effect.gen(function* () {
-        const chatId = ChatId.make()
+        const chatId = yield* ChatId.make
         const orders = yield* LiveOrders.LiveOrders
         yield* orders.put(
           LiveOrders.LiveOrder.make({
@@ -128,7 +128,7 @@ describe("PrintOrder", () => {
         )
         yield* PrintOrders.PrintOrder.execute(
           {
-            runId: RunId.make(),
+            runId: yield* RunId.make,
             chatId,
             reference: "ACM-TEST02",
             office: "Acme Amsterdam",

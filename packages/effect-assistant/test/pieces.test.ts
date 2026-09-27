@@ -5,7 +5,7 @@ import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { Assistant, AssistantEvent, AssistantHistory, AssistantLoop, ChatId, ChatLog } from "../src/index.ts"
+import { Assistant, AssistantChat, AssistantEvent, AssistantHistory, AssistantLoop, ChatId } from "../src/index.ts"
 import { collectUntil, newChat, runMemory, say, testModel, turnsDone } from "./fixtures.ts"
 
 class Summary extends Schema.TaggedClass<Summary>()("Summary", {
@@ -31,7 +31,7 @@ describe("the app's own events", () => {
       )
 
       const entries = yield* Effect.gen(function* () {
-        const chat = yield* newChat()
+        const chat = yield* newChat
         yield* Compacting.submit(chat, say("hi"))
 
         return yield* collectUntil(Compacting, chat, (es) => turnsDone(es) >= 1)
@@ -48,7 +48,7 @@ describe("the app's own events", () => {
 
 describe("AssistantHistory.fromEntries", () => {
   it("puts what comes before first and leaves the app's own events out", () => {
-    const chatId = ChatId.make()
+    const chatId = Effect.runSync(ChatId.make)
 
     const history = AssistantHistory.fromEntries(
       [
@@ -83,7 +83,7 @@ describe("a loop of your own", () => {
       )
 
       const entries = yield* Effect.gen(function* () {
-        const chat = yield* newChat()
+        const chat = yield* newChat
         yield* Own.submit(chat, say("Say hi in one short message."))
 
         return yield* collectUntil(Own, chat, (es) => turnsDone(es) >= 1)
@@ -107,14 +107,15 @@ describe("a history built from turn.entries", () => {
           Effect.gen(function* () {
             // Reads the chat only through entries, then replies.
             yield* turn.entries
-            const log = yield* ChatLog.ChatLog
-            yield* log.append(turn.chatId, [AssistantEvent.AssistantMessage.make({ id: "r1", text: "Hi." })])
+            yield* AssistantChat.AssistantChat.use((chat) =>
+              chat.append([AssistantEvent.AssistantMessage.make({ id: "r1", text: "Hi." })])
+            )
           })
         ).pipe(Stream.drain)
       )
 
       const entries = yield* Effect.gen(function* () {
-        const chat = yield* newChat()
+        const chat = yield* newChat
         yield* Own.submit(chat, say("hello"))
 
         return yield* collectUntil(Own, chat, (es) => turnsDone(es) >= 1)

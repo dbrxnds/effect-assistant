@@ -45,11 +45,11 @@ Every input has an id, and a chat stores an input once per id: a resubmitted
 id is ignored. A client can retry a message with the same id, and a
 workflow step or a webhook that runs twice doesn't tell the assistant twice.
 
-Use `InputId.make()` for a new random id, or derive one from what the input
-stands for when that's stable:
+Use `InputId.make` for a new random id (an Effect, from Effect's `Random`),
+or `InputId.fromKey` with what the input stands for when that's stable:
 
 ```ts
-InputId.make(`${orderId}:shipped`)
+InputId.fromKey(`${orderId}:shipped`)
 ```
 
 ## Reading a chat

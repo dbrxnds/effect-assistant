@@ -1,10 +1,11 @@
 import { describe, expect, it } from "@effect/vitest"
+import * as Effect from "effect/Effect"
 import { AssistantActivity, AssistantEvent, ChatId, InputId, RunId } from "../src/index.ts"
 import { fact, say } from "./fixtures.ts"
 
 const { SpecialistFinished, SpecialistStarted, TurnCompleted, TurnFailed, TurnStarted } = AssistantEvent
 
-const chatId = ChatId.make()
+const chatId = Effect.runSync(ChatId.make)
 
 const entries = (events: ReadonlyArray<AssistantEvent.AssistantEvent>) =>
   events.map((event, i) => AssistantEvent.Entry.make({ chatId, seq: i + 1, at: (i + 1) * 1000, event }))
@@ -22,27 +23,29 @@ describe("AssistantActivity", () => {
     expect(AssistantActivity.isWorking(activity([say("hi")]))).toBe(true)
 
     // The turn read through seq 2; "two" (seq 3) arrived after, so another turn is coming.
-    const events = [say("one"), TurnStarted.make({}), say("two")]
+    const events = [say("one"), TurnStarted.make({ assistant: "test" }), say("two")]
 
     expect(AssistantActivity.isWorking(activity([...events, TurnCompleted.make({ throughSeq: 2 })]))).toBe(true)
     expect(AssistantActivity.isWorking(activity([...events, TurnCompleted.make({ throughSeq: 3 })]))).toBe(false)
   })
 
   it("works from TurnStarted until the turn ends", () => {
-    const running = activity([say("hi"), TurnStarted.make({})])
+    const running = activity([say("hi"), TurnStarted.make({ assistant: "test" })])
 
     expect(running.turnSince).toBe(2000)
     expect(AssistantActivity.isWorking(running)).toBe(true)
     expect(
-      AssistantActivity.isWorking(activity([say("hi"), TurnStarted.make({}), TurnCompleted.make({ throughSeq: 2 })]))
+      AssistantActivity.isWorking(
+        activity([say("hi"), TurnStarted.make({ assistant: "test" }), TurnCompleted.make({ throughSeq: 2 })])
+      )
     ).toBe(false)
   })
 
   it("closes a turn a restart cut off when the resumed turn ends", () => {
     const resumed = activity([
       say("hi"),
-      TurnStarted.make({}),
-      TurnStarted.make({}),
+      TurnStarted.make({ assistant: "test" }),
+      TurnStarted.make({ assistant: "test" }),
       TurnFailed.make({ throughSeq: 3, message: "boom" })
     ])
 
@@ -50,11 +53,11 @@ describe("AssistantActivity", () => {
   })
 
   it("keeps working while a specialist runs after its turn ended", () => {
-    const runId = RunId.make()
+    const runId = RunId.fromKey("activity-test")
 
     const spawned = [
       say("research this"),
-      TurnStarted.make({}),
+      TurnStarted.make({ assistant: "test" }),
       SpecialistStarted.make({ runId, specialist: "research", goal: "Q4 budgets" })
     ]
 
@@ -70,7 +73,7 @@ describe("AssistantActivity", () => {
       ...spawned,
       TurnCompleted.make({ throughSeq: 3 }),
       SpecialistFinished.make({
-        id: InputId.make(`${runId}:1`),
+        id: InputId.fromKey(`${runId}:1`),
         runId,
         specialist: "research",
         brief: 1,
@@ -88,7 +91,7 @@ describe("AssistantActivity", () => {
       ...spawned,
       TurnCompleted.make({ throughSeq: 3 }),
       SpecialistFinished.make({
-        id: InputId.make(`${runId}:1`),
+        id: InputId.fromKey(`${runId}:1`),
         runId,
         specialist: "research",
         brief: 1,
@@ -105,10 +108,10 @@ describe("AssistantActivity", () => {
   it("doesn't count a workflow waiting on an approval as work, once its fact is handled", () => {
     const waiting = activity([
       say("request the campaign"),
-      TurnStarted.make({}),
+      TurnStarted.make({ assistant: "test" }),
       TurnCompleted.make({ throughSeq: 2 }),
       fact("workflow:CampaignRequest", { status: "awaiting_admin_approval" }),
-      TurnStarted.make({}),
+      TurnStarted.make({ assistant: "test" }),
       TurnCompleted.make({ throughSeq: 5 })
     ])
 

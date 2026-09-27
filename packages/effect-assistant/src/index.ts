@@ -67,11 +67,6 @@ export * as AssistantToolCall from "./AssistantToolCall.ts"
 /**
  * @since 0.1.0
  */
-export * as AssistantTurn from "./AssistantTurn.ts"
-
-/**
- * @since 0.1.0
- */
 export * as ChatId from "./ChatId.ts"
 
 /**

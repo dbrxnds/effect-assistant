@@ -70,12 +70,13 @@ Services that depend on the chat's user, like a `CurrentUser`, the handler
 provides itself (see [chats and users](./chats)). The full rule is in
 [what a handler may use](./assistant#what-a-handler-may-use).
 
-## The turn a tool runs in
+## The chat a tool runs in
 
-[`AssistantTurn`](/api/AssistantTurn) tells a tool which chat it's acting on:
+[`AssistantChat`](/api/AssistantChat) tells a tool which chat it's acting on,
+and lets it read and add to the chat:
 
 ```ts
-import { AssistantTurn } from "effect-assistant"
+import { AssistantChat } from "effect-assistant"
 
 const ExportInput = Schema.Struct({ month: Schema.String })
 
@@ -84,16 +85,15 @@ const startExport = Tool.make({
   description: "Export this chat's orders to a spreadsheet.",
   inputSchema: ExportInput,
   run: Effect.fn(function* ({ month }: typeof ExportInput.Type) {
-    const turn = yield* AssistantTurn.AssistantTurn
+    const chat = yield* AssistantChat.AssistantChat
     const exports = yield* Exports // your service
-    yield* exports.start({ chatId: turn.chatId, month })
+    yield* exports.start({ chatId: chat.chatId, month })
     return { status: "started" }
   })
 })
 ```
 
-Tools also get the turn's other services: `ChatLog` and
-`Specialist.Runner`. The `AssistantEngine` isn't one of them. A tool whose
+Tools also get the turn's other service, `Specialist.Runner`. The `AssistantEngine` isn't one of them. A tool whose
 work reports back later starts a [workflow](./facts#long-running-work), and
 the workflow notifies the chat.
 

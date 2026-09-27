@@ -71,12 +71,12 @@ const MyAssistantLive = MyAssistantHandlers.pipe(
 )
 
 const program = Effect.gen(function* () {
-  const chatId = ChatId.make()
+  const chatId = yield* ChatId.make
 
   // Returns at once: the assistant works in the background.
   yield* MyAssistant.submit(
     chatId,
-    AssistantEvent.UserMessage.make({ id: InputId.make(), text: "What's the weather in Oslo?" })
+    AssistantEvent.UserMessage.make({ id: yield* InputId.make, text: "What's the weather in Oslo?" })
   )
 
   // The chat's events, stored ones first, then live ones.

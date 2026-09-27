@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Stream from "effect/Stream"
-import { type Assistant, AssistantEvent, BlockKit, ChatLog } from "../src/index.ts"
+import { type Assistant, AssistantChat, AssistantEvent, BlockKit, ChatLog } from "../src/index.ts"
 import { mayHaveRunOutput, notRunOutput } from "../src/internal/history.ts"
 import { silentTurnMessage } from "../src/internal/turns.ts"
 import { collectUntil, fact, memoryAssistant, newChat, say, TestAssistant, testModel, turnsDone } from "./fixtures.ts"
@@ -43,7 +43,9 @@ const lateFact = () => {
     yield* turn.history
 
     if (turns === 1) {
-      yield* ChatLog.ChatLog.use((log) => log.append(turn.chatId, [fact("specialist:research", { answer: "Ontario" })]))
+      yield* AssistantChat.AssistantChat.use((chat) =>
+        chat.append([fact("specialist:research", { answer: "Ontario" })])
+      )
 
       return Stream.make(
         AssistantEvent.ModelOutput.make({ items: [waitCall("w1")] }),
@@ -51,8 +53,9 @@ const lateFact = () => {
       )
     }
 
-    const log = yield* ChatLog.ChatLog
-    yield* log.append(turn.chatId, [AssistantEvent.AssistantMessage.make({ id: "answer", text: "It's in Ontario." })])
+    yield* AssistantChat.AssistantChat.use((chat) =>
+      chat.append([AssistantEvent.AssistantMessage.make({ id: "answer", text: "It's in Ontario." })])
+    )
 
     return Stream.empty
   })
@@ -65,7 +68,7 @@ describe("turn completion", () => {
   it.live("records TurnFailed when client input gets no assistant message", () =>
     Effect.gen(function* () {
       const assistant = TestAssistant
-      const chat = yield* newChat()
+      const chat = yield* newChat
       yield* assistant.submit(chat, say("hello?"))
       const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 1)
 
@@ -81,7 +84,7 @@ describe("turn completion", () => {
   it.live("still allows a silent TurnCompleted for fact-only turns", () =>
     Effect.gen(function* () {
       const assistant = TestAssistant
-      const chat = yield* newChat()
+      const chat = yield* newChat
       yield* assistant.submit(
         chat,
         fact("workflow:InventorySync", { step: "3 of 10", status: "syncing", detail: "routine batch, nothing needed" })
@@ -99,7 +102,7 @@ describe("turn completion", () => {
   it.live("gives a call the handler never ran a result", () =>
     Effect.gen(function* () {
       const assistant = TestAssistant
-      const chat = yield* newChat()
+      const chat = yield* newChat
       yield* assistant.submit(chat, say("hello?"))
       const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 1)
       const results = entries.flatMap(({ event }) => (Predicate.isTagged(event, "ToolResult") ? [event] : []))
@@ -121,7 +124,7 @@ describe("turn completion", () => {
       )
 
       const entries = yield* Effect.gen(function* () {
-        const chat = yield* newChat()
+        const chat = yield* newChat
         yield* TestAssistant.submit(chat, say("send it"))
 
         return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
@@ -136,7 +139,7 @@ describe("turn completion", () => {
   it.live("leaves an input that arrived after the loop's last read to the next turn, without failing this one", () =>
     Effect.gen(function* () {
       const assistant = TestAssistant
-      const chat = yield* newChat()
+      const chat = yield* newChat
       yield* assistant.submit(chat, say("which province is Ottawa in?"))
       const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 2)
 
@@ -159,7 +162,7 @@ describe("turn completion", () => {
       )
 
       const entries = yield* Effect.gen(function* () {
-        const chat = yield* newChat()
+        const chat = yield* newChat
         yield* TestAssistant.submit(chat, say("Thanks, that's all I needed."))
 
         return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
@@ -186,7 +189,7 @@ describe("BlockKit.closeStale", () => {
 
       const entries = yield* Effect.gen(function* () {
         const log = yield* ChatLog.ChatLog
-        const chat = yield* newChat()
+        const chat = yield* newChat
         yield* log.append(chat, [
           AssistantEvent.AssistantMessage.make({
             id: "m1",

@@ -24,7 +24,7 @@
  * const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
  *   AssistantLoop.stream({
  *     model: "claude-sonnet-5",
- *     instructions: `${turn.preamble}\n\n${instructions}`,
+ *     instructions: turn.instructions("You help a small team."),
  *     toolkit: { ...turn.tools, ...toolkit },
  *     history: turn.history,
  *     toolChoice: "required"
@@ -39,6 +39,7 @@ import * as HistoryCheck from "@effect-uai/core/HistoryCheck"
 import * as Items from "@effect-uai/core/Items"
 import * as LanguageModel from "@effect-uai/core/LanguageModel"
 import * as Loop from "@effect-uai/core/Loop"
+import type * as Tool from "@effect-uai/core/Tool"
 import * as Toolkit from "@effect-uai/core/Toolkit"
 import * as ToolResultWire from "@effect-uai/core/ToolResult"
 import * as Turn from "@effect-uai/core/Turn"
@@ -62,166 +63,20 @@ import { waitToolName } from "./internal/tools.ts"
 export type Event = AssistantEvent.ModelOutput | AssistantEvent.ToolStarted | AssistantEvent.ToolResult
 
 /**
- * Options for {@link stream}.
+ * What a toolkit's tools need to run, besides the call the loop provides.
  *
- * @category models
+ * @category utility types
  * @since 0.1.0
  */
-export interface Options<Tools extends Toolkit.Toolkit = Toolkit.Toolkit> {
-  /** The model to call, as the `LanguageModel` in context names it (e.g. `"claude-sonnet-5"`). */
-  readonly model: string
-  /** The full system prompt, optionally with span attributes (like the prompt's name and version). */
-  readonly instructions: string | Instructions.Resolved
-  readonly toolkit?: Tools | undefined
-  /** The current history. Read before every model call. */
-  readonly history: Effect.Effect<ReadonlyArray<Items.HistoryItem>>
-  /** Model calls allowed. Default 16. */
-  readonly maxSteps?: number | undefined
-  /** `"required"` makes every step a tool call: assistants talk only through tools. */
-  readonly toolChoice?: LanguageModel.CommonRequest["toolChoice"] | undefined
-}
+export type ToolServices<Tools extends Toolkit.Toolkit> = Exclude<Toolkit.ToolkitR<Tools>, AssistantToolCall>
 
 /**
- * A tool call with no input can arrive with `arguments: ""`. Store `"{}"`
- * instead: the Anthropic adapter parses arguments when it sends history back,
- * and `""` isn't JSON.
- */
-const withJsonArguments = (item: Items.HistoryItem): Items.HistoryItem =>
-  Items.isToolCall(item) && item.arguments.trim() === "" ? { ...item, arguments: "{}" } : item
-
-/** Runs one call through the toolkit, in its own span, with the call as `AssistantToolCall`. */
-const runCall = (toolkit: Toolkit.Toolkit, call: Items.ToolCall) =>
-  Toolkit.collectResults(Toolkit.run(toolkit, [call])).pipe(
-    Effect.provideService(AssistantToolCall, { callId: call.call_id, tool: call.name }),
-    Effect.map((results) =>
-      results.map((result) => {
-        const wire = ToolResultWire.toToolCallOutput(result)
-
-        return AssistantEvent.ToolResult.make({ callId: wire.call_id, tool: call.name, output: wire.output })
-      })
-    ),
-    Effect.tap((results) => Telemetry.toolOutput(results.map((result) => result.output).join("\n"))),
-    Telemetry.toolSpan(call)
-  )
-
-/** The loop's state between model calls. */
-interface State {
-  readonly steps: number
-  /** After a step that stopped: the history length if nothing new arrives. */
-  readonly doneAt: number | undefined
-}
-
-/**
- * Runs the agent loop as a stream, on effect-uai's `Loop`: each iteration
- * calls the model with the current history and emits its `ModelOutput`, then
- * runs that output's tool calls concurrently and emits their `ToolResult`s.
+ * How a toolkit's tools can fail, besides the failures the model sees as results.
  *
- * **Details**
- *
- * It ends when the model is done (it made no tool calls, or called `wait`)
- * and nothing new arrived while it worked, or after `maxSteps` model calls.
- *
- * Each tool call is stored as started before it runs, and a call a crash cut
- * off (in the history with no result) runs again, with the same call id,
- * before the next model call, unless its tool is marked
- * `AssistantToolCall.destructive`. So a tool call runs at least once: a tool
- * that changes something outside the chat uses
- * `AssistantToolCall.idempotencyKey`, or is marked destructive.
- * The tools run only once the output is pulled, and the next model call only
- * once the results are: whoever consumes the stream records each event before
- * the next step reads the history.
- *
- * @category constructors
+ * @category utility types
  * @since 0.1.0
  */
-export const stream = <Tools extends Toolkit.Toolkit = Record<never, never>>(
-  options: Options<Tools>
-): Stream.Stream<
-  Event,
-  AiError.AiError,
-  LanguageModel.LanguageModel | Exclude<Toolkit.ToolkitR<Tools>, AssistantToolCall>
-> => {
-  const toolkit: Toolkit.Toolkit = options.toolkit ?? {}
-  const maxSteps = options.maxSteps ?? 16
-
-  const instructions = Predicate.isString(options.instructions) ? { text: options.instructions } : options.instructions
-
-  /** Runs the calls: first a `ToolStarted` for each (stored before any runs), then their results. */
-  const runCalls = (calls: ReadonlyArray<Items.ToolCall>, then: (results: number) => State) =>
-    Stream.fromIterable(
-      calls.map((call) => Loop.value(AssistantEvent.ToolStarted.make({ callId: call.call_id, tool: call.name })))
-    ).pipe(
-      Stream.concat(
-        Stream.unwrap(
-          Effect.forEach(calls, (call) => runCall(toolkit, call), { concurrency: "unbounded" }).pipe(
-            Effect.map((all) => {
-              const results = all.flat()
-
-              return Stream.fromIterable(results.map(Loop.value)).pipe(Stream.concat(Loop.next(then(results.length))))
-            })
-          )
-        )
-      )
-    )
-
-  const runTools = (calls: ReadonlyArray<Items.ToolCall>, state: State, seen: number) =>
-    runCalls(calls, (results) => ({
-      steps: state.steps + 1,
-      doneAt: calls.some((call) => call.name === waitToolName) ? seen + results : undefined
-    }))
-
-  const step = Effect.fn(function* (state: State) {
-    const history = yield* options.history
-    // Calls a crash cut off, with no result: they run again, with the same ids, before the model goes on.
-    // A destructive tool's call doesn't: the model is told it may have run.
-    const cutOff = HistoryCheck.findUnansweredCalls(history)
-
-    if (cutOff.length > 0) {
-      const destructive = cutOff.filter((call) => isDestructive(toolkit[call.name]))
-      const again = cutOff.filter((call) => !isDestructive(toolkit[call.name]))
-
-      return Stream.fromIterable(
-        destructive.map((call) =>
-          Loop.value(
-            AssistantEvent.ToolResult.make({ callId: call.call_id, tool: call.name, output: mayHaveRunOutput })
-          )
-        )
-      ).pipe(Stream.concat(again.length > 0 ? runCalls(again, () => state) : Loop.next(state)))
-    }
-
-    // Done, unless something arrived while the model was working.
-    if (state.doneAt !== undefined && history.length === state.doneAt) return Loop.stop()
-
-    if (state.steps >= maxSteps) return Loop.stop()
-
-    const input = [Items.systemText(instructions.text), ...history]
-
-    const turn = yield* LanguageModel.turn({
-      model: options.model,
-      history: input,
-      tools: toolkit,
-      toolChoice: options.toolChoice
-    }).pipe(Telemetry.chatSpan(options.model, input, instructions.attributes))
-
-    const output = Loop.value(AssistantEvent.ModelOutput.make({ items: turn.items.map(withJsonArguments) }))
-    const calls = Turn.getToolCalls(turn)
-    const seen = history.length + turn.items.length
-
-    return calls.length === 0
-      ? Stream.make(output).pipe(Stream.concat(Loop.next<State>({ steps: state.steps + 1, doneAt: seen })))
-      : Stream.make(output).pipe(Stream.concat(runTools(calls, state, seen)))
-  })
-
-  // SAFETY: running a call needs exactly the tools' own requirements.
-  return Loop.loop<State, Event, AiError.AiError, LanguageModel.LanguageModel>(
-    { steps: 0, doneAt: undefined },
-    step
-  ) as Stream.Stream<
-    Event,
-    AiError.AiError,
-    LanguageModel.LanguageModel | Exclude<Toolkit.ToolkitR<Tools>, AssistantToolCall>
-  >
-}
+export type ToolErrors<Tools extends Toolkit.Toolkit> = Exclude<Toolkit.ToolkitE<Tools>, string | Tool.ToolFailed>
 
 /**
  * Options for {@link step}.
@@ -230,14 +85,26 @@ export const stream = <Tools extends Toolkit.Toolkit = Record<never, never>>(
  * @since 0.1.0
  */
 export interface StepOptions<Tools extends Toolkit.Toolkit = Toolkit.Toolkit> {
-  /** The model to call, as the `LanguageModel` in context names it. */
+  /** The model to call, as the `LanguageModel` in context names it (e.g. `"claude-sonnet-5"`). */
   readonly model: string
-  /** The full system prompt, like `turn.instructions(text)`. */
+  /** The full system prompt, like `turn.instructions(text)`, optionally with span attributes. */
   readonly instructions: string | Instructions.Resolved
-  readonly toolkit?: Tools | undefined
+  readonly toolkit: Tools
   /** The current history, read at the start of the step. */
   readonly history: Effect.Effect<ReadonlyArray<Items.HistoryItem>>
+  /** `"required"` makes every step a tool call: assistants talk only through tools. */
   readonly toolChoice?: LanguageModel.CommonRequest["toolChoice"] | undefined
+}
+
+/**
+ * Options for {@link stream}.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface Options<Tools extends Toolkit.Toolkit = Toolkit.Toolkit> extends StepOptions<Tools> {
+  /** Model calls allowed. Default 16. */
+  readonly maxSteps?: number | undefined
 }
 
 /**
@@ -251,17 +118,43 @@ export interface StepResult {
   readonly output: AssistantEvent.ModelOutput | undefined
   /** Whether the model is done: it made no tool calls, or called `wait`. */
   readonly done: boolean
+  /** The history's length with this step's output and results: a longer one got something new meanwhile. */
+  readonly historyLength: number
 }
 
-/** A tool call's results as loop values: its start, then its results. */
-const callValues = (toolkit: Toolkit.Toolkit, calls: ReadonlyArray<Items.ToolCall>) =>
+/**
+ * A tool call with no input can arrive with `arguments: ""`. Store `"{}"`
+ * instead: the Anthropic adapter parses arguments when it sends history back,
+ * and `""` isn't JSON.
+ */
+const withJsonArguments = (item: Items.HistoryItem): Items.HistoryItem =>
+  Items.isToolCall(item) && item.arguments.trim() === "" ? { ...item, arguments: "{}" } : item
+
+/** Runs one call through the toolkit, in its own span, with the call as `AssistantToolCall`. */
+const runCall = <Tools extends Toolkit.Toolkit>(toolkit: Tools, call: Items.ToolCall) =>
+  Toolkit.collectResults(Toolkit.run(toolkit, [call])).pipe(
+    Effect.provideService(AssistantToolCall, { callId: call.call_id, tool: call.name }),
+    Effect.map((results) =>
+      results.map((result) => {
+        const wire = ToolResultWire.toToolCallOutput(result)
+
+        return AssistantEvent.ToolResult.make({ callId: wire.call_id, tool: call.name, output: wire.output })
+      })
+    ),
+    Effect.tap((results) => Telemetry.toolOutput(results.map((result) => result.output).join("\n"))),
+    Telemetry.toolSpan(call)
+  )
+
+/** Runs the calls: first a `ToolStarted` for each (stored before any runs), then their results, concurrently. */
+const runCalls = <Tools extends Toolkit.Toolkit>(toolkit: Tools, calls: ReadonlyArray<Items.ToolCall>) =>
   Stream.fromIterable(
     calls.map((call) => Loop.value(AssistantEvent.ToolStarted.make({ callId: call.call_id, tool: call.name })))
   ).pipe(
     Stream.concat(
       Stream.unwrap(
-        Effect.forEach(calls, (call) => runCall(toolkit, call), { concurrency: "unbounded" }).pipe(
-          Effect.map((all) => Stream.fromIterable(all.flat().map(Loop.value)))
+        Effect.map(
+          Effect.forEach(calls, (call) => runCall(toolkit, call), { concurrency: "unbounded" }),
+          (all) => Stream.fromIterable(all.flat().map(Loop.value))
         )
       )
     )
@@ -278,8 +171,9 @@ const callValues = (toolkit: Toolkit.Toolkit, calls: ReadonlyArray<Items.ToolCal
  *
  * A step whose history has calls a crash cut off runs those first, with the
  * same ids (a destructive tool's call gets a may-have-run result instead),
- * and doesn't call the model. As with {@link stream}, whoever consumes the
- * loop records each event before pulling the next.
+ * and doesn't call the model. Whoever consumes the loop records each event
+ * before pulling the next, so the next step's history has it; `then` runs
+ * after the step's events are recorded.
  *
  * **Example** (A loop of your own)
  *
@@ -305,56 +199,99 @@ export const step = <Tools extends Toolkit.Toolkit, S, E2 = never, R2 = never>(
   then: (result: StepResult) => Stream.Stream<Loop.Step<never, S>, E2, R2>
 ): Stream.Stream<
   Loop.Step<Event, S>,
-  AiError.AiError | E2,
-  LanguageModel.LanguageModel | Exclude<Toolkit.ToolkitR<Tools>, AssistantToolCall> | R2
+  AiError.AiError | ToolErrors<Tools> | E2,
+  LanguageModel.LanguageModel | ToolServices<Tools> | R2
 > => {
-  const toolkit: Toolkit.Toolkit = options.toolkit ?? {}
-
+  const { toolkit } = options
   const instructions = Predicate.isString(options.instructions) ? { text: options.instructions } : options.instructions
 
-  const body = Effect.gen(function* () {
-    const history = yield* options.history
-    const cutOff = HistoryCheck.findUnansweredCalls(history)
+  const next = (result: StepResult) => Stream.unwrap(Effect.sync(() => then(result)))
 
-    if (cutOff.length > 0) {
-      const destructive = cutOff.filter((call) => isDestructive(toolkit[call.name]))
-      const again = cutOff.filter((call) => !isDestructive(toolkit[call.name]))
+  return Stream.unwrap(
+    Effect.gen(function* () {
+      const history = yield* options.history
+      // Calls a crash cut off, with no result: they run again, with the same ids, before the model goes on.
+      // A destructive tool's call doesn't: the model is told it may have run.
+      const cutOff = HistoryCheck.findUnansweredCalls(history)
 
-      return Stream.fromIterable(
-        destructive.map((call) =>
-          Loop.value(
-            AssistantEvent.ToolResult.make({ callId: call.call_id, tool: call.name, output: mayHaveRunOutput })
+      if (cutOff.length > 0) {
+        const destructive = cutOff.filter((call) => isDestructive(toolkit[call.name]))
+        const again = cutOff.filter((call) => !isDestructive(toolkit[call.name]))
+
+        return Stream.fromIterable(
+          destructive.map((call) =>
+            Loop.value(
+              AssistantEvent.ToolResult.make({ callId: call.call_id, tool: call.name, output: mayHaveRunOutput })
+            )
           )
+        ).pipe(
+          Stream.concat(runCalls(toolkit, again)),
+          Stream.concat(next({ output: undefined, done: false, historyLength: history.length + cutOff.length }))
         )
-      ).pipe(
-        Stream.concat(callValues(toolkit, again)),
-        Stream.concat(Stream.unwrap(Effect.sync(() => then({ output: undefined, done: false }))))
+      }
+
+      const input = [Items.systemText(instructions.text), ...history]
+
+      const turn = yield* LanguageModel.turn({
+        model: options.model,
+        history: input,
+        tools: toolkit,
+        toolChoice: options.toolChoice
+      }).pipe(Telemetry.chatSpan(options.model, input, instructions.attributes))
+
+      const output = AssistantEvent.ModelOutput.make({ items: turn.items.map(withJsonArguments) })
+      const calls = Turn.getToolCalls(turn)
+      const done = calls.length === 0 || calls.some((call) => call.name === waitToolName)
+      const historyLength = history.length + turn.items.length + calls.length
+
+      return Stream.make(Loop.value(output)).pipe(
+        Stream.concat(runCalls(toolkit, calls)),
+        Stream.concat(next({ output, done, historyLength }))
       )
-    }
+    })
+  )
+}
 
-    const input = [Items.systemText(instructions.text), ...history]
+/**
+ * Runs the agent loop as a stream: {@link step} after step, until the model
+ * is done (it made no tool calls, or called `wait`) and nothing new arrived
+ * while it worked, or after `maxSteps` model calls.
+ *
+ * **Details**
+ *
+ * Each tool call is stored as started before it runs, and a call a crash cut
+ * off (in the history with no result) runs again, with the same call id,
+ * before the next model call, unless its tool is marked
+ * `AssistantToolCall.destructive`. So a tool call runs at least once: a tool
+ * that changes something outside the chat uses
+ * `AssistantToolCall.idempotencyKey`, or is marked destructive.
+ * The tools run only once the output is pulled, and the next model call only
+ * once the results are: whoever consumes the stream records each event before
+ * the next step reads the history.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const stream = <Tools extends Toolkit.Toolkit>(
+  options: Options<Tools>
+): Stream.Stream<Event, AiError.AiError | ToolErrors<Tools>, LanguageModel.LanguageModel | ToolServices<Tools>> => {
+  const maxSteps = options.maxSteps ?? 16
 
-    const turn = yield* LanguageModel.turn({
-      model: options.model,
-      history: input,
-      tools: toolkit,
-      toolChoice: options.toolChoice
-    }).pipe(Telemetry.chatSpan(options.model, input, instructions.attributes))
-
-    const output = AssistantEvent.ModelOutput.make({ items: turn.items.map(withJsonArguments) })
-    const calls = Turn.getToolCalls(turn)
-    const done = calls.length === 0 || calls.some((call) => call.name === waitToolName)
-
-    return Stream.make(Loop.value(output)).pipe(
-      Stream.concat(callValues(toolkit, calls)),
-      Stream.concat(Stream.unwrap(Effect.sync(() => then({ output, done }))))
+  // Done: stop, unless something arrived while the model was working; then it reads that first.
+  const afterDone = (steps: number, historyLength: number) =>
+    Stream.unwrap(
+      Effect.map(options.history, (history) =>
+        history.length > historyLength ? Loop.next(steps) : Loop.stop<number>()
+      )
     )
-  })
 
-  // SAFETY: running a call needs exactly the tools' own requirements.
-  return Stream.unwrap(body) as Stream.Stream<
-    Loop.Step<Event, S>,
-    AiError.AiError | E2,
-    LanguageModel.LanguageModel | Exclude<Toolkit.ToolkitR<Tools>, AssistantToolCall> | R2
-  >
+  return Loop.loop(0, (steps: number) =>
+    step(options, (result) => {
+      const taken = result.output === undefined ? steps : steps + 1
+
+      if (taken >= maxSteps) return Loop.stop<number>()
+
+      return result.done ? afterDone(taken, result.historyLength) : Loop.next(taken)
+    })
+  )
 }

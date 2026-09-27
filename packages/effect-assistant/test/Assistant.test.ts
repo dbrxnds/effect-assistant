@@ -93,7 +93,7 @@ describe("layerMemory", () => {
   it.live("answers a message through send_user_message", () =>
     Effect.gen(function* () {
       const assistant = TestAssistant
-      const chat = yield* newChat()
+      const chat = yield* newChat
       yield* assistant.submit(chat, say("Say hi in one short message."))
       const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 1)
 
@@ -105,7 +105,7 @@ describe("layerMemory", () => {
   it.live("uses a tool and reports its result", () =>
     Effect.gen(function* () {
       const assistant = TestAssistant
-      const chat = yield* newChat()
+      const chat = yield* newChat
       yield* assistant.submit(chat, say("What's the weather in Oslo right now?"))
       const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 1)
 
@@ -118,7 +118,7 @@ describe("layerMemory", () => {
   it.live("picks up a message sent while it is working", () =>
     Effect.gen(function* () {
       const assistant = TestAssistant
-      const chat = yield* newChat()
+      const chat = yield* newChat
       yield* assistant.submit(chat, say("Can you check order A-17 for me?"))
       // Wait until the slow tool is running, then send another message.
       yield* collectUntil(assistant, chat, (es) => es.some(({ event }) => Predicate.isTagged(event, "ModelOutput")))
@@ -137,7 +137,7 @@ describe("layerMemory", () => {
   it.live("background specialist reports back as a fact and the assistant follows up", () =>
     Effect.gen(function* () {
       const assistant = ResearchAssistant
-      const chat = yield* newChat()
+      const chat = yield* newChat
       yield* assistant.submit(
         chat,
         say("Start the research specialist in the background: which planet is the largest in our solar system?")
@@ -157,7 +157,7 @@ describe("layerMemory", () => {
   it.live("spawns a specialist for a quick question and relays the answer", () =>
     Effect.gen(function* () {
       const assistant = ResearchAssistant
-      const chat = yield* newChat()
+      const chat = yield* newChat
       yield* assistant.submit(chat, say("Quickly ask the research specialist what the capital of Canada is."))
       const entries = yield* collectUntil(assistant, chat, (es) => text(es).includes("ottawa") && idle(es))
 
@@ -171,7 +171,7 @@ describe("specialist briefs and follow-ups", () => {
   it.live("sends a structured brief and follows up on the same run", () =>
     Effect.gen(function* () {
       const assistant = ResearchAssistant
-      const chat = yield* newChat()
+      const chat = yield* newChat
       yield* assistant.submit(chat, say("Quickly ask the research specialist what the capital of Canada is."))
       const first = yield* collectUntil(assistant, chat, (es) => text(es).includes("ottawa") && idle(es))
       const [call] = specialistCalls(first)
@@ -230,7 +230,7 @@ describe("steering and stopping a running specialist", () => {
   it.live("steers a running worker with a new brief", () =>
     Effect.gen(function* () {
       const assistant = ArchiveAssistant
-      const chat = yield* newChat()
+      const chat = yield* newChat
       yield* assistant.submit(chat, say("Have the archivist find where our 2024 offsite was."))
       yield* collectUntil(assistant, chat, (es) => statuses(es).includes("started"))
       yield* assistant.submit(chat, say("Oh, and tell the archivist to also find the 2025 one, same run."))
@@ -249,7 +249,7 @@ describe("steering and stopping a running specialist", () => {
   it.live("stops a running worker", () =>
     Effect.gen(function* () {
       const assistant = ArchiveAssistant
-      const chat = yield* newChat()
+      const chat = yield* newChat
       yield* assistant.submit(chat, say("Have the archivist find where our 2024 offsite was."))
       yield* collectUntil(assistant, chat, (es) => statuses(es).includes("started"))
       yield* assistant.submit(chat, say("Actually never mind, stop the archivist."))
@@ -269,7 +269,7 @@ describe("steering and stopping a running specialist", () => {
   it.live("closes a run cut off by a shutdown and tells the assistant", () =>
     Effect.gen(function* () {
       const log = yield* ChatLog.ChatLog
-      const chat = yield* newChat()
+      const chat = yield* newChat
 
       // The engine and the assistant live in this scope; closing it is the shutdown. The storage stays.
       const layer = archiveHandlers.pipe(
@@ -328,7 +328,7 @@ describe("UI blocks", () => {
   it.live("puts a block in a message, then acts on its answer", () =>
     Effect.gen(function* () {
       const assistant = BlockAssistant
-      const chat = yield* newChat()
+      const chat = yield* newChat
       yield* assistant.submit(chat, say("Should the campaign banner be red or blue? Give me buttons to pick."))
       const shown = yield* collectUntil(assistant, chat, (es) => withBlock(es) !== undefined && turnsDone(es) >= 1)
       const message = withBlock(shown)!
@@ -339,7 +339,7 @@ describe("UI blocks", () => {
       yield* assistant.submit(
         chat,
         AssistantEvent.BlockAnswer.make({
-          id: InputId.make(),
+          id: yield* InputId.make,
           messageId: message.id,
           kind: "choose_one",
           value: { choice: "blue" }
@@ -354,7 +354,7 @@ describe("UI blocks", () => {
   it.live("takes a block answered by typing", () =>
     Effect.gen(function* () {
       const assistant = BlockAssistant
-      const chat = yield* newChat()
+      const chat = yield* newChat
       yield* assistant.submit(chat, say("Should the campaign banner be red or blue? Give me buttons to pick."))
       yield* collectUntil(assistant, chat, (es) => withBlock(es) !== undefined && turnsDone(es) >= 1)
 
@@ -377,7 +377,7 @@ describe("UI blocks", () => {
   it.live("fills in a block from a fact", () =>
     Effect.gen(function* () {
       const assistant = BlockAssistant
-      const chat = yield* newChat()
+      const chat = yield* newChat
       yield* assistant.submit(
         chat,
         fact("workflow:CreateCampaign", {
@@ -403,7 +403,7 @@ describe("facts: tell the user or keep it internal", () => {
   it.live("keeps routine progress internal", () =>
     Effect.gen(function* () {
       const assistant = TestAssistant
-      const chat = yield* newChat()
+      const chat = yield* newChat
       yield* assistant.submit(
         chat,
         fact("workflow:InventorySync", { step: "3 of 10", status: "syncing", detail: "routine batch, nothing needed" })
@@ -418,7 +418,7 @@ describe("facts: tell the user or keep it internal", () => {
   it.live("tells the user when something needs them", () =>
     Effect.gen(function* () {
       const assistant = TestAssistant
-      const chat = yield* newChat()
+      const chat = yield* newChat
       yield* assistant.submit(
         chat,
         fact("workflow:InventorySync", {
@@ -446,7 +446,7 @@ describe("layerEntity", () => {
   it.live("runs a chat as a cluster entity", () =>
     Effect.gen(function* () {
       const assistant = TestAssistant
-      const chat = yield* newChat()
+      const chat = yield* newChat
       yield* assistant.submit(chat, say("Say hi in one short message."))
       const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 1)
 
@@ -458,7 +458,7 @@ describe("layerEntity", () => {
   it.live("runs a background specialist and reports back once", () =>
     Effect.gen(function* () {
       const assistant = ResearchAssistant
-      const chat = yield* newChat()
+      const chat = yield* newChat
       yield* assistant.submit(
         chat,
         say("Start the research specialist in the background: which planet is the largest in our solar system?")
@@ -512,7 +512,7 @@ describe("discovery", () => {
   it.live("finds a tool with search_tools and runs it with execute_tool", () =>
     Effect.gen(function* () {
       const assistant = TestAssistant
-      const chat = yield* newChat()
+      const chat = yield* newChat
       yield* assistant.submit(chat, say("How many parking spots are free at the Amsterdam office right now?"))
       const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 1)
 
@@ -526,7 +526,7 @@ describe("discovery", () => {
   it.live("loads a skill from its catalog and follows it", () =>
     Effect.gen(function* () {
       const assistant = TestAssistant
-      const chat = yield* newChat()
+      const chat = yield* newChat
       yield* assistant.submit(chat, say("We have a new hire starting Monday. What's our onboarding process?"))
       const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 1)
 

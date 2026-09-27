@@ -115,8 +115,8 @@ reads services, [looks up the user](./chats), or fetches its
 A turn doesn't run inside the request that caused it, so a handler can't use
 just any service in scope. It may use:
 
-- the turn's services, `Assistant.TurnServices`: `AssistantTurn`,
-  `ChatLog`, and `Specialist.Runner`;
+- the turn's services, `Assistant.TurnServices`: `AssistantChat` (the chat:
+  its id, its entries, and its writer) and `Specialist.Runner`;
 - `LanguageModel`;
 - what its build Effect required, like `Catalog` above. Those become the
   layer's requirements, and you provide them the usual way;

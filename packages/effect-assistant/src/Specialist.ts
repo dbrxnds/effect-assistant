@@ -11,9 +11,8 @@
  *   the run's loop as a stream, usually `run.loop({ model, instructions, toolkit })`.
  *   The build Effect runs once per chat activation, like an entity's, with
  *   the layer's services and `AssistantChat`; the function runs for each
- *   brief. A run works in the chat that spawned it:
- *   look up whom it works for from `run.chatId`, like the assistant's
- *   handler does.
+ *   brief. A run works in the chat that spawned it: look up whom it works
+ *   for from `run.chatId`, like the assistant's handler does.
  *
  * The assistant works with its specialists through three tools:
  *
@@ -72,13 +71,10 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
-import type * as Stream from "effect/Stream"
+import * as Stream from "effect/Stream"
 import type { AssistantChat } from "./AssistantChat.ts"
 import type * as AssistantLoop from "./AssistantLoop.ts"
-import type { AssistantToolCall } from "./AssistantToolCall.ts"
-import type { AssistantTurn } from "./AssistantTurn.ts"
 import type { ChatId } from "./ChatId.ts"
-import type * as ChatLog from "./ChatLog.ts"
 import type * as Instructions from "./Instructions.ts"
 import type { RunId } from "./RunId.ts"
 import type { Skill } from "./Skill.ts"
@@ -160,13 +156,13 @@ export interface SpecialistHandler<Name extends string> {
 export type HandlerOf<S> = S extends Specialist<infer Name> ? SpecialistHandler<Name> : never
 
 /**
- * Services a run provides to its handler: the spawning turn, the runner, the
- * chat's log, and the model.
+ * Services a run provides to its handler: its chat, the chat's runner, and
+ * the model.
  *
  * @category models
  * @since 0.1.0
  */
-export type RunServices = AssistantTurn | Runner | ChatLog.ChatLog | LanguageModel.LanguageModel
+export type RunServices = AssistantChat | Runner | LanguageModel.LanguageModel
 
 /**
  * Options for `run.loop`.
@@ -207,8 +203,8 @@ export interface Run {
     options: LoopOptions<Tools, R>
   ) => Stream.Stream<
     AssistantLoop.Event,
-    AiError.AiError,
-    LanguageModel.LanguageModel | Exclude<Toolkit.ToolkitR<Tools>, AssistantToolCall> | R
+    AiError.AiError | AssistantLoop.ToolErrors<Tools>,
+    LanguageModel.LanguageModel | AssistantLoop.ToolServices<Tools> | R
   >
 }
 
@@ -227,16 +223,27 @@ export type Handler<R = never, RE = R> = (
   | Effect.Effect<Stream.Stream<AssistantLoop.Event, unknown, R>, unknown, RE>
 
 /**
- * A handler's build, with the services of the layer that registered it. The
- * build runs once per chat activation (see `AssistantChat`).
+ * A specialist's handler as its layer provides it: `open` runs the build for
+ * a chat (once per chat activation, see `AssistantChat`), and returns the
+ * handler with the layer's services already provided.
  *
  * @category models
  * @since 0.1.0
  */
 export interface Built {
-  readonly build: Effect.Effect<Handler<any, any>, unknown, any>
-  readonly context: Context.Context<never>
+  readonly open: Effect.Effect<
+    (run: Run) => Stream.Stream<AssistantLoop.Event, unknown, RunServices>,
+    never,
+    Scope.Scope | AssistantChat
+  >
 }
+
+/** A handler's result as a stream: it may return the stream from an Effect. */
+const toStream = <R, RE>(
+  result:
+    | Stream.Stream<AssistantLoop.Event, unknown, R>
+    | Effect.Effect<Stream.Stream<AssistantLoop.Event, unknown, R>, unknown, RE>
+): Stream.Stream<AssistantLoop.Event, unknown, R | RE> => (Effect.isEffect(result) ? Stream.unwrap(result) : result)
 
 /**
  * Defines a specialist: its name, and when to use it.
@@ -253,24 +260,28 @@ export const make = <const Name extends string>(
 ): Specialist<Name> => {
   const Handler = Context.Service<SpecialistHandler<Name>, Built>(`effect-assistant/Specialist/${name}`)
 
-  // The build runs per chat activation, in the chat; here it only keeps the layer's services for it.
-  const toLayer = (build: Handler<any, any> | Effect.Effect<Handler<any, any>, any, any>) =>
-    Layer.effect(
+  // The signature checks what the handler uses (`CheckServices`); the layer's services, which the build
+  // required, are provided to it and to every run's stream, so what's left is the run services.
+  function toLayer<R = never, RE = never, E = never, RX = never>(
+    build: (Handler<R, RE> | Effect.Effect<Handler<R, RE>, E, RX>) & CheckServices<Exclude<R | RE, RunServices | RX>>
+  ): Layer.Layer<SpecialistHandler<Name>, never, Exclude<RX, Scope.Scope | AssistantChat>>
+  function toLayer(
+    build: Handler<any, any> | Effect.Effect<Handler<any, any>, unknown, any>
+  ): Layer.Layer<SpecialistHandler<Name>, never, any> {
+    return Layer.effect(
       Handler,
       Effect.map(Effect.context<never>(), (context) => ({
-        build: Effect.isEffect(build) ? build : Effect.succeed(build),
-        context
+        // The build runs per chat activation, in the chat; here it only keeps the layer's services for it.
+        open: (Effect.isEffect(build) ? build : Effect.succeed(build)).pipe(
+          Effect.map((handler) => (run: Run) => Stream.provideContext(toStream(handler(run)), context)),
+          Effect.provideContext(context),
+          Effect.orDie
+        )
       }))
     )
-
-  return {
-    [TypeId]: TypeId,
-    name,
-    description: options.description,
-    Handler,
-    // SAFETY: the layer provides the handler it's given; its requirements are the ones `toLayer` states.
-    toLayer: toLayer as Specialist<Name>["toLayer"]
   }
+
+  return { [TypeId]: TypeId, name, description: options.description, Handler, toLayer }
 }
 
 /**
@@ -300,14 +311,12 @@ export const Brief = Schema.Struct({
 export type Brief = typeof Brief.Type
 
 /**
- * A request to start a specialist run.
+ * A request to start a specialist run in the runner's chat.
  *
  * @category models
  * @since 0.1.0
  */
 export interface SpawnRequest {
-  /** The turn that spawns it: the run works in its chat. */
-  readonly turn: AssistantTurn["Service"]
   /** The specialist's name. */
   readonly kind: string
   readonly brief: Brief

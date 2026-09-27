@@ -7,17 +7,17 @@ import { ChatId } from "effect-assistant"
 ```
 
 The `ChatId` module defines the id of one conversation: `chat:` followed by
-a nanoid. A chat id keys everything about a chat: its event log, its cluster
+a UUID. A chat id keys everything about a chat: its log, its cluster
 entity, and its trace session.
 
 ## Constructors
 
 ### make
 
-Creates a new random chat id.
+Creates a new random chat id, with Effect's `Random`.
 
 ```ts
-const make: () => ChatId
+const make: Effect.Effect<ChatId>
 ```
 
 <small>Since 0.1.0</small>
@@ -38,11 +38,11 @@ type ChatId = typeof ChatId.Type
 
 ### ChatId
 
-Schema for chat ids: `` `chat:${nanoid}` ``, branded so a run id or a plain
+Schema for chat ids: `` `chat:${uuid}` ``, branded so a run id or a plain
 string can't be passed where a chat id is required.
 
 ```ts
-const ChatId = Schema.TemplateLiteral(["chat:", Nanoid.Nanoid]).pipe(Schema.brand("effect-assistant/ChatId"))
+const ChatId = Schema.TemplateLiteral(["chat:", Uuid.Uuid]).pipe(Schema.brand("effect-assistant/ChatId"))
 ```
 
 <small>Since 0.1.0</small>

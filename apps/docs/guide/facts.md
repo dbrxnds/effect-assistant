@@ -14,7 +14,7 @@ const shipped = (chatId: ChatId.ChatId, orderId: string) =>
   MyAssistant.submit(
     chatId,
     AssistantEvent.Fact.make({
-      id: InputId.make(`${orderId}:shipped`),
+      id: InputId.fromKey(`${orderId}:shipped`),
       source: "webhook:Shipping",
       payload: { orderId, status: "shipped", carrier: "DHL" }
     })
@@ -41,9 +41,9 @@ const startCampaign = Tool.make({
   description: "Order a campaign. The run reports each step back as a fact.",
   inputSchema: StartInput,
   run: Effect.fn(function* ({ campaignId, budget }: typeof StartInput.Type) {
-    const turn = yield* AssistantTurn.AssistantTurn
-    const runId = RunId.make()
-    yield* CreateCampaign.execute({ runId, chatId: turn.chatId, campaignId, budget }, { discard: true })
+    const chat = yield* AssistantChat.AssistantChat
+    const runId = RunId.fromKey(yield* AssistantToolCall.idempotencyKey)
+    yield* CreateCampaign.execute({ runId, chatId: chat.chatId, campaignId, budget }, { discard: true })
     return { runId, status: "started" }
   })
 })
@@ -59,7 +59,7 @@ const report = (payload: Payload, status: string) =>
     execute: MyAssistant.submit(
       payload.chatId,
       AssistantEvent.Fact.make({
-        id: InputId.make(`${payload.runId}:${status}`),
+        id: InputId.fromKey(`${payload.runId}:${status}`),
         source: "workflow:CreateCampaign",
         payload: { runId: payload.runId, status }
       })

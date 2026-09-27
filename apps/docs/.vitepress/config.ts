@@ -9,7 +9,6 @@ const modules = [
   "AssistantHistory",
   "ChatLog",
   "AssistantLoop",
-  "AssistantTurn",
   "Block",
   "BlockKit",
   "Instructions",
