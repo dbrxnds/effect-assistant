@@ -8,9 +8,14 @@ import { AssistantLoop } from "effect-assistant"
 
 The `AssistantLoop` module is the agent loop: call the model, run its tool
 calls, repeat. `stream` runs it as a `Stream` of what happened, one
-step at a time, on effect-uai's `Loop`. An assistant's handler and a specialist's handler both
+step at a time. An assistant's handler and a specialist's handler both
 return one, usually through `turn.loop` or `run.loop`, which wire in the
 rest.
+
+Each step is one call of `effect/unstable/ai`'s `LanguageModel`, whichever
+provider the context has (`AnthropicLanguageModel.model(...)`, say). The
+loop runs the calls the model makes itself, so it can store each one as
+started before it runs.
 
 History is read fresh before every model call, so a message the user sends
 mid-turn is seen at the next step. That is what makes an assistant a
@@ -28,26 +33,83 @@ ahead (`Stream.buffer`) or run it twice.
 ```ts
 import { AssistantLoop } from "effect-assistant"
 
-const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
-  AssistantLoop.stream({
-    model: "claude-sonnet-5",
-    instructions: turn.instructions("You help a small team."),
-    toolkit: { ...turn.tools, ...toolkit },
-    history: turn.history(),
-    toolChoice: "required"
-  })
-)
+const MyAssistantHandlers = MyAssistant.toLayer(Effect.gen(function*() {
+  const tools = AssistantLoop.tools(yield* MyToolkit)
+
+  return (turn) =>
+    AssistantLoop.stream({
+      instructions: turn.instructions("You help a small team."),
+      toolkit: AssistantLoop.merge(turn.tools, tools),
+      history: turn.history(),
+      toolChoice: "required"
+    })
+}))
 ```
 
 ## Constructors
 
+### empty
+
+No tools.
+
+```ts
+const empty: Tools
+```
+
+<small>Since 0.1.0</small>
+
+### value
+
+Emits a value from a loop body.
+
+```ts
+const value: <A>(value: A) => Step<A, never>
+```
+
+<small>Since 0.1.0</small>
+
+### next
+
+Ends a loop body's step and goes on with this state.
+
+```ts
+const next: <S>(state: S) => Stream.Stream<Step<never, S>>
+```
+
+<small>Since 0.1.0</small>
+
+### stop
+
+Ends the loop.
+
+```ts
+const stop: <S = never>() => Stream.Stream<Step<never, S>>
+```
+
+<small>Since 0.1.0</small>
+
+### loop
+
+Runs a loop body from a state: emits its values, and runs it again with the
+state it goes `next` with, until it `stop`s. A body that ends without
+either stops too.
+
+```ts
+const loop: <S, A, E, R>(
+  initial: S,
+  body: (state: S) => Stream.Stream<Step<A, S>, E, R>
+) => Stream.Stream<A, E, R>
+```
+
+<small>Since 0.1.0</small>
+
 ### step
 
-One step of the agent loop, as a body for effect-uai's `Loop.loop`: it
-calls the model with the current history and emits its `ModelOutput`,
-then runs the output's tool calls and emits a `ToolStarted` and a
-`ToolResult` for each. `then` decides what comes next: `Loop.next(state)`
-or `Loop.stop()`.
+One step of the agent loop, as a body for `loop`: it calls the model
+with the current history and emits its `ModelOutput`, then runs the
+output's tool calls and emits a `ToolStarted` and a `ToolResult` for each.
+`then` decides what comes next: `AssistantLoop.next(state)` or
+`AssistantLoop.stop()`.
 
 **Details**
 
@@ -59,28 +121,23 @@ after the step's events are recorded.
 **Example** (A loop of your own)
 
 ```ts
-import * as Loop from "@effect-uai/core/Loop"
 import { AssistantLoop } from "effect-assistant"
 
 const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
-  Loop.loop({ steps: 0 }, (state) =>
+  AssistantLoop.loop({ steps: 0 }, (state) =>
     AssistantLoop.step(
-      { model: "claude-sonnet-5", instructions: turn.instructions("You help a small team."), toolkit: turn.tools, history: turn.history(), toolChoice: "required" },
-      (result) => result.done || state.steps >= 12 ? Loop.stop() : Loop.next({ steps: state.steps + 1 })
+      { instructions: turn.instructions("You help a small team."), toolkit: turn.tools, history: turn.history(), toolChoice: "required" },
+      (result) => result.done || state.steps >= 12 ? AssistantLoop.stop() : AssistantLoop.next({ steps: state.steps + 1 })
     )
   )
 )
 ```
 
 ```ts
-const step: <Tools extends Toolkit.Toolkit, S, E2 = never, R2 = never>(
-  options: StepOptions<Tools>,
-  then: (result: StepResult) => Stream.Stream<Loop.Step<never, S>, E2, R2>
-) => Stream.Stream<
-  Loop.Step<Event, S>,
-  AiError.AiError | ToolErrors<Tools> | E2,
-  LanguageModel.LanguageModel | ToolServices<Tools> | R2
->
+const step: <R, S, E2 = never, R2 = never>(
+  options: StepOptions<R>,
+  then: (result: StepResult) => Stream.Stream<Step<never, S>, E2, R2>
+) => Stream.Stream<Step<Event, S>, AiError.AiError | E2, LanguageModel.LanguageModel | R | R2>
 ```
 
 <small>Since 0.1.0</small>
@@ -103,9 +160,21 @@ once the results are: whoever consumes the stream records each event before
 the next step reads the history.
 
 ```ts
-const stream: <Tools extends Toolkit.Toolkit>(
-  options: Options<Tools>
-) => Stream.Stream<Event, AiError.AiError | ToolErrors<Tools>, LanguageModel.LanguageModel | ToolServices<Tools>>
+const stream: <R = never>(
+  options: Options<R>
+) => Stream.Stream<Event, AiError.AiError, LanguageModel.LanguageModel | R>
+```
+
+<small>Since 0.1.0</small>
+
+## Combinators
+
+### merge
+
+Two sets of tools together, like the assistant's own and the app's.
+
+```ts
+const merge: <A, B>(self: Tools<A>, that: Tools<B>) => Tools<A | B>
 ```
 
 <small>Since 0.1.0</small>
@@ -123,21 +192,57 @@ type Event = AssistantEvent.ModelOutput | AssistantEvent.ToolStarted | Assistant
 
 <small>Since 0.1.0</small>
 
+### CallResult
+
+How a tool call went: success or failure, its result in JSON, as the model
+reads it, and a failure's kind when it has one.
+
+```ts
+interface CallResult {
+  readonly outcome: AssistantEvent.ToolOutcome
+  readonly result: Schema.Json
+  readonly kind?: string | undefined
+}
+```
+
+<small>Since 0.1.0</small>
+
+### Tools
+
+Tools the loop can run, with their handlers: the tools' definitions, as
+the model sees them, and how to run a call to one. `R` is what the handlers
+need. `tools` makes them from a native toolkit, `merge` puts two
+together; `turn.tools` are the assistant's own.
+
+**Details**
+
+A call never fails the loop: a call to a tool that isn't there, params
+that don't fit, and the tool's own failure are all a failed `CallResult`
+the model reads. Only a defect fails it.
+
+```ts
+interface Tools<out R = never> {
+  readonly definitions: ReadonlyArray<Tool.Any>
+  readonly run: (call: AssistantEvent.ToolCallPart) => Effect.Effect<CallResult, never, R>
+}
+```
+
+<small>Since 0.1.0</small>
+
 ### StepOptions
 
 Options for `step`.
 
 ```ts
-interface StepOptions<Tools extends Toolkit.Toolkit = Toolkit.Toolkit> {
-  /** The model to call, as the `LanguageModel` in context names it (e.g. `"claude-sonnet-5"`). */
-  readonly model: string
+interface StepOptions<R = never> {
   /** The full system prompt, like `turn.instructions(text)`, optionally with span attributes. */
   readonly instructions: string | Instructions.Resolved
-  readonly toolkit: Tools
+  /** The tools the model can call. Default: none. */
+  readonly toolkit?: Tools<R> | undefined
   /** The current history, read at the start of the step. */
-  readonly history: Effect.Effect<ReadonlyArray<Items.HistoryItem>>
+  readonly history: Effect.Effect<ReadonlyArray<Prompt.Message>>
   /** `"required"` makes every step a tool call: assistants talk only through tools. */
-  readonly toolChoice?: LanguageModel.CommonRequest["toolChoice"] | undefined
+  readonly toolChoice?: LanguageModel.ToolChoice<string> | undefined
 }
 ```
 
@@ -148,7 +253,7 @@ interface StepOptions<Tools extends Toolkit.Toolkit = Toolkit.Toolkit> {
 Options for `stream`.
 
 ```ts
-interface Options<Tools extends Toolkit.Toolkit = Toolkit.Toolkit> extends StepOptions<Tools> {
+interface Options<R = never> extends StepOptions<R> {
   /** Model calls allowed. Default 16. */
   readonly maxSteps?: number | undefined
 }
@@ -176,24 +281,31 @@ interface StepResult {
 
 <small>Since 0.1.0</small>
 
-## Utility types
+### Step
 
-### ToolServices
-
-What a toolkit's tools need to run, besides the call the loop provides.
+What a loop body emits: a value, or what to do next.
 
 ```ts
-type ToolServices<Tools extends Toolkit.Toolkit> = Exclude<Toolkit.ToolkitR<Tools>, AssistantToolCall>
+type Step<A, S> = Data.TaggedEnum<{
+  Value: { readonly value: A }
+  Next: { readonly state: S }
+  Stop: {}
+}>
 ```
 
 <small>Since 0.1.0</small>
 
-### ToolErrors
+## Utility types
 
-How a toolkit's tools can fail, besides the failures the model sees as results.
+### ToolServices
+
+What a toolkit's handlers need to run, besides the call the loop provides.
 
 ```ts
-type ToolErrors<Tools extends Toolkit.Toolkit> = Exclude<Toolkit.ToolkitE<Tools>, string | Tool.ToolFailed>
+type ToolServices<Tools extends Record<string, Tool.Any>> = Exclude<
+  Tool.HandlerServices<Tools[keyof Tools]>,
+  AssistantToolCall
+>
 ```
 
 <small>Since 0.1.0</small>

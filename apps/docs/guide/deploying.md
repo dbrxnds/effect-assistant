@@ -16,7 +16,7 @@ const MyAssistantLive = MyAssistant.toLayer(handler).pipe(Layer.provide(Research
 const AppLive = Server.layer.pipe(
   Layer.provideMerge(MyAssistantLive),
   Layer.provideMerge(Layer.merge(AssistantEngine.layerCluster, ClusterWorkflowEngine.layer)),
-  Layer.provide(AnthropicLive), // effect-uai's Anthropic.layer: the LanguageModel
+  Layer.provide(ModelLive), // AnthropicLanguageModel.model(...): the LanguageModel
   Layer.provideMerge(Layer.merge(ChatLog.layerSql, SingleRunner.layer({ runnerStorage: "sql" }))),
   Layer.provide(PgLive) // one Postgres pool for the log, the entities, and workflows
 )

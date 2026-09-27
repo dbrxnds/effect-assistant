@@ -109,12 +109,9 @@ importers:
       '@acme/demo-shared':
         specifier: workspace:*
         version: link:../shared
-      '@effect-uai/anthropic':
-        specifier: 0.17.0
-        version: 0.17.0(@effect-uai/core@0.17.0(effect@4.0.0-rc.117))(effect@4.0.0-rc.117)
-      '@effect-uai/core':
-        specifier: 0.17.0
-        version: 0.17.0(effect@4.0.0-rc.117)
+      '@effect/ai-anthropic':
+        specifier: 4.0.0-rc.117
+        version: 4.0.0-rc.117(effect@4.0.0-rc.117)
       '@effect/opentelemetry':
         specifier: 4.0.0-rc.117
         version: 4.0.0-rc.117(@opentelemetry/api-logs@0.222.0)(@opentelemetry/api@1.9.1)(@opentelemetry/resources@2.11.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.222.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.11.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.11.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-node@2.11.0(@opentelemetry/api@1.9.1))(@opentelemetry/semantic-conventions@1.43.0)(effect@4.0.0-rc.117)
@@ -175,7 +172,7 @@ importers:
         version: 1.0.0-rc.0(@opentelemetry/api@1.9.1)(@types/node@22.20.4)(@vitest/ui@5.0.1(vitest@5.0.1))(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1)
       vitest:
         specifier: 5.0.1
-        version: 5.0.1(@opentelemetry/api@1.9.1)(@types/node@22.20.4)(@vitest/browser-preview@5.0.1)(@vitest/ui@5.0.1(vitest@5.0.1))(vite@8.3.0(@types/node@22.20.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+        version: 5.0.1(@opentelemetry/api@1.9.1)(@types/node@22.20.4)(@vitest/browser-preview@5.0.1)(@vitest/ui@5.0.1)(vite@8.3.0(@types/node@22.20.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   packages/demo/shared:
     dependencies:
@@ -198,12 +195,9 @@ importers:
 
   packages/effect-assistant:
     devDependencies:
-      '@effect-uai/anthropic':
-        specifier: 0.17.0
-        version: 0.17.0(@effect-uai/core@0.17.0(effect@4.0.0-rc.117))(effect@4.0.0-rc.117)
-      '@effect-uai/core':
-        specifier: 0.17.0
-        version: 0.17.0(effect@4.0.0-rc.117)
+      '@effect/ai-anthropic':
+        specifier: 4.0.0-rc.117
+        version: 4.0.0-rc.117(effect@4.0.0-rc.117)
       '@effect/vitest':
         specifier: 4.0.0-rc.117
         version: 4.0.0-rc.117(effect@4.0.0-rc.117)(vitest@5.0.1)
@@ -221,7 +215,7 @@ importers:
         version: 1.0.0-rc.0(@opentelemetry/api@1.9.1)(@types/node@22.20.4)(@vitest/ui@5.0.1(vitest@5.0.1))(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(typescript@7.0.2)(yaml@2.9.1)
       vitest:
         specifier: 5.0.1
-        version: 5.0.1(@opentelemetry/api@1.9.1)(@types/node@22.20.4)(@vitest/browser-preview@5.0.1)(@vitest/ui@5.0.1(vitest@5.0.1))(vite@8.3.0(@types/node@22.20.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+        version: 5.0.1(@opentelemetry/api@1.9.1)(@types/node@22.20.4)(@vitest/browser-preview@5.0.1)(@vitest/ui@5.0.1)(vite@8.3.0(@types/node@22.20.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
 packages:
 
@@ -535,14 +529,8 @@ packages:
       search-insights:
         optional: true
 
-  '@effect-uai/anthropic@0.17.0':
-    resolution: {integrity: sha512-fEsQ0E/UL653UpS/TvMZsOmt8jkutGHLqL6rkzGaDPQG/pnQyNZ0Z62vdZRtB+SPF1oQTxZWHO0Oelq6vLHK5A==}
-    peerDependencies:
-      '@effect-uai/core': '>=0.2.0 <1'
-      effect: 4.0.0-rc.117
-
-  '@effect-uai/core@0.17.0':
-    resolution: {integrity: sha512-KR5XE0HFoKelexeHMoyL+aZ5CfZd+e43jKQ492zWynTK5YsMVsCrQQ+3qKIFnmOs/p4P4QdShfK1BCNL3GvgrQ==}
+  '@effect/ai-anthropic@4.0.0-rc.117':
+    resolution: {integrity: sha512-UENH5wxqQud9NLlX2WqauiWuJ+Q9dBW2bOxMOsUJalZ0YdjbcK3LgNTZjrOR+0jPGTlBR9OIgF9qqFPZg6J0AA==}
     peerDependencies:
       effect: 4.0.0-rc.117
 
@@ -4609,14 +4597,8 @@ snapshots:
     transitivePeerDependencies:
       - '@algolia/client-search'
 
-  '@effect-uai/anthropic@0.17.0(@effect-uai/core@0.17.0(effect@4.0.0-rc.117))(effect@4.0.0-rc.117)':
+  '@effect/ai-anthropic@4.0.0-rc.117(effect@4.0.0-rc.117)':
     dependencies:
-      '@effect-uai/core': 0.17.0(effect@4.0.0-rc.117)
-      effect: 4.0.0-rc.117
-
-  '@effect-uai/core@0.17.0(effect@4.0.0-rc.117)':
-    dependencies:
-      '@standard-schema/spec': 1.1.0
       effect: 4.0.0-rc.117
 
   '@effect/atom-react@4.0.0-beta.107(effect@4.0.0-rc.117)(react@19.3.0)(scheduler@0.28.0)':
@@ -6364,7 +6346,7 @@ snapshots:
       '@testing-library/dom': 10.4.2
       '@testing-library/user-event': 14.6.7(@testing-library/dom@10.4.2)
       '@vitest/browser': 5.0.1(vite@8.3.0(@types/node@22.20.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))(vitest@5.0.1)
-      vitest: 5.0.1(@opentelemetry/api@1.9.1)(@types/node@22.20.4)(@vitest/browser-preview@5.0.1)(@vitest/ui@5.0.1)(vite@8.3.0(@types/node@22.20.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+      vitest: 5.0.1(@opentelemetry/api@1.9.1)(@types/node@22.20.4)(@vitest/browser-preview@5.0.1)(@vitest/ui@5.0.1(vitest@5.0.1))(vite@8.3.0(@types/node@22.20.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
     transitivePeerDependencies:
       - bufferutil
       - msw
@@ -6400,7 +6382,7 @@ snapshots:
       pngjs: 7.0.0
       sirv: 3.0.2
       tinyrainbow: 3.1.1
-      vitest: 5.0.1(@opentelemetry/api@1.9.1)(@types/node@22.20.4)(@vitest/browser-preview@5.0.1)(@vitest/ui@5.0.1)(vite@8.3.0(@types/node@22.20.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+      vitest: 5.0.1(@opentelemetry/api@1.9.1)(@types/node@22.20.4)(@vitest/browser-preview@5.0.1)(@vitest/ui@5.0.1(vitest@5.0.1))(vite@8.3.0(@types/node@22.20.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
       ws: 8.21.3
     transitivePeerDependencies:
       - bufferutil
@@ -8048,6 +8030,7 @@ snapshots:
       '@vitest/ui': 5.0.1(vitest@5.0.1)
     transitivePeerDependencies:
       - msw
+    optional: true
 
   vitest@5.0.1(@opentelemetry/api@1.9.1)(@types/node@22.20.4)(@vitest/browser-preview@5.0.1)(@vitest/ui@5.0.1)(vite@8.3.0(@types/node@22.20.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)):
     dependencies:

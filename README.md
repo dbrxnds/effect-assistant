@@ -20,10 +20,9 @@ An assistant with one tool, in memory, that answers a message. All it needs is
 walks through it.
 
 ```ts
-import * as Anthropic from "@effect-uai/anthropic/Anthropic"
-import * as Tool from "@effect-uai/core/Tool"
-import * as Toolkit from "@effect-uai/core/Toolkit"
-import { Assistant, AssistantEngine, AssistantEvent, ChatId, ChatLog, InputId } from "effect-assistant"
+import * as AnthropicClient from "@effect/ai-anthropic/AnthropicClient"
+import * as AnthropicLanguageModel from "@effect/ai-anthropic/AnthropicLanguageModel"
+import { Assistant, AssistantEngine, AssistantEvent, AssistantLoop, ChatId, ChatLog, InputId } from "effect-assistant"
 import * as Config from "effect/Config"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
@@ -31,41 +30,44 @@ import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import * as Tool from "effect/unstable/ai/Tool"
+import * as Toolkit from "effect/unstable/ai/Toolkit"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 
 // The definition: your server and UI import it for submit and subscribe.
 const MyAssistant = Assistant.make("my-assistant")
 
-const WeatherInput = Schema.Struct({ city: Schema.String })
-
-const weather = Tool.make({
-  name: "get_weather",
+// A native tool, and its handler.
+const GetWeather = Tool.make("get_weather", {
   description: "Current weather for a city.",
-  inputSchema: WeatherInput,
-  run: Effect.fn(function* ({ city }: typeof WeatherInput.Type) {
-    return { city, weather: "sunny, 21°C" }
-  })
+  parameters: Schema.Struct({ city: Schema.String }),
+  success: Schema.Struct({ city: Schema.String, weather: Schema.String })
+})
+
+const toolkit = AssistantLoop.tools(Toolkit.make(GetWeather), {
+  get_weather: ({ city }) => Effect.succeed({ city, weather: "sunny, 21°C" })
 })
 
 // The handler: every turn runs the agent loop.
 const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
-  turn.loop({
-    model: "claude-sonnet-5",
-    instructions: "You help a small team. Be brief.",
-    toolkit: Toolkit.make(weather)
-  })
+  turn.loop({ instructions: "You help a small team. Be brief.", toolkit })
 )
 
-const AnthropicLive = Layer.unwrap(
+// The model the loop calls.
+const ModelLive = Layer.unwrap(
   Effect.gen(function* () {
     const apiKey = yield* Config.Redacted("ANTHROPIC_API_KEY")
-    return Anthropic.layer({ apiKey }).pipe(Layer.provide(FetchHttpClient.layer))
+
+    return AnthropicLanguageModel.model("claude-sonnet-5").pipe(
+      Layer.provide(AnthropicClient.layer({ apiKey })),
+      Layer.provide(FetchHttpClient.layer)
+    )
   })
 )
 
 // The engine runs the chats and stores them in a log; both in memory here.
 const MyAssistantLive = MyAssistantHandlers.pipe(
-  Layer.provide(AnthropicLive),
+  Layer.provide(ModelLive),
   Layer.provideMerge(AssistantEngine.layerMemory),
   Layer.provideMerge(ChatLog.layerMemory)
 )
@@ -79,7 +81,7 @@ const program = Effect.gen(function* () {
     AssistantEvent.UserMessage.make({ id: yield* InputId.make, text: "What's the weather in Oslo?" })
   )
 
-  // The chat's events, stored ones first, then live ones.
+  // The chat's events, stored ones first, then live ones. The user sees only the assistant's messages.
   yield* MyAssistant.subscribe(chatId).pipe(
     Stream.takeUntil(({ event }) => Predicate.isTagged(event, "TurnCompleted")),
     Stream.runForEach(({ event }) =>

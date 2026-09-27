@@ -3,9 +3,8 @@
  * `realModel` is the Anthropic API, for the contract tests. It needs
  * ANTHROPIC_API_KEY (loaded from .env.local).
  */
-import * as Anthropic from "@effect-uai/anthropic/Anthropic"
-import type * as LanguageModel from "@effect-uai/core/LanguageModel"
-import type * as Toolkit from "@effect-uai/core/Toolkit"
+import * as AnthropicClient from "@effect/ai-anthropic/AnthropicClient"
+import * as AnthropicLanguageModel from "@effect/ai-anthropic/AnthropicLanguageModel"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -13,6 +12,7 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as Stream from "effect/Stream"
+import type * as LanguageModel from "effect/unstable/ai/LanguageModel"
 import * as TestRunner from "effect/unstable/cluster/TestRunner"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import {
@@ -26,13 +26,14 @@ import {
 } from "../src/index.ts"
 import { toJsonText } from "../src/internal/schema.ts"
 
-/** The Anthropic API, for the contract tests. */
-export const realModel = Anthropic.layer({
-  apiKey: Redacted.make(process.env.ANTHROPIC_API_KEY ?? "")
-}).pipe(Layer.provide(FetchHttpClient.layer))
-
 /** A small, fast model: the contract tests check behaviour, not wording. */
 export const testModel = "claude-haiku-4-5"
+
+/** The Anthropic API, for the contract tests, with prompt caching as an app would set it. */
+export const realModel = AnthropicLanguageModel.model(testModel, { cache_control: { type: "ephemeral" } }).pipe(
+  Layer.provide(AnthropicClient.layer({ apiKey: Redacted.make(process.env.ANTHROPIC_API_KEY ?? "") })),
+  Layer.provide(FetchHttpClient.layer)
+)
 
 /** The assistant most tests use: no blocks, no specialists. */
 export const TestAssistant = Assistant.make("test")
@@ -57,11 +58,9 @@ export const runEntity = <E, RIn>(handlers: Layer.Layer<never, E, RIn>, model: M
 
 /** A handler that runs the turn's loop with these options. */
 export const simple =
-  <Tools extends Toolkit.Toolkit = Record<never, never>, R = never>(
-    options: Omit<Assistant.LoopOptions<Tools, R>, "model">
-  ) =>
+  <RT = never, RS = never>(options: Assistant.LoopOptions<RT, RS>) =>
   (turn: Assistant.Turn) =>
-    turn.loop({ model: testModel, ...options })
+    turn.loop(options)
 
 /** An in-memory `TestAssistant` with this handler, its own event log, and this model. */
 export const memoryAssistant = (
@@ -88,9 +87,9 @@ export const traceEntries = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
         Predicate.isTagged(event, "UserMessage") || Predicate.isTagged(event, "AssistantMessage")
           ? event.text
           : Predicate.isTagged(event, "ModelOutput")
-            ? event.items.flatMap((item) => (item.type === "function_call" ? [item.name] : [])).join(",")
+            ? event.parts.flatMap((part) => (part.type === "tool-call" ? [part.name] : [])).join(",")
             : Predicate.isTagged(event, "ToolResult")
-              ? `${event.tool}: ${event.output.slice(0, 80)}`
+              ? `${event.tool}: ${toJsonText(event.result).slice(0, 80)}`
               : Predicate.isTagged(event, "Fact")
                 ? toJsonText(event.payload).slice(0, 120)
                 : ""

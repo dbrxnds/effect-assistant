@@ -162,7 +162,7 @@ export const staleBlocks = (
  * ```ts
  * const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
  *   Stream.unwrap(
- *     BlockKit.closeStale({ messages: 3 }).pipe(Effect.as(turn.loop({ model: "claude-sonnet-5", instructions })))
+ *     BlockKit.closeStale({ messages: 3 }).pipe(Effect.as(turn.loop({ instructions })))
  *   )
  * )
  * ```

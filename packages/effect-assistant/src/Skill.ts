@@ -23,11 +23,15 @@
  *
  * @since 0.1.0
  */
-import * as Tool from "@effect-uai/core/Tool"
-import * as Toolkit from "@effect-uai/core/Toolkit"
+import type * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import * as Tool from "effect/unstable/ai/Tool"
+import * as Toolkit from "effect/unstable/ai/Toolkit"
+import type * as AssistantLoop from "./AssistantLoop.ts"
 import * as Instructions from "./Instructions.ts"
+import * as Toolkits from "./internal/toolkit.ts"
+import * as ToolFailure from "./ToolFailure.ts"
 
 /**
  * A skill. `R` is what its instructions need when they're loaded.
@@ -78,31 +82,36 @@ export const withCatalog = <R>(prompt: string, skills: ReadonlyArray<Skill<R>>):
       ].join("\n")
 
 /**
- * Returns the `load_skill` tool for these skills, or an empty toolkit when
- * there are none.
+ * Returns the `load_skill` tool for these skills, or no tools when there are
+ * none.
  *
  * @category constructors
  * @since 0.1.0
  */
-export const toolkit = <R>(skills: ReadonlyArray<Skill<R>>): Toolkit.Toolkit => {
-  if (skills.length === 0) return {}
+export const toolkit = <R>(skills: ReadonlyArray<Skill<R>>): AssistantLoop.Tools<R> => {
+  if (skills.length === 0) return Toolkits.empty
 
   const byName = new Map(skills.map((skill) => [skill.name, skill]))
-  const Input = Schema.Struct({ name: Schema.Literals(skills.map((skill) => skill.name)) })
 
-  return Toolkit.make(
-    Tool.make({
-      name: "load_skill",
-      description:
-        "Load a skill's instructions by name, in the same step as your first lookups (not in a step of its own). Follow them for the rest of the task.",
-      inputSchema: Input,
-      run: Effect.fn(function* ({ name }: typeof Input.Type) {
-        const skill = byName.get(name)
+  const LoadSkill = Tool.make("load_skill", {
+    description:
+      "Load a skill's instructions by name, in the same step as your first lookups (not in a step of its own). Follow them for the rest of the task.",
+    parameters: Schema.Struct({ name: Schema.Literals(skills.map((skill) => skill.name)) }),
+    success: Schema.String,
+    failure: ToolFailure.ToolFailure
+  })
 
-        if (skill === undefined) return yield* Tool.fail(`No skill named ${name}.`)
+  // A skill's instructions resolve with the services of the loop that loads it.
+  return Toolkits.withContext(Toolkit.make(LoadSkill), (context: Context.Context<R>) => ({
+    load_skill: ({ name }) => {
+      const skill = byName.get(name)
 
-        return (yield* Instructions.resolve(skill.instructions)).text
-      })
-    })
-  )
+      return skill === undefined
+        ? ToolFailure.fail(`No skill named ${name}.`)
+        : Instructions.resolve(skill.instructions).pipe(
+            Effect.map((resolved) => resolved.text),
+            Effect.provideContext(context)
+          )
+    }
+  }))
 }

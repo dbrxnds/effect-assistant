@@ -9,8 +9,6 @@
  * with its own prompts and tools; the mechanics are tested on a scripted
  * model in the other files.
  */
-import * as Tool from "@effect-uai/core/Tool"
-import * as Toolkit from "@effect-uai/core/Toolkit"
 import { describe, expect, it } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -18,10 +16,14 @@ import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import * as Response from "effect/unstable/ai/Response"
+import * as Tool from "effect/unstable/ai/Tool"
+import * as Toolkit from "effect/unstable/ai/Toolkit"
 import {
   Assistant,
   AssistantEngine,
   AssistantEvent,
+  AssistantLoop,
   AssistantToolCall,
   Block,
   BlockKit,
@@ -41,7 +43,6 @@ import {
   say,
   simple,
   TestAssistant,
-  testModel,
   text,
   toolsRun,
   traceEntries,
@@ -50,11 +51,14 @@ import {
 
 const instructions = "You help a small team. Be brief."
 
-const weather = Tool.make({
-  name: "get_weather",
+const GetWeather = Tool.make("get_weather", {
   description: "Current weather for a city.",
-  inputSchema: Schema.Struct({ city: Schema.String }),
-  run: ({ city }) => Effect.succeed({ city, weather: "hail, 3 degrees celsius" })
+  parameters: Schema.Struct({ city: Schema.String }),
+  success: Schema.Struct({ city: Schema.String, weather: Schema.String })
+})
+
+const weather = AssistantLoop.tools(Toolkit.make(GetWeather), {
+  get_weather: ({ city }) => Effect.succeed({ city, weather: "hail, 3 degrees celsius" })
 })
 
 describe("with a real model", () => {
@@ -78,17 +82,17 @@ describe("with a real model", () => {
       expect(failures(entries), traceEntries(entries)).toEqual([])
       expect(toolsRun(entries)).toContain("get_weather")
       expect(text(entries)).toContain("hail")
-    }).pipe(Effect.provide(memoryAssistant(simple({ instructions, toolkit: Toolkit.make(weather) }), realModel)))
+    }).pipe(Effect.provide(memoryAssistant(simple({ instructions, toolkit: weather }), realModel)))
   )
 
   // The loop only waited; the reply pass runs the real model, with wait in its history.
   const waitedOnly = (turn: Assistant.Turn) =>
     Stream.make(
       AssistantEvent.ModelOutput.make({
-        items: [{ type: "function_call", call_id: "wait-1", name: "wait", arguments: "{}" }]
+        parts: [Response.makePart("tool-call", { id: "wait-1", name: "wait", params: {}, providerExecuted: false })]
       }),
-      AssistantEvent.ToolResult.make({ callId: "wait-1", tool: "wait", output: "waiting" })
-    ).pipe(Stream.concat(turn.replyIfOwed({ model: testModel, instructions })))
+      AssistantEvent.ToolResult.make({ callId: "wait-1", tool: "wait", outcome: "success", result: "waiting" })
+    ).pipe(Stream.concat(turn.replyIfOwed({ instructions })))
 
   it.live("replies in the reply pass, which forces send_user_message", () =>
     Effect.gen(function* () {
@@ -108,9 +112,7 @@ describe("with a real model", () => {
 
     const layer = runMemory(
       ResearchAssistant.toLayer(simple({ instructions })).pipe(
-        Layer.provide(
-          Research.toLayer((run) => run.loop({ model: testModel, instructions: "Answer in one sentence." }))
-        )
+        Layer.provide(Research.toLayer((run) => run.loop({ instructions: "Answer in one sentence." })))
       ),
       realModel
     )
@@ -162,11 +164,14 @@ describe("with a real model", () => {
       const ran = yield* Deferred.make<string>()
       const Resumer = Assistant.make("contract-resumer")
 
-      const sendReport = Tool.make({
-        name: "send_report",
+      const SendReport = Tool.make("send_report", {
         description: "Sends the weekly report.",
-        inputSchema: Tool.noInput,
-        run: () =>
+        success: Schema.String,
+        dependencies: [AssistantToolCall.AssistantToolCall]
+      })
+
+      const sendReport = AssistantLoop.tools(Toolkit.make(SendReport), {
+        send_report: () =>
           Effect.gen(function* () {
             yield* Deferred.succeed(ran, (yield* AssistantToolCall.AssistantToolCall).callId)
 
@@ -179,13 +184,20 @@ describe("with a real model", () => {
         say("Send the weekly report."),
         AssistantEvent.TurnStarted.make({ assistant: "contract-resumer" }),
         AssistantEvent.ModelOutput.make({
-          items: [{ type: "function_call", call_id: "toolu_report_1", name: "send_report", arguments: "{}" }],
+          parts: [
+            Response.makePart("tool-call", {
+              id: "toolu_report_1",
+              name: "send_report",
+              params: {},
+              providerExecuted: false
+            })
+          ],
           seenThroughSeq: 2
         }),
         AssistantEvent.ToolStarted.make({ callId: "toolu_report_1", tool: "send_report" })
       ])
 
-      const layer = Resumer.toLayer(simple({ instructions, toolkit: Toolkit.make(sendReport) })).pipe(
+      const layer = Resumer.toLayer(simple({ instructions, toolkit: sendReport })).pipe(
         Layer.provideMerge(AssistantEngine.layerMemory),
         Layer.provide(realModel)
       )

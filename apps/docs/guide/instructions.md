@@ -8,7 +8,7 @@ specialist's, to `run.loop`): text, or [`Instructions.Resolved`](/api/Instructio
 
 ```ts
 const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
-  turn.loop({ model: "claude-sonnet-5", instructions: "You are a colleague on the marketing team." })
+  turn.loop({ instructions: "You are a colleague on the marketing team." })
 )
 ```
 
@@ -35,10 +35,7 @@ const MyAssistantHandlers = MyAssistant.toLayer(
     return Effect.fn(function* (turn: Assistant.Turn) {
       const user = yield* users.forChat(turn.chatId)
 
-      return turn.loop({
-        model: "claude-sonnet-5",
-        instructions: `You are a colleague of ${user.name} on the marketing team.`
-      })
+      return turn.loop({ instructions: `You are a colleague of ${user.name} on the marketing team.` })
     })
   })
 )
@@ -120,11 +117,7 @@ const MyAssistantHandlers = MyAssistant.toLayer(
     const prompts = yield* Prompts
 
     return Effect.fn(function* (turn: Assistant.Turn) {
-      return turn.loop({
-        model: "claude-sonnet-5",
-        instructions: yield* prompts.get("my-assistant"),
-        skills: [ordering]
-      })
+      return turn.loop({ instructions: yield* prompts.get("my-assistant"), skills: [ordering] })
     })
   })
 )

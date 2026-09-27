@@ -22,36 +22,36 @@ and a tool call required at every step, followed by `turn.replyIfOwed`.
 
 ## A loop of your own
 
-`AssistantLoop.step(options, then)` is one step, as a body for effect-uai's
-`Loop.loop`. It calls the model with the current history and emits its
-`ModelOutput`, then runs the tool calls and emits a `ToolStarted` and a
-`ToolResult` for each. `then` gets `{ output, done }` and returns
-`Loop.next(state)` or `Loop.stop()`. `done` means the model made no tool calls,
-or ended its turn (`wait`, or a message with `wait: true`) and none of the
-step's calls failed.
+`AssistantLoop.step(options, then)` is one step, as a body for
+`AssistantLoop.loop`. It calls the model (the `LanguageModel` in context) with
+the current history and emits its `ModelOutput`, then runs the tool calls and
+emits a `ToolStarted` and a `ToolResult` for each. `then` gets
+`{ output, done }` and returns `AssistantLoop.next(state)` or
+`AssistantLoop.stop()`. `done` means the model made no tool calls, or ended
+its turn (`wait`, or a message with `wait: true`) and none of the step's
+calls failed.
 
 **Example** (At most 12 steps)
 
 ```ts
-import * as Loop from "@effect-uai/core/Loop"
 import { AssistantLoop } from "effect-assistant"
 import * as Stream from "effect/Stream"
 
 const instructions = "You help a small marketing team."
 
 const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
-  Loop.loop({ steps: 0 }, (state) =>
+  AssistantLoop.loop({ steps: 0 }, (state) =>
     AssistantLoop.step(
       {
-        model: "claude-sonnet-5",
         instructions: turn.instructions(instructions),
-        toolkit: { ...turn.tools, ...toolkit },
+        toolkit: AssistantLoop.merge(turn.tools, toolkit),
         history: turn.history(),
         toolChoice: "required"
       },
-      (result) => (result.done || state.steps >= 12 ? Loop.stop() : Loop.next({ steps: state.steps + 1 }))
+      (result) =>
+        result.done || state.steps >= 12 ? AssistantLoop.stop() : AssistantLoop.next({ steps: state.steps + 1 })
     )
-  ).pipe(Stream.concat(turn.replyIfOwed({ model: "claude-sonnet-5", instructions })))
+  ).pipe(Stream.concat(turn.replyIfOwed({ instructions })))
 )
 ```
 
@@ -66,7 +66,7 @@ The loop's state is yours: step limits, budgets, anything `then` decides on.
 
 ## End with replyIfOwed
 
-`turn.replyIfOwed({ model, instructions })` runs one more pass when the user's
+`turn.replyIfOwed({ instructions })` runs one more pass when the user's
 latest message has no reply and nothing arrived after the loop's last read.
 That pass can only call `send_user_message`. When no reply is owed, it's
 empty. Pass it the same instructions as the loop; it adds `Instructions.protocol`
@@ -80,7 +80,8 @@ reply."). See [a reply to every message](./turns#a-reply-to-every-message).
 
 A history view picks which of the chat's entries the model reads, and what
 goes with them. It gets the entries and returns entries (the model reads them
-as usual) and history items (it reads them as they are), in order. Pass it to
+as usual) and prompt messages (`effect/unstable/ai/Prompt`, which it reads as
+they are), in order. Pass it to
 the loop as `history`, or to `turn.history(view)` in a loop of your own.
 
 **Example** (Keep the last 10 turns)
@@ -96,9 +97,7 @@ const lastTurns =
     return entries.slice(starts.at(-turns) ?? 0)
   }
 
-const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
-  turn.loop({ model: "claude-sonnet-5", instructions, history: lastTurns(10) })
-)
+const MyAssistantHandlers = MyAssistant.toLayer((turn) => turn.loop({ instructions, history: lastTurns(10) }))
 ```
 
 Cut the entries just after a turn ended: a turn closes its tool calls before
@@ -126,19 +125,22 @@ The view starts at the last summary: its text first, then the entries after
 it. When that grows past a size, the handler appends a new summary before it
 runs the loop.
 
-**Example** (Summarize past 200 history items)
+**Example** (Summarize past 200 messages)
 
 ```ts
-import * as Items from "@effect-uai/core/Items"
 import type { Assistant } from "effect-assistant"
 import * as Effect from "effect/Effect"
+import * as Prompt from "effect/unstable/ai/Prompt"
 
 const sinceSummary: Assistant.HistoryView<Summary> = (entries) => {
   const last = entries.findLast(({ event }) => event instanceof Summary)
 
   return last === undefined || !(last.event instanceof Summary)
     ? entries
-    : [Items.userText(`Earlier in this chat: ${last.event.text}`), ...entries.filter(({ seq }) => seq > last.seq)]
+    : [
+        ...Prompt.make(`Earlier in this chat: ${last.event.text}`).content,
+        ...entries.filter(({ seq }) => seq > last.seq)
+      ]
 }
 
 const MyAssistantHandlers = MyAssistant.toLayer(
@@ -150,7 +152,7 @@ const MyAssistantHandlers = MyAssistant.toLayer(
 
       if (history.length > 200) yield* turn.append(Summary.make({ text: yield* summarizer.summarize(history) }))
 
-      return turn.loop({ model: "claude-sonnet-5", instructions, history: sinceSummary })
+      return turn.loop({ instructions, history: sinceSummary })
     })
   })
 )

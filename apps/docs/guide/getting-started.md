@@ -5,11 +5,12 @@ Everything runs in one process; all you need is an Anthropic API key.
 
 ## Install
 
-`effect` and `@effect-uai/core` are peer dependencies: your app brings its own,
-so there's one copy of each. Add a model provider too, here `@effect-uai/anthropic`.
+`effect` is a peer dependency: your app brings its own, so there's one copy.
+The library runs on Effect's AI modules (`effect/unstable/ai`); add a model
+provider for them, here `@effect/ai-anthropic`.
 
 ```bash
-pnpm add effect-assistant effect@4.0.0-rc.117 @effect-uai/core@0.17.0 @effect-uai/anthropic@0.17.0
+pnpm add effect-assistant effect@4.0.0-rc.117 @effect/ai-anthropic@4.0.0-rc.117
 ```
 
 ## Define an assistant
@@ -17,7 +18,8 @@ pnpm add effect-assistant effect@4.0.0-rc.117 @effect-uai/core@0.17.0 @effect-ua
 **Example** (A first assistant)
 
 ```ts
-import * as Anthropic from "@effect-uai/anthropic/Anthropic"
+import * as AnthropicClient from "@effect/ai-anthropic/AnthropicClient"
+import * as AnthropicLanguageModel from "@effect/ai-anthropic/AnthropicLanguageModel"
 import { Assistant, AssistantEngine, ChatLog } from "effect-assistant"
 import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
@@ -29,20 +31,24 @@ export const MyAssistant = Assistant.make("my-assistant")
 
 // The handler: every turn runs the agent loop with these instructions.
 const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
-  turn.loop({ model: "claude-sonnet-5", instructions: "You help a small marketing team. Be brief." })
+  turn.loop({ instructions: "You help a small marketing team. Be brief." })
 )
 
-// The model API: effect-uai's Anthropic layer provides `LanguageModel`.
-const AnthropicLive = Layer.unwrap(
+// The model: a `LanguageModel`, here Anthropic's. The loop calls whichever one the layer is given.
+const ModelLive = Layer.unwrap(
   Effect.gen(function* () {
     const apiKey = yield* Config.Redacted("ANTHROPIC_API_KEY")
-    return Anthropic.layer({ apiKey }).pipe(Layer.provide(FetchHttpClient.layer))
+
+    return AnthropicLanguageModel.model("claude-sonnet-5").pipe(
+      Layer.provide(AnthropicClient.layer({ apiKey })),
+      Layer.provide(FetchHttpClient.layer)
+    )
   })
 )
 
-// The handler on an engine, with an event log and the model API. All in memory.
+// The handler on an engine, with an event log and the model. All in memory.
 export const MyAssistantLive = MyAssistantHandlers.pipe(
-  Layer.provide(AnthropicLive),
+  Layer.provide(ModelLive),
   Layer.provideMerge(AssistantEngine.layerMemory),
   Layer.provideMerge(ChatLog.layerMemory)
 )
@@ -98,41 +104,38 @@ events, and shows a working indicator while
 [`AssistantActivity`](./events#what-is-working) says something is working.
 
 ::: tip The assistant talks only through a tool
-The model's plain text never reaches the user. It sends a message by calling
+The model's plain text never reaches the user, and neither do its tool calls
+or their results: they're its own work. It sends a message by calling
 `send_user_message`, so it decides what the user hears. See [turns](./turns).
 :::
 
 ## Give it a tool
 
-Tools are [effect-uai](https://github.com/betalyra/effect-uai) tools: a name,
-a description, an input schema, and an Effect to run. Pass them to
-`turn.loop` as a `toolkit`.
+Tools are Effect's own (`effect/unstable/ai/Tool`): a name, a description,
+schemas for the parameters and the result, and a handler. `AssistantLoop.tools`
+turns a toolkit and its handlers into tools for `turn.loop`.
 
 **Example** (A weather tool)
 
 ```ts
-import * as Tool from "@effect-uai/core/Tool"
-import * as Toolkit from "@effect-uai/core/Toolkit"
+import { AssistantLoop } from "effect-assistant"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import * as Tool from "effect/unstable/ai/Tool"
+import * as Toolkit from "effect/unstable/ai/Toolkit"
 
-const WeatherInput = Schema.Struct({ city: Schema.String })
-
-const weather = Tool.make({
-  name: "get_weather",
+const GetWeather = Tool.make("get_weather", {
   description: "Current weather for a city.",
-  inputSchema: WeatherInput,
-  run: Effect.fn(function* ({ city }: typeof WeatherInput.Type) {
-    return { city, weather: "sunny, 21°C" }
-  })
+  parameters: Schema.Struct({ city: Schema.String }),
+  success: Schema.Struct({ city: Schema.String, weather: Schema.String })
+})
+
+const toolkit = AssistantLoop.tools(Toolkit.make(GetWeather), {
+  get_weather: ({ city }) => Effect.succeed({ city, weather: "sunny, 21°C" })
 })
 
 const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
-  turn.loop({
-    model: "claude-sonnet-5",
-    instructions: "You help a small marketing team. Be brief.",
-    toolkit: Toolkit.make(weather)
-  })
+  turn.loop({ instructions: "You help a small marketing team. Be brief.", toolkit })
 )
 ```
 

@@ -9,7 +9,9 @@
  * - What the user sees: {@link AssistantMessage}, optionally with a
  *   {@link MessageBlock}.
  * - What the model did: {@link ModelOutput}, then {@link ToolStarted} and
- *   {@link ToolResult} for each tool call.
+ *   {@link ToolResult} for each tool call. These are the assistant's own
+ *   work: a chat UI shows the user only `AssistantMessage`s (and whether the
+ *   assistant is working).
  * - Turn bookkeeping: {@link TurnStarted}, {@link TurnCompleted},
  *   {@link TurnFailed}.
  * - Specialist runs: {@link SpecialistStarted}, {@link SpecialistFinished}. A
@@ -22,16 +24,24 @@
  * Turns and specialist runs are the chat's activity: each opens with one event
  * and closes with another (see `AssistantActivity`).
  *
+ * **Versioning**
+ *
+ * A log is kept for good, so an event's stored form is versioned. An event
+ * with a `format` field is at that format; one without is at format 1. A
+ * change to what an event stores gives it the next format, and its schema
+ * goes on decoding every earlier one, migrated to the new form, so an old
+ * log reads as it did. {@link ModelOutput} and {@link ToolResult} are at
+ * format 2, `effect/unstable/ai`'s response parts and a tool's encoded result;
+ * their format 1 (history items, and results as text) came before the first
+ * release and isn't read.
+ *
  * @since 0.1.0
  */
-// The history items' declarations name effect-uai's `ImageSource`: importing its module lets ours name it too.
-import type {} from "@effect-uai/core/Image"
-import * as Items from "@effect-uai/core/Items"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
+import * as Response from "effect/unstable/ai/Response"
 import { ChatId } from "./ChatId.ts"
 import { InputId } from "./InputId.ts"
-import * as InternalSchema from "./internal/schema.ts"
 import { RunId } from "./RunId.ts"
 
 /**
@@ -166,24 +176,69 @@ export class AssistantMessage extends Schema.TaggedClass<AssistantMessage>()("As
   closes: Schema.optional(Schema.Array(Schema.String))
 }) {}
 
-// effect-uai's `HistoryItem` schema declares `unknown` services for its content
-// blocks, but the items are plain JSON. Dropping them keeps events JSON- and
-// RPC-encodable.
-const HistoryItems = InternalSchema.withoutServices(Schema.Array(Items.HistoryItem))
+/**
+ * Schema for a tool call the model made: `effect/unstable/ai`'s tool call
+ * part (`Response.ToolCallPart`) for any tool, with its params in JSON, as the
+ * model wrote them.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export const ToolCallPart = Schema.Struct({
+  ...Response.ToolCallPart("", Schema.Json).fields,
+  name: Schema.String
+}).annotate({ identifier: "ToolCallPart" })
 
 /**
- * The items of one model call: text, and tool calls.
+ * A tool call the model made.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type ToolCallPart = typeof ToolCallPart.Type
+
+/**
+ * Schema for what the log keeps of a model call: `effect/unstable/ai`'s
+ * response parts for text, reasoning (with the provider's metadata, like a
+ * thinking block's signature), and tool calls.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export const ModelPart = Schema.Union([Response.TextPart, Response.ReasoningPart, ToolCallPart])
+
+/**
+ * A part of a model call's output.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type ModelPart = typeof ModelPart.Type
+
+/**
+ * What one model call wrote: text, reasoning, and tool calls, as response
+ * parts. `Prompt.fromResponseParts` turns them into history.
  *
  * @category models
  * @since 0.1.0
  */
 export class ModelOutput extends Schema.TaggedClass<ModelOutput>()("ModelOutput", {
-  items: HistoryItems,
+  /** The stored form's version (see "Versioning" above). */
+  format: Schema.tag(2),
+  parts: Schema.Array(ModelPart),
   /**
    * The last entry the model had read when it wrote this. Inputs after it
    * arrived while the model was working.
    */
-  seenThroughSeq: Schema.optional(Schema.Int)
+  seenThroughSeq: Schema.optional(Schema.Int),
+  /** The model that wrote it: the provider's id for it, or the name the context gave it. */
+  model: Schema.optional(Schema.String),
+  /** The provider's id for the response, when it gives one. */
+  responseId: Schema.optional(Schema.String),
+  /** The call's tokens: input (with the cache's reads and writes) and output. */
+  usage: Schema.optional(Response.Usage),
+  /** How long the call took, in milliseconds. */
+  durationMillis: Schema.optional(Schema.Finite)
 }) {}
 
 /**
@@ -200,15 +255,38 @@ export class ToolStarted extends Schema.TaggedClass<ToolStarted>()("ToolStarted"
 }) {}
 
 /**
- * The output of one tool call, as the model sees it.
+ * Schema for how a tool call went: `"success"`, or `"failure"`, which the
+ * model reads as an error.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export const ToolOutcome = Schema.Literals(["success", "failure"])
+
+/**
+ * How a tool call went.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type ToolOutcome = typeof ToolOutcome.Type
+
+/**
+ * The result of one tool call, as the model reads it: the tool's success or
+ * failure in its encoded (JSON) form, and which one it is. A failure says its
+ * kind when it has one: a `ToolFailure`'s `kind`, or its tag.
  *
  * @category models
  * @since 0.1.0
  */
 export class ToolResult extends Schema.TaggedClass<ToolResult>()("ToolResult", {
+  /** The stored form's version (see "Versioning" above). */
+  format: Schema.tag(2),
   callId: Schema.String,
   tool: Schema.String,
-  output: Schema.String
+  outcome: ToolOutcome,
+  result: Schema.Json,
+  kind: Schema.optional(Schema.String)
 }) {}
 
 /**
@@ -219,7 +297,9 @@ export class ToolResult extends Schema.TaggedClass<ToolResult>()("ToolResult", {
  */
 export class TurnStarted extends Schema.TaggedClass<TurnStarted>()("TurnStarted", {
   /** The assistant that runs it. */
-  assistant: Schema.String
+  assistant: Schema.String,
+  /** The id of the turn's trace, when a tracer records it (not Effect's own, which exports nothing). */
+  traceId: Schema.optional(Schema.String)
 }) {}
 
 /**

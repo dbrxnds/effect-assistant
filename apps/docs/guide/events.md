@@ -22,17 +22,25 @@ Each event is stored as an `AssistantEvent.Entry`: the chat id, a `seq`
 
 ## Events
 
-| Event                                        | Meaning                                                                                                           |
-| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `UserMessage`                                | Text the user typed.                                                                                              |
-| `BlockAnswer`                                | The user used a [block](./blocks).                                                                                |
-| `Fact`                                       | Something the assistant should know that the user didn't type: a workflow step, a specialist's answer, a webhook. |
-| `AssistantMessage`                           | A message the assistant sent, optionally with a block.                                                            |
-| `ModelOutput`, `ToolStarted`, `ToolResult`   | What the model did in each step, then each tool call as it starts and its result.                                 |
-| `TurnStarted`, `TurnCompleted`, `TurnFailed` | [Turn](./turns) bookkeeping.                                                                                      |
-| `SpecialistStarted`, `SpecialistFinished`    | A [specialist](./specialists) run working, and done; a finished run's report wakes a turn.                        |
-| `BlocksClosed`                               | [Blocks](./blocks) closed without an answer.                                                                      |
-| Your own events and inputs                   | [Yours](#your-own-events-and-inputs), like a summary or an uploaded file, stored as themselves.                   |
+| Event                                        | Meaning                                                                                                                  |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `UserMessage`                                | Text the user typed.                                                                                                     |
+| `BlockAnswer`                                | The user used a [block](./blocks).                                                                                       |
+| `Fact`                                       | Something the assistant should know that the user didn't type: a workflow step, a specialist's answer, a webhook.        |
+| `AssistantMessage`                           | A message the assistant sent, optionally with a block.                                                                   |
+| `ModelOutput`, `ToolStarted`, `ToolResult`   | The assistant's own work, which the user doesn't see: each model step, then each tool call as it starts, and its result. |
+| `TurnStarted`, `TurnCompleted`, `TurnFailed` | [Turn](./turns) bookkeeping.                                                                                             |
+| `SpecialistStarted`, `SpecialistFinished`    | A [specialist](./specialists) run working, and done; a finished run's report wakes a turn.                               |
+| `BlocksClosed`                               | [Blocks](./blocks) closed without an answer.                                                                             |
+| Your own events and inputs                   | [Yours](#your-own-events-and-inputs), like a summary or an uploaded file, stored as themselves.                          |
+
+A `ModelOutput` is one model call: its response parts (text, reasoning, and
+tool calls, as `effect/unstable/ai`'s `Response` parts), the model, the
+provider's response id, the tokens it used (with the cache's reads and
+writes), and how long it took. A `ToolResult` is a call's `outcome`
+(`"success"` or `"failure"`), its `result` in JSON, and a failure's `kind`.
+`TurnStarted` has the turn's trace id when a tracer records it, to go from
+the log to the trace.
 
 The first three are **inputs**: submitting one starts a turn, or joins the
 one that is running. A chat client may submit `UserMessage` and

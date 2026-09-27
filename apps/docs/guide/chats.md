@@ -59,12 +59,13 @@ The handler looks the user up from `turn.chatId`, in the same table, and
 provides what its tools need to its loop:
 
 ```ts
-import * as Tool from "@effect-uai/core/Tool"
-import * as Toolkit from "@effect-uai/core/Toolkit"
-import type { ChatId } from "effect-assistant"
+import { AssistantLoop, type ChatId } from "effect-assistant"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import * as Tool from "effect/unstable/ai/Tool"
+import * as Toolkit from "effect/unstable/ai/Toolkit"
 
 interface User {
   readonly name: string
@@ -81,12 +82,16 @@ export class ChatUsers extends Context.Service<
   }
 >()("app/ChatUsers") {}
 
-const greet = Tool.make({
-  name: "greet",
+// The tool declares what its handler uses at call time.
+const Greet = Tool.make("greet", {
   description: "Greets the current user.",
-  inputSchema: Tool.noInput,
-  run: () => Effect.map(CurrentUser, (user) => `hi ${user.name}`)
+  success: Schema.String,
+  dependencies: [CurrentUser]
 })
+
+const greet = () => CurrentUser.useSync((user) => `hi ${user.name}`)
+
+const toolkit = AssistantLoop.tools(Toolkit.make(Greet), { greet })
 
 const MyAssistantLive = MyAssistant.toLayer(
   Effect.gen(function* () {
@@ -95,13 +100,7 @@ const MyAssistantLive = MyAssistant.toLayer(
     return (turn) =>
       Stream.unwrap(
         Effect.map(users.forChat(turn.chatId), (user) =>
-          turn
-            .loop({
-              model: "claude-sonnet-5",
-              instructions: `You help ${user.name}.`,
-              toolkit: Toolkit.make(greet)
-            })
-            .pipe(Stream.provideService(CurrentUser, user))
+          turn.loop({ instructions: `You help ${user.name}.`, toolkit }).pipe(Stream.provideService(CurrentUser, user))
         )
       )
   })
@@ -138,9 +137,10 @@ const MyAssistantLive = MyAssistant.toLayer(
         Effect.map(users.forChat(turn.chatId), (user) =>
           turn
             .loop({
-              model: "claude-sonnet-5",
               instructions,
-              toolkit: user.admin ? Toolkit.make(adminReport, greet) : Toolkit.make(greet)
+              toolkit: user.admin
+                ? AssistantLoop.tools(Toolkit.make(AdminReport, Greet), { admin_report: adminReport, greet })
+                : AssistantLoop.tools(Toolkit.make(Greet), { greet })
             })
             .pipe(Stream.provideService(CurrentUser, user))
         )
@@ -164,21 +164,21 @@ handler does the same lookup from `run.chatId`:
 const ResearchLive = Research.toLayer(
   Effect.gen(function* () {
     const users = yield* ChatUsers
+    const toolkit = AssistantLoop.tools(yield* OrderTools)
 
     return (run) =>
       Stream.unwrap(
         Effect.map(users.forChat(run.chatId), (user) =>
           run
             .loop({
-              model: "claude-sonnet-5",
               instructions: "Answer with the findings and numbers the colleague needs, in a few short lines.",
-              toolkit: Toolkit.make(orderHistory)
+              toolkit
             })
             .pipe(Stream.provideService(CurrentUser, user))
         )
       )
   })
-)
+).pipe(Layer.provide(OrderToolsLive))
 ```
 
 The turn for its answer is in the same chat, so it finds the same user.

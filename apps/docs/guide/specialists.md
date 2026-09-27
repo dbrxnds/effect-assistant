@@ -9,26 +9,30 @@ A specialist has two parts, like a workflow:
 - a **definition**, with `Specialist.make`: its name, and when to use it
   (the assistant sees this).
 - a **handler**, with `toLayer`: a function of the run that returns its loop,
-  usually `run.loop({ model, instructions, toolkit })`.
+  usually `run.loop({ instructions, toolkit })`.
 
 **Example** (A research specialist)
 
 ```ts
-import * as Toolkit from "@effect-uai/core/Toolkit"
-import { Assistant, Specialist } from "effect-assistant"
+import { Assistant, AssistantLoop, Specialist } from "effect-assistant"
+import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 
 const Research = Specialist.make("research", {
   description: "Researches past campaigns and orders. Give it the question and any context."
 })
 
-const ResearchLive = Research.toLayer((run) =>
-  run.loop({
-    model: "claude-sonnet-5",
-    instructions: "Answer with the findings and numbers the colleague needs, in a few short lines.",
-    toolkit: Toolkit.make(similarCampaigns, orderHistory)
+const ResearchLive = Research.toLayer(
+  Effect.gen(function* () {
+    const toolkit = AssistantLoop.tools(yield* ResearchTools) // a native toolkit
+
+    return (run) =>
+      run.loop({
+        instructions: "Answer with the findings and numbers the colleague needs, in a few short lines.",
+        toolkit
+      })
   })
-)
+).pipe(Layer.provide(ResearchToolsLive))
 
 // The assistant lists it, and its toLayer needs ResearchLive.
 const MyAssistant = Assistant.make("my-assistant", { specialists: [Research] })
@@ -89,9 +93,12 @@ so instructions, tools, the model, and limits are just code.
 **Example** (At most three reports at a time)
 
 ```ts
+import * as AnthropicLanguageModel from "@effect/ai-anthropic/AnthropicLanguageModel"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import * as Semaphore from "effect/Semaphore"
 import * as Stream from "effect/Stream"
+import * as Toolkit from "effect/unstable/ai/Toolkit"
 
 const Analyst = Specialist.make("analyst", {
   description: "Writes reports on spend, budgets, and campaigns."
@@ -108,19 +115,20 @@ const AnalystLive = Analyst.toLayer(
           yield* Effect.acquireRelease(permits.take(1), () => permits.release(1))
 
           return run.loop({
-            model: "claude-haiku-4-5", // any model the LanguageModel layer serves
             instructions: "Write the report the colleague asked for, with the numbers.",
-            toolkit: Toolkit.make(spendReport),
+            toolkit: AssistantLoop.tools(Toolkit.make(SpendReport), { spend_report: spendReport }),
             maxSteps: 12 // model calls per brief; default 8
           })
         })
       )
   })
-)
+).pipe(Layer.provide(AnthropicLanguageModel.model("claude-haiku-4-5"))) // a model of its own
 ```
 
-- `run.loop` takes `model`, `instructions`, `toolkit`, `skills` (its own
+- `run.loop` takes `instructions`, `toolkit`, `skills` (its own
   [catalog](./skills)), and `maxSteps`.
+- A run calls the assistant's `LanguageModel`, unless the specialist's layer
+  is given one of its own, as here.
 - The handler may use the run's services (`Specialist.RunServices`) and what
   its build Effect required, as an assistant's handler does (see
   [what a handler may use](./assistant#what-a-handler-may-use)).

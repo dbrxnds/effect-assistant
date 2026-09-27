@@ -45,8 +45,7 @@
     "test:contract": "vp test run test/contract.test.ts"
   },
   "devDependencies": {
-    "@effect-uai/anthropic": "0.17.0",
-    "@effect-uai/core": "0.17.0",
+    "@effect/ai-anthropic": "4.0.0-rc.117",
     "@effect/vitest": "4.0.0-rc.117",
     "@types/node": "^22.15.3",
     "effect": "4.0.0-rc.117",
@@ -55,7 +54,6 @@
     "vitest": "catalog:"
   },
   "peerDependencies": {
-    "@effect-uai/core": "^0.17.0",
     "effect": "^4.0.0-rc.117"
   }
 }

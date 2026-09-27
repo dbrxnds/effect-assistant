@@ -1,4 +1,3 @@
-import * as Anthropic from "@effect-uai/anthropic/Anthropic"
 import { describe, expect, it } from "@effect/vitest"
 import * as AssistantEngine from "effect-assistant/AssistantEngine"
 import * as AssistantEvent from "effect-assistant/AssistantEvent"
@@ -9,13 +8,12 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
-import * as Redacted from "effect/Redacted"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as ClusterWorkflowEngine from "effect/unstable/cluster/ClusterWorkflowEngine"
 import * as TestRunner from "effect/unstable/cluster/TestRunner"
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
+import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 import * as DurableDeferred from "effect/unstable/workflow/DurableDeferred"
 import { AcmeAssistant } from "../src/AcmeAssistant.ts"
 import * as Campaign from "../src/Campaign.ts"
@@ -33,9 +31,13 @@ process.env.DEMO_STEP_SECONDS = "0"
  */
 const quietAcme = AcmeAssistant.toLayer(() => Stream.empty).pipe(Layer.provide(Research.toLayer(() => Stream.empty)))
 
-// The runner wants a model API; nothing here calls it.
-const anthropic = Anthropic.layer({ apiKey: Redacted.make(process.env.ANTHROPIC_API_KEY ?? "") }).pipe(
-  Layer.provide(FetchHttpClient.layer)
+// The runner wants a model; nothing here calls it.
+const model = Layer.effect(
+  LanguageModel.LanguageModel,
+  LanguageModel.make({
+    generateText: () => Effect.die("Nothing here calls the model."),
+    streamText: () => Stream.die("Nothing here calls the model.")
+  })
 )
 
 /** The inputs stored in a chat so far. */
@@ -58,7 +60,7 @@ const steps = (inputs: ReadonlyArray<AssistantEvent.Input>) =>
 const layer = Layer.mergeAll(Campaign.layerWorkflow, PrintOrders.layerWorkflow).pipe(
   Layer.provideMerge(quietAcme),
   Layer.provideMerge(Layer.merge(AssistantEngine.layerCluster, ClusterWorkflowEngine.layer)),
-  Layer.provide(anthropic),
+  Layer.provide(model),
   Layer.provideMerge(ChatLog.layerMemory),
   Layer.provideMerge(TestRunner.layer),
   Layer.provideMerge(LiveOrders.layerMemory)

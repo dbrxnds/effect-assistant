@@ -16,13 +16,20 @@ invoke_agent <assistant>          one trace per turn; session.id = the chat id
 - **Turns** are their own traces, grouped by `session.id`, so a tool like
   Langfuse shows a chat as a session of turns. A turn's input is the inputs it
   handles; its output is what the user saw.
-- **Model calls** are named after the model the loop calls, and get the standard `gen_ai.*` attributes (from Effect's
-  `effect/unstable/ai/Telemetry`), cache read and write tokens, and the
-  prompt's span attributes when [instructions](./instructions) carry them.
+- **Model calls** are named after the model the loop calls (when the context
+  names it, as `AnthropicLanguageModel.model(...)` does), and get the standard
+  `gen_ai.*` attributes (from Effect's `effect/unstable/ai/Telemetry`), cache
+  read and write tokens, and the prompt's span attributes when
+  [instructions](./instructions) carry them. The `LanguageModel` call's own
+  span, with the provider's attributes, is inside it.
 - **Tool calls** record their arguments (as `{ arguments }`) and result.
 
 Message content is always attached. Drop or mask it in your exporter if you
 don't want it sent.
+
+The log links back: `TurnStarted.traceId` is the turn's trace, when a tracer
+records it, and each `ModelOutput` keeps the step's model, response id,
+usage, and duration.
 
 The assistant's name in traces is the name in its definition:
 `Assistant.make("my-assistant")` traces as `invoke_agent my-assistant`.

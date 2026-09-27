@@ -1,11 +1,10 @@
-import * as Items from "@effect-uai/core/Items"
-import * as Loop from "@effect-uai/core/Loop"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import * as Prompt from "effect/unstable/ai/Prompt"
 import { Assistant, AssistantChat, AssistantEvent, AssistantLoop, ChatId, ChatLog, InputId } from "../src/index.ts"
-import { collectUntil, newChat, runMemory, say, testModel, turnsDone } from "./fixtures.ts"
+import { collectUntil, newChat, runMemory, say, turnsDone } from "./fixtures.ts"
 import * as Scripted from "./scripted.ts"
 
 class Summary extends Schema.TaggedClass<Summary>()("Summary", {
@@ -79,7 +78,7 @@ describe("the app's own events", () => {
       }).pipe(
         Effect.provide(
           runMemory(
-            Compacting.toLayer((turn) => turn.loop({ model: testModel, instructions: "Be brief." })),
+            Compacting.toLayer((turn) => turn.loop({ instructions: "Be brief." })),
             model.layer
           )
         )
@@ -101,7 +100,10 @@ describe("the app's own events", () => {
 
         return last === undefined || !(last.event instanceof Summary)
           ? entries
-          : [Items.userText(`Earlier in this chat: ${last.event.text}`), ...entries.filter(({ seq }) => seq > last.seq)]
+          : [
+              ...Prompt.make(`Earlier in this chat: ${last.event.text}`).content,
+              ...entries.filter(({ seq }) => seq > last.seq)
+            ]
       }
 
       const handlers = Compacting.toLayer((turn) =>
@@ -110,7 +112,7 @@ describe("the app's own events", () => {
             // The first turn writes the summary; the second reads through the view.
             if ((yield* turn.entries).every(({ event }) => !(event instanceof Summary))) yield* turn.append(summary)
 
-            return turn.loop({ model: testModel, instructions: "Be brief.", history: sinceSummary })
+            return turn.loop({ instructions: "Be brief.", history: sinceSummary })
           })
         )
       )
@@ -131,23 +133,23 @@ describe("the app's own events", () => {
 })
 
 describe("a loop of your own", () => {
-  it.live("runs AssistantLoop.step in effect-uai's Loop, and ends with replyIfOwed", () =>
+  it.live("runs AssistantLoop.step in AssistantLoop.loop, and ends with replyIfOwed", () =>
     Effect.gen(function* () {
       const Own = Assistant.make("own-loop")
 
       const handlers = Own.toLayer((turn) =>
-        Loop.loop({ steps: 0 }, (state) =>
+        AssistantLoop.loop({ steps: 0 }, (state) =>
           AssistantLoop.step(
             {
-              model: testModel,
               instructions: turn.instructions("You help a small team. Be brief."),
               toolkit: turn.tools,
               history: turn.history(),
               toolChoice: "required"
             },
-            (result) => (result.done || state.steps >= 4 ? Loop.stop() : Loop.next({ steps: state.steps + 1 }))
+            (result) =>
+              result.done || state.steps >= 4 ? AssistantLoop.stop() : AssistantLoop.next({ steps: state.steps + 1 })
           )
-        ).pipe(Stream.concat(turn.replyIfOwed({ model: testModel, instructions: "You help a small team. Be brief." })))
+        ).pipe(Stream.concat(turn.replyIfOwed({ instructions: "You help a small team. Be brief." })))
       )
 
       const entries = yield* Effect.gen(function* () {

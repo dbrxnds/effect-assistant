@@ -1,33 +1,30 @@
-import type * as Items from "@effect-uai/core/Items"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Stream from "effect/Stream"
+import * as Tracer from "effect/Tracer"
+import * as Response from "effect/unstable/ai/Response"
 import { type Assistant, AssistantChat, AssistantEvent, BlockKit, ChatLog } from "../src/index.ts"
 import { mayHaveRunOutput, notRunOutput } from "../src/internal/history.ts"
 import { silentTurnMessage } from "../src/internal/turns.ts"
-import { collectUntil, fact, memoryAssistant, newChat, say, TestAssistant, testModel, turnsDone } from "./fixtures.ts"
+import { collectUntil, fact, memoryAssistant, newChat, say, TestAssistant, turnsDone } from "./fixtures.ts"
 import * as Scripted from "./scripted.ts"
 
-const toolCall = (callId: string, name: string): Items.ToolCall => ({
-  type: "function_call",
-  call_id: callId,
-  name,
-  arguments: "{}"
-})
+const toolCall = (callId: string, name: string) =>
+  Response.makePart("tool-call", { id: callId, name, params: {}, providerExecuted: false })
 
 /** A handler that ends the turn with only `wait`, like a misbehaving model. */
 const waitOnly = () =>
   Stream.make(
-    AssistantEvent.ModelOutput.make({ items: [toolCall("wait-1", "wait")] }),
-    AssistantEvent.ToolResult.make({ callId: "wait-1", tool: "wait", output: "waiting" })
+    AssistantEvent.ModelOutput.make({ parts: [toolCall("wait-1", "wait")] }),
+    AssistantEvent.ToolResult.make({ callId: "wait-1", tool: "wait", outcome: "success", result: "waiting" })
   )
 
 const layer = memoryAssistant(waitOnly, Scripted.unused)
 
 /** A handler whose stream ends after a model output with a tool call, before the tool runs. */
 const stopsEarly: Assistant.Handler = () =>
-  Stream.make(AssistantEvent.ModelOutput.make({ items: [toolCall("lookup-1", "lookup")] }))
+  Stream.make(AssistantEvent.ModelOutput.make({ parts: [toolCall("lookup-1", "lookup")] }))
 
 const stopsEarlyLayer = memoryAssistant(stopsEarly, Scripted.unused)
 
@@ -48,8 +45,8 @@ const lateFact = () => {
       )
 
       return Stream.make(
-        AssistantEvent.ModelOutput.make({ items: [toolCall("w1", "wait")] }),
-        AssistantEvent.ToolResult.make({ callId: "w1", tool: "wait", output: "waiting" })
+        AssistantEvent.ModelOutput.make({ parts: [toolCall("w1", "wait")] }),
+        AssistantEvent.ToolResult.make({ callId: "w1", tool: "wait", outcome: "success", result: "waiting" })
       )
     }
 
@@ -107,7 +104,7 @@ describe("turn completion", () => {
       const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 1)
       const results = entries.flatMap(({ event }) => (Predicate.isTagged(event, "ToolResult") ? [event] : []))
 
-      expect(results.map((result) => [result.callId, result.output])).toEqual([["lookup-1", notRunOutput]])
+      expect(results.map((result) => [result.callId, result.result])).toEqual([["lookup-1", notRunOutput]])
     }).pipe(Effect.provide(stopsEarlyLayer))
   )
 
@@ -117,7 +114,7 @@ describe("turn completion", () => {
       const stopsMidCall = memoryAssistant(
         () =>
           Stream.make(
-            AssistantEvent.ModelOutput.make({ items: [toolCall("send-1", "send")] }),
+            AssistantEvent.ModelOutput.make({ parts: [toolCall("send-1", "send")] }),
             AssistantEvent.ToolStarted.make({ callId: "send-1", tool: "send" })
           ),
         Scripted.unused
@@ -132,7 +129,7 @@ describe("turn completion", () => {
 
       const results = entries.flatMap(({ event }) => (Predicate.isTagged(event, "ToolResult") ? [event] : []))
 
-      expect(results.map((result) => [result.callId, result.output])).toEqual([["send-1", mayHaveRunOutput]])
+      expect(results.map((result) => [result.callId, result.result])).toEqual([["send-1", mayHaveRunOutput]])
     })
   )
 
@@ -159,9 +156,7 @@ describe("turn completion", () => {
 
       // The loop only calls wait, as a model might after answering a workflow's question.
       const handler = (turn: Assistant.Turn) =>
-        waitOnly().pipe(
-          Stream.concat(turn.replyIfOwed({ model: testModel, instructions: "Be brief.", nudge: "Reply now." }))
-        )
+        waitOnly().pipe(Stream.concat(turn.replyIfOwed({ instructions: "Be brief.", nudge: "Reply now." })))
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
@@ -175,8 +170,50 @@ describe("turn completion", () => {
       expect(Predicate.isTagged(lastTurnEnd(entries)!, "TurnCompleted")).toBe(true)
       expect(AssistantEvent.assistantTexts(entries)).toEqual(["You're welcome."])
       expect(request?.tools).toEqual(["send_user_message"])
-      expect(request?.toolChoice).toEqual({ type: "function", name: "send_user_message" })
+      expect(request?.toolChoice).toEqual({ tool: "send_user_message" })
       expect(request?.system.endsWith("Be brief.\n\nReply now.")).toBe(true)
+    })
+  )
+})
+
+describe("a turn's trace", () => {
+  const turnStarts = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
+    entries.flatMap(({ event }) => (Predicate.isTagged(event, "TurnStarted") ? [event] : []))
+
+  const oneTurn = Effect.gen(function* () {
+    const chat = yield* newChat
+    yield* TestAssistant.submit(chat, fact("workflow:Export", { status: "done" }))
+
+    return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
+  })
+
+  it.live("is in TurnStarted when a tracer records it", () =>
+    Effect.gen(function* () {
+      const traceIds: Array<string> = []
+
+      const recording = Tracer.make({
+        span: (options) => {
+          const span = new Tracer.NativeSpan(options)
+          traceIds.push(span.traceId)
+
+          return span
+        }
+      })
+
+      const entries = yield* oneTurn.pipe(Effect.provide(layer), Effect.withTracer(recording))
+      const [started] = turnStarts(entries)
+
+      expect(started?.traceId).toBeDefined()
+      expect(traceIds).toContain(started?.traceId)
+    })
+  )
+
+  it.live("isn't there with Effect's own tracer, which exports nothing", () =>
+    Effect.gen(function* () {
+      const [started] = turnStarts(yield* oneTurn.pipe(Effect.provide(layer)))
+
+      expect(started).toBeDefined()
+      expect(started?.traceId).toBeUndefined()
     })
   )
 })

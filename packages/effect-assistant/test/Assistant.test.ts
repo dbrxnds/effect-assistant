@@ -3,9 +3,6 @@
  * messages mid-turn, specialist runs, blocks, discovery, skills, and both
  * engines. How a real model uses it is in `contract.test.ts`.
  */
-import * as Items from "@effect-uai/core/Items"
-import * as Tool from "@effect-uai/core/Tool"
-import * as Toolkit from "@effect-uai/core/Toolkit"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -13,19 +10,24 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import * as Tool from "effect/unstable/ai/Tool"
+import * as Toolkit from "effect/unstable/ai/Toolkit"
 import {
   Assistant,
   AssistantActivity,
   AssistantEngine,
   AssistantEvent,
+  AssistantLoop,
   Block,
   BlockKit,
   ChatLog,
   Instructions,
   Skill,
   Specialist,
-  ToolDiscovery
+  ToolDiscovery,
+  ToolFailure
 } from "../src/index.ts"
+import { toJsonText } from "../src/internal/schema.ts"
 import {
   collectUntil,
   failures,
@@ -40,7 +42,6 @@ import {
   say,
   simple,
   TestAssistant,
-  testModel,
   text,
   toolsRun,
   traceEntries,
@@ -53,8 +54,7 @@ const instructions = "You help a small team."
 /** Whether a request is the assistant's (it can message the user), not a specialist's. */
 const isAssistant = (request: Scripted.Request) => request.tools.includes("send_user_message")
 
-const hasCalled = (request: Scripted.Request, tool: string) =>
-  request.history.some((item) => Items.isToolCall(item) && item.name === tool)
+const { hasCalled } = Scripted
 
 describe("a turn", () => {
   it.live("puts the protocol before the instructions", () =>
@@ -75,13 +75,44 @@ describe("a turn", () => {
     })
   )
 
+  it.live("stores each model step's parts, model, response id, usage, and duration", () =>
+    Effect.gen(function* () {
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* TestAssistant.submit(chat, say("hi"))
+
+        return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
+      }).pipe(
+        Effect.provide(
+          memoryAssistant(
+            simple({ instructions }),
+            Scripted.layer(() => Scripted.reply("Hi."))
+          )
+        )
+      )
+
+      const [step] = entries.flatMap(({ event }) => (Predicate.isTagged(event, "ModelOutput") ? [event] : []))
+
+      expect(step?.format).toBe(2)
+      expect(step?.parts.map((part) => part.type)).toEqual(["tool-call"])
+      expect(step?.model).toBe(Scripted.model)
+      expect(step?.responseId).toBe("response_1")
+      expect(step?.usage?.inputTokens).toEqual({ total: 120, uncached: 20, cacheRead: 100, cacheWrite: 0 })
+      expect(step?.usage?.outputTokens.total).toBe(8)
+      expect(step?.durationMillis).toBeGreaterThanOrEqual(0)
+    })
+  )
+
   it.live("picks up a message sent while a tool runs, at its next step", () =>
     Effect.gen(function* () {
-      const lookup = Tool.make({
-        name: "lookup_order",
+      const LookupOrder = Tool.make("lookup_order", {
         description: "Look up an order.",
-        inputSchema: Schema.Struct({ orderId: Schema.String }),
-        run: ({ orderId }) => Effect.sleep("1 second").pipe(Effect.as({ orderId, status: "shipped" }))
+        parameters: Schema.Struct({ orderId: Schema.String }),
+        success: Schema.Struct({ orderId: Schema.String, status: Schema.String })
+      })
+
+      const lookup = AssistantLoop.tools(Toolkit.make(LookupOrder), {
+        lookup_order: ({ orderId }) => Effect.sleep("1 second").pipe(Effect.as({ orderId, status: "shipped" }))
       })
 
       const script: Scripted.Script = (request) => {
@@ -106,9 +137,7 @@ describe("a turn", () => {
         yield* TestAssistant.submit(chat, say("Also, what's 12 times 12?"))
 
         return yield* collectUntil(TestAssistant, chat, (es) => text(es).includes("144") && idle(es))
-      }).pipe(
-        Effect.provide(memoryAssistant(simple({ instructions, toolkit: Toolkit.make(lookup) }), Scripted.layer(script)))
-      )
+      }).pipe(Effect.provide(memoryAssistant(simple({ instructions, toolkit: lookup }), Scripted.layer(script))))
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
       // One turn read both messages.
@@ -119,7 +148,7 @@ describe("a turn", () => {
 
 const Research = Specialist.make("research", { description: "Answers research questions." })
 
-const ResearchLive = Research.toLayer((run) => run.loop({ model: testModel, instructions: "Answer in one line." }))
+const ResearchLive = Research.toLayer((run) => run.loop({ instructions: "Answer in one line." }))
 
 const ResearchAssistant = Assistant.make("research-test", { specialists: [Research] })
 
@@ -186,18 +215,20 @@ describe("specialist runs", () => {
   )
 
   // A slow search keeps the specialist busy long enough to steer or stop it.
-  const archive = Tool.make({
-    name: "search_archive",
+  const SearchArchive = Tool.make("search_archive", {
     description: "Search the archive.",
-    inputSchema: Schema.Struct({ query: Schema.String }),
-    run: ({ query }) => Effect.sleep("1 second").pipe(Effect.as({ query, results: ["2024: Lisbon", "2025: Porto"] }))
+    parameters: Schema.Struct({ query: Schema.String }),
+    success: Schema.Struct({ query: Schema.String, results: Schema.Array(Schema.String) })
+  })
+
+  const archive = AssistantLoop.tools(Toolkit.make(SearchArchive), {
+    search_archive: ({ query }) =>
+      Effect.sleep("1 second").pipe(Effect.as({ query, results: ["2024: Lisbon", "2025: Porto"] }))
   })
 
   const Archivist = Specialist.make("archivist", { description: "Looks things up in the archive." })
 
-  const ArchivistLive = Archivist.toLayer((run) =>
-    run.loop({ model: testModel, instructions: "Search, then answer.", toolkit: Toolkit.make(archive) })
-  )
+  const ArchivistLive = Archivist.toLayer((run) => run.loop({ instructions: "Search, then answer.", toolkit: archive }))
 
   const ArchiveAssistant = Assistant.make("archive-test", { specialists: [Archivist] })
 
@@ -233,12 +264,12 @@ describe("specialist runs", () => {
           ]
     }
 
-  const Status = Schema.fromJsonString(Schema.Struct({ status: Schema.String }))
+  const Status = Schema.Struct({ status: Schema.String })
 
   const statuses = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
     entries.flatMap(({ event }) =>
       Predicate.isTagged(event, "ToolResult") && event.tool.endsWith("_specialist")
-        ? Option.toArray(Option.map(Schema.decodeUnknownOption(Status)(event.output), (output) => output.status))
+        ? Option.toArray(Option.map(Schema.decodeUnknownOption(Status)(event.result), (output) => output.status))
         : []
     )
 
@@ -400,12 +431,8 @@ describe("UI blocks", () => {
 
   /** The id of the message the last send_user_message with a block sent. */
   const sentId = (request: Scripted.Request) =>
-    request.history
-      .flatMap((item) =>
-        Items.isToolCallOutput(item) && Schema.is(Sent)(item.output)
-          ? [item.output.slice("sent as message ".length)]
-          : []
-      )
+    Scripted.toolResults(request)
+      .flatMap((part) => (Schema.is(Sent)(part.result) ? [part.result.slice("sent as message ".length)] : []))
       .at(-1) ?? ""
 
   const blockScript: Scripted.Script = (request) => {
@@ -498,9 +525,11 @@ describe("UI blocks", () => {
         return yield* collectUntil(BlockAssistant, chat, idle)
       }).pipe(Effect.provide(runMemory(BlockAssistant.toLayer(simple({ instructions })), model.layer)))
 
-      const results = entries.flatMap(({ event }) => (Predicate.isTagged(event, "ToolResult") ? [event.output] : []))
+      const results = entries.flatMap(({ event }) => (Predicate.isTagged(event, "ToolResult") ? [event] : []))
 
-      expect(results[0]).toMatch(/props|Expected/)
+      expect(results[0]?.outcome).toBe("failure")
+      expect(results[0]?.kind).toBe("ToolParameterValidationError")
+      expect(toJsonText(results[0]?.result)).toMatch(/Expected/)
       expect(shown(entries)).toBeUndefined()
       // The failed message's `wait` doesn't end the turn: the loop's next step reads the failure.
       expect((yield* model.requests).map((request) => request.toolChoice)).toEqual(["required", "required"])
@@ -547,18 +576,21 @@ describe("the cluster engine", () => {
 })
 
 describe("tools found on demand, and skills", () => {
-  const parking = Tool.make({
-    name: "parking_availability",
+  const Parking = Tool.make("parking_availability", {
     description: "Free parking spots at an office garage right now.",
-    inputSchema: Schema.Struct({ office: Schema.String }),
-    run: ({ office }) => Effect.succeed({ office, freeSpots: 37 })
+    parameters: Schema.Struct({ office: Schema.String }),
+    success: Schema.Struct({ office: Schema.String, freeSpots: Schema.Int })
   })
 
-  const invoices = Tool.make({
-    name: "invoice_lookup",
+  const Invoices = Tool.make("invoice_lookup", {
     description: "Find an invoice by number.",
-    inputSchema: Schema.Struct({ id: Schema.String }),
-    run: () => Effect.succeed("not relevant")
+    parameters: Schema.Struct({ id: Schema.String }),
+    success: Schema.String
+  })
+
+  const officeTools = AssistantLoop.tools(Toolkit.make(Parking, Invoices), {
+    parking_availability: ({ office }) => Effect.succeed({ office, freeSpots: 37 }),
+    invoice_lookup: () => Effect.succeed("not relevant")
   })
 
   it.live("finds a tool with search_tools and runs it with execute_tool", () =>
@@ -585,10 +617,7 @@ describe("tools found on demand, and skills", () => {
         return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
       }).pipe(
         Effect.provide(
-          memoryAssistant(
-            simple({ instructions, toolkit: ToolDiscovery.make(Toolkit.make(parking, invoices)) }),
-            Scripted.layer(script)
-          )
+          memoryAssistant(simple({ instructions, toolkit: ToolDiscovery.make(officeTools) }), Scripted.layer(script))
         )
       )
 
@@ -600,11 +629,14 @@ describe("tools found on demand, and skills", () => {
 
   it.live("fails execute_tool when its tool fails, so a waiting message doesn't end the turn", () =>
     Effect.gen(function* () {
-      const broken = Tool.make({
-        name: "broken_printer",
+      const BrokenPrinter = Tool.make("broken_printer", {
         description: "Prints, when it works.",
-        inputSchema: Schema.Struct({}),
-        run: () => Tool.fail("Out of paper.")
+        success: Schema.String,
+        failure: ToolFailure.ToolFailure
+      })
+
+      const broken = AssistantLoop.tools(Toolkit.make(BrokenPrinter), {
+        broken_printer: () => ToolFailure.fail("Out of paper.")
       })
 
       const model = yield* Scripted.make((request) =>
@@ -613,18 +645,22 @@ describe("tools found on demand, and skills", () => {
           : [Scripted.call("execute_tool", { name: "broken_printer", input: {} }), ...Scripted.reply("Printed.")]
       )
 
-      yield* Effect.gen(function* () {
+      const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
         yield* TestAssistant.submit(chat, say("Print it."))
-        yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
+
+        return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
       }).pipe(
-        Effect.provide(
-          memoryAssistant(simple({ instructions, toolkit: ToolDiscovery.make(Toolkit.make(broken)) }), model.layer)
-        )
+        Effect.provide(memoryAssistant(simple({ instructions, toolkit: ToolDiscovery.make(broken) }), model.layer))
       )
 
-      // The model got another step to read the failure.
+      // The model got another step to read the failure, stored as the tool's.
       expect(yield* model.requests).toHaveLength(2)
+      expect(
+        entries.flatMap(({ event }) =>
+          Predicate.isTagged(event, "ToolResult") && event.tool === "execute_tool" ? [[event.outcome, event.kind]] : []
+        )
+      ).toEqual([["failure", "ToolFailure"]])
     })
   )
 

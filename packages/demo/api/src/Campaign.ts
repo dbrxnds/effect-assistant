@@ -16,18 +16,21 @@
 import * as Budgets from "@acme/demo-shared/Budgets"
 import * as Locations from "@acme/demo-shared/Locations"
 import * as Orders from "@acme/demo-shared/Orders"
-import * as Tool from "@effect-uai/core/Tool"
 import type * as AssistantEvent from "effect-assistant/AssistantEvent"
 import * as AssistantToolCall from "effect-assistant/AssistantToolCall"
 import * as AssistantChat from "effect-assistant/AssistantChat"
 import * as ChatId from "effect-assistant/ChatId"
 import * as RunId from "effect-assistant/RunId"
+import * as ToolFailure from "effect-assistant/ToolFailure"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
+import * as Tool from "effect/unstable/ai/Tool"
+import * as Toolkit from "effect/unstable/ai/Toolkit"
 import * as DurableDeferred from "effect/unstable/workflow/DurableDeferred"
 import * as Workflow from "effect/unstable/workflow/Workflow"
+import type * as WorkflowEngine from "effect/unstable/workflow/WorkflowEngine"
 import * as LiveOrders from "./LiveOrders.ts"
 import * as PrintOrders from "./PrintOrders.ts"
 import * as Steps from "./Steps.ts"
@@ -209,29 +212,19 @@ const approvalToken = (entries: ReadonlyArray<AssistantEvent.Entry>, runId: stri
     Option.map((request) => request.approvalToken)
   )
 
-const DecideInput = Schema.Struct({ runId: Schema.String, decision: Schema.Literals(["approve", "deny"]) })
-
 /**
  * Approves or denies a run once the user decided.
  *
  * @category tools
  * @since 0.1.0
  */
-export const decideCampaign = Tool.make({
-  name: "decide_campaign",
+export const DecideCampaign = Tool.make("decide_campaign", {
   description:
     "Approve or deny a campaign run that is awaiting approval, once the user has decided. Only call it after the user answered.",
-  inputSchema: DecideInput,
-  run: Effect.fn(function* ({ runId, decision }: typeof DecideInput.Type) {
-    const chat = yield* AssistantChat.AssistantChat
-    const token = approvalToken(yield* chat.entries, runId)
-
-    if (Option.isNone(token)) return yield* Tool.fail(`No campaign run ${runId} is awaiting approval here.`)
-
-    yield* decideApproval(token.value, decision)
-
-    return { runId, decision }
-  })
+  parameters: Schema.Struct({ runId: Schema.String, decision: Schema.Literals(["approve", "deny"]) }),
+  success: Schema.Struct({ runId: Schema.String, decision: Schema.Literals(["approve", "deny"]) }),
+  failure: ToolFailure.ToolFailure,
+  dependencies: [AssistantChat.AssistantChat]
 })
 
 /**
@@ -240,18 +233,15 @@ export const decideCampaign = Tool.make({
  * @category tools
  * @since 0.1.0
  */
-export const listCampaignProducts = Tool.make({
-  name: "list_campaign_products",
+export const ListCampaignProducts = Tool.make("list_campaign_products", {
   description: "Campaign products that can be ordered, with their channels and minimum budget.",
-  inputSchema: Tool.noInput,
-  run: () => Effect.succeed(campaignProducts)
+  success: Schema.Array(CampaignProduct)
 })
 
-const StartInput = Schema.Struct({
-  campaignId: Schema.String,
-  office: Schema.String.annotate({ description: "The office paying for it, like Amsterdam." }),
-  audience: Schema.String,
-  budget: Schema.Finite.annotate({ description: "In USD." })
+const CampaignStarted = Schema.Struct({
+  runId: RunId.RunId,
+  reference: Schema.String,
+  status: Schema.Literal("started")
 })
 
 /**
@@ -260,70 +250,123 @@ const StartInput = Schema.Struct({
  * @category tools
  * @since 0.1.0
  */
-export const startCampaign = Tool.make({
-  name: "start_campaign",
+export const StartCampaign = Tool.make("start_campaign", {
   description:
     "Order a campaign. Needs the product id, the office paying, who it should reach, and the budget in USD. Ask the user for anything missing first. Checks the office's budget; the run then waits for the user's approval and reports each stage back as a fact.",
-  inputSchema: StartInput,
-  run: Effect.fn(function* ({ campaignId, office, audience, budget }: typeof StartInput.Type) {
-    // The same run for every time this call runs: after a crash it runs again, and finds its order.
-    const runId = RunId.fromKey(yield* AssistantToolCall.idempotencyKey)
-    const reference = Steps.reference(runId)
-    const orders = yield* LiveOrders.LiveOrders
-    const placed = yield* orders.get(reference)
-
-    if (placed !== undefined) return { reference, status: placed.status, note: "Already placed by this call." }
-
-    const product = campaignProducts.find((candidate) => candidate.campaignId === campaignId)
-
-    if (product === undefined) return yield* Tool.fail(`Unknown campaignId ${campaignId}`)
-
-    if (budget < product.minimumBudget) {
-      return yield* Tool.fail(`${product.name} needs at least $${product.minimumBudget}.`)
-    }
-
-    const location = Locations.findByName(office)
-
-    if (location === undefined) return yield* Tool.fail(`No office named ${office}.`)
-
-    const officeBudget = yield* PrintOrders.officeBudget(location)
-
-    if (budget > officeBudget.remaining) {
-      return yield* Tool.fail(
-        `${location.name} has $${officeBudget.remaining} left in ${Budgets.currentQuarter.name}, less than $${budget}.`
-      )
-    }
-
-    const chat = yield* AssistantChat.AssistantChat
-
-    yield* orders.put(
-      LiveOrders.LiveOrder.make({
-        reference,
-        chatId: chat.chatId,
-        kind: "campaign",
-        office: location.name,
-        locationId: location.locationId,
-        description: `${product.name} for ${audience}`,
-        total: budget,
-        status: "placed",
-        placedOn: new Date().toISOString().slice(0, 10),
-        updatedAt: Date.now()
-      })
-    )
-    yield* CreateCampaign.execute(
-      {
-        runId,
-        chatId: chat.chatId,
-        reference,
-        campaignName: product.name,
-        office: location.name,
-        audience,
-        budget,
-        channels: product.channels
-      },
-      { discard: true }
-    )
-
-    return { runId, reference, status: "started" }
-  })
+  parameters: Schema.Struct({
+    campaignId: Schema.String,
+    office: Schema.String.annotate({ description: "The office paying for it, like Amsterdam." }),
+    audience: Schema.String,
+    budget: Schema.Finite.annotate({ description: "In USD." })
+  }),
+  success: Schema.Union([
+    Schema.Struct({ reference: Schema.String, status: Schema.String, note: Schema.String }),
+    CampaignStarted
+  ]),
+  failure: ToolFailure.ToolFailure,
+  dependencies: [AssistantChat.AssistantChat, AssistantToolCall.AssistantToolCall]
 })
+
+/**
+ * The campaign tools.
+ *
+ * @category toolkits
+ * @since 0.1.0
+ */
+export const CampaignTools = Toolkit.make(ListCampaignProducts, StartCampaign, DecideCampaign)
+
+/**
+ * Layer for the campaign tools' handlers, on the orders placed through Acme
+ * and the workflow engine.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const layerTools = CampaignTools.toLayer(
+  Effect.gen(function* () {
+    const services = yield* Effect.context<LiveOrders.LiveOrders | WorkflowEngine.WorkflowEngine>()
+
+    return CampaignTools.of({
+      list_campaign_products: () => Effect.succeed(campaignProducts),
+      decide_campaign: ({ runId, decision }) =>
+        Effect.gen(function* () {
+          const chat = yield* AssistantChat.AssistantChat
+          const token = approvalToken(yield* chat.entries, runId)
+
+          if (Option.isNone(token))
+            return yield* ToolFailure.fail(`No campaign run ${runId} is awaiting approval here.`)
+
+          yield* decideApproval(token.value, decision)
+
+          return { runId, decision }
+        }).pipe(Effect.provideContext(services)),
+      start_campaign: ({ campaignId, office, audience, budget }) =>
+        Effect.gen(function* () {
+          // The same run for every time this call runs: after a crash it runs again, and finds its order.
+          const runId = RunId.fromKey(yield* AssistantToolCall.idempotencyKey)
+          const reference = Steps.reference(runId)
+          const orders = yield* LiveOrders.LiveOrders
+          const placed = yield* orders.get(reference)
+
+          if (placed !== undefined) return { reference, status: placed.status, note: "Already placed by this call." }
+
+          const product = campaignProducts.find((candidate) => candidate.campaignId === campaignId)
+
+          if (product === undefined) return yield* ToolFailure.fail(`Unknown campaignId ${campaignId}`)
+
+          if (budget < product.minimumBudget) {
+            return yield* ToolFailure.fail(`${product.name} needs at least $${product.minimumBudget}.`, {
+              kind: "under_minimum"
+            })
+          }
+
+          const location = Locations.findByName(office)
+
+          if (location === undefined) return yield* ToolFailure.fail(`No office named ${office}.`)
+
+          const officeBudget = yield* PrintOrders.officeBudget(location)
+
+          if (budget > officeBudget.remaining) {
+            return yield* ToolFailure.fail(
+              `${location.name} has $${officeBudget.remaining} left in ${Budgets.currentQuarter.name}, less than $${budget}.`,
+              { kind: "over_budget" }
+            )
+          }
+
+          const chat = yield* AssistantChat.AssistantChat
+
+          yield* orders.put(
+            LiveOrders.LiveOrder.make({
+              reference,
+              chatId: chat.chatId,
+              kind: "campaign",
+              office: location.name,
+              locationId: location.locationId,
+              description: `${product.name} for ${audience}`,
+              total: budget,
+              status: "placed",
+              placedOn: new Date().toISOString().slice(0, 10),
+              updatedAt: Date.now()
+            })
+          )
+          yield* CreateCampaign.execute(
+            {
+              runId,
+              chatId: chat.chatId,
+              reference,
+              campaignName: product.name,
+              office: location.name,
+              audience,
+              budget,
+              channels: product.channels
+            },
+            { discard: true }
+          )
+
+          const started: typeof CampaignStarted.Type = { runId, reference, status: "started" }
+
+          return started
+        }).pipe(Effect.provideContext(services))
+    })
+  })
+)
