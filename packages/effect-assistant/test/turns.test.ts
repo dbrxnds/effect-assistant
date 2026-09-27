@@ -6,6 +6,7 @@ import { type Assistant, AssistantChat, AssistantEvent, BlockKit, ChatLog } from
 import { mayHaveRunOutput, notRunOutput } from "../src/internal/history.ts"
 import { silentTurnMessage } from "../src/internal/turns.ts"
 import { collectUntil, fact, memoryAssistant, newChat, say, TestAssistant, testModel, turnsDone } from "./fixtures.ts"
+import * as Scripted from "./scripted.ts"
 
 /** A handler that ends the turn with only `wait`, like a misbehaving model. */
 const waitOnly = () => {
@@ -17,7 +18,7 @@ const waitOnly = () => {
   )
 }
 
-const layer = memoryAssistant(waitOnly)
+const layer = memoryAssistant(waitOnly, Scripted.unused)
 
 /** A handler whose stream ends after a model output with a tool call, before the tool runs. */
 const stopsEarly: Assistant.Handler = () =>
@@ -27,7 +28,7 @@ const stopsEarly: Assistant.Handler = () =>
     })
   )
 
-const stopsEarlyLayer = memoryAssistant(stopsEarly)
+const stopsEarlyLayer = memoryAssistant(stopsEarly, Scripted.unused)
 
 const waitCall = (id: string) => ({ type: "function_call" as const, call_id: id, name: "wait", arguments: "{}" })
 
@@ -114,13 +115,15 @@ describe("turn completion", () => {
   it.live("tells the model a call whose stream stopped while it ran may have done its work", () =>
     Effect.gen(function* () {
       // The call started, then the handler's stream ended before its result.
-      const stopsMidCall = memoryAssistant(() =>
-        Stream.make(
-          AssistantEvent.ModelOutput.make({
-            items: [{ type: "function_call" as const, call_id: "send-1", name: "send", arguments: "{}" }]
-          }),
-          AssistantEvent.ToolStarted.make({ callId: "send-1", tool: "send" })
-        )
+      const stopsMidCall = memoryAssistant(
+        () =>
+          Stream.make(
+            AssistantEvent.ModelOutput.make({
+              items: [{ type: "function_call" as const, call_id: "send-1", name: "send", arguments: "{}" }]
+            }),
+            AssistantEvent.ToolStarted.make({ callId: "send-1", tool: "send" })
+          ),
+        Scripted.unused
       )
 
       const entries = yield* Effect.gen(function* () {
@@ -148,30 +151,33 @@ describe("turn completion", () => {
         "TurnCompleted",
         "TurnCompleted"
       ])
-    }).pipe(Effect.provide(memoryAssistant(lateFact())))
+    }).pipe(Effect.provide(memoryAssistant(lateFact(), Scripted.unused)))
   )
 
-  it.live("replyIfOwed makes the real model reply to a turn that only waited", () =>
+  it.live("replyIfOwed runs one pass that can only reply, with the nudge", () =>
     Effect.gen(function* () {
-      // The loop only calls wait, as a model might after answering a workflow's question; the reply pass runs
-      // the real model, with wait still in its history.
-      const layer = memoryAssistant((turn) =>
+      const model = yield* Scripted.make(() => [Scripted.call("send_user_message", { text: "You're welcome." })])
+
+      // The loop only calls wait, as a model might after answering a workflow's question.
+      const handler = (turn: Assistant.Turn) =>
         waitOnly().pipe(
-          Stream.concat(turn.replyIfOwed({ model: testModel, instructions: "You help a small team. Be brief." }))
+          Stream.concat(turn.replyIfOwed({ model: testModel, instructions: "Be brief.", nudge: "Reply now." }))
         )
-      )
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
         yield* TestAssistant.submit(chat, say("Thanks, that's all I needed."))
 
         return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
-      }).pipe(Effect.provide(layer))
+      }).pipe(Effect.provide(memoryAssistant(handler, model.layer)))
 
-      const end = lastTurnEnd(entries)
+      const [request] = yield* model.requests
 
-      expect(Predicate.isTagged(end!, "TurnCompleted")).toBe(true)
-      expect(AssistantEvent.assistantTexts(entries).length).toBe(1)
+      expect(Predicate.isTagged(lastTurnEnd(entries)!, "TurnCompleted")).toBe(true)
+      expect(AssistantEvent.assistantTexts(entries)).toEqual(["You're welcome."])
+      expect(request?.tools).toEqual(["send_user_message"])
+      expect(request?.toolChoice).toEqual({ type: "function", name: "send_user_message" })
+      expect(request?.system.endsWith("Be brief.\n\nReply now.")).toBe(true)
     })
   )
 })
@@ -184,7 +190,8 @@ describe("BlockKit.closeStale", () => {
           yield* BlockKit.closeStale({ messages: 2 })
 
           return Stream.empty
-        })
+        }),
+        Scripted.unused
       )
 
       const entries = yield* Effect.gen(function* () {

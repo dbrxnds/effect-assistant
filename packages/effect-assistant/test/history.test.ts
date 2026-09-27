@@ -166,7 +166,7 @@ describe("History.fromEntries, a finished specialist run", () => {
     expect(history.at(-1)).toMatchObject({
       content: [
         {
-          text: `<specialist name="research" run="${runId}" status="answered">\nYou started it 2 minutes ago for: Q4 budgets\nThe user hasn't written since you started it.\nReport:\nAmsterdam spent most.\n</specialist>`
+          text: `<specialist name="research" run="${runId}" status="answered">\nA report from a specialist you started. The user hasn't seen it.\nYou started it 2 minutes ago for: Q4 budgets\nThe user hasn't written since you started it.\nReport:\nAmsterdam spent most.\n</specialist>`
         }
       ]
     })

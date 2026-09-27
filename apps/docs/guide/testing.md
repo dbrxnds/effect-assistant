@@ -1,15 +1,27 @@
 # Testing
 
-Test an assistant the way it runs: the memory engine and log, a real model,
-and assertions about what the user was shown.
+Test an assistant the way it runs: the memory engine and log, and
+assertions about what the user was shown. Test two things separately.
 
-## Use the real model
+## The mechanics, on a scripted model
 
-effect-assistant's own tests call the real model: a small, fast one
-(`claude-haiku-4-5`). Most of what matters in an assistant is behaviour, like
-whether it tells the user, picks the right tool, or uses a block, and a mock
-model can't tell you that. Keep assertions about outcomes ("the answer
-mentions Ottawa", "it called `spawn_specialist`"), not exact wording.
+What your tools and handlers do with what the model answers doesn't depend
+on the model: a tool's side effects, a workflow's facts, a custom loop.
+Script the model's answers (a `LanguageModel` layer that returns the tool
+calls you want) and assert on the log. These tests are fast, free, and
+deterministic, so they run on every change.
+
+effect-assistant's own tests do this for its mechanics: messages that
+arrive mid-turn, specialist runs, blocks, crash recovery, both engines.
+
+## The behaviour, on the real model
+
+Whether the assistant tells the user, picks the right tool, or uses a block
+depends on your prompts, your tools, and the model: test it with the real
+model, a small, fast one like `claude-haiku-4-5`, as evals of your app. Keep
+assertions about outcomes ("the answer mentions Ottawa", "it called
+`spawn_specialist`"), not exact wording, and run them on main or nightly
+rather than on every change.
 
 ## Use the memory layers
 

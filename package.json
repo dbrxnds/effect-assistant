@@ -16,7 +16,8 @@
     "docs:dev": "pnpm --filter @effect-assistant/docs dev",
     "docs:build": "pnpm --filter @effect-assistant/docs build",
     "changeset": "changeset",
-    "release": "pnpm --filter effect-assistant build && changeset publish"
+    "release": "pnpm --filter effect-assistant build && changeset publish",
+    "test:contract": "pnpm --filter effect-assistant test:contract"
   },
   "devDependencies": {
     "@changesets/cli": "3.0.3",

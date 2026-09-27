@@ -8,7 +8,8 @@ should use. Do not commit `.env.local`.
 pnpm install
 pnpm check        # vp check: format, lint, and type check
 pnpm lint-fix     # vp check --fix
-pnpm test
+pnpm test         # on a scripted model
+pnpm test:contract # effect-assistant against the real model
 ```
 
 `pnpm start:node` starts the built demo. It listens on `0.0.0.0` and `PORT`.

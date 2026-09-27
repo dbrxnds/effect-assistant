@@ -8,6 +8,7 @@ import * as Queue from "effect/Queue"
 import * as Stream from "effect/Stream"
 import { Assistant, ChatId, Specialist } from "../src/index.ts"
 import { fact, runEntity, runMemory, say } from "./fixtures.ts"
+import * as Scripted from "./scripted.ts"
 
 interface User {
   readonly name: string
@@ -118,8 +119,8 @@ const handlers = (seen: Queue.Queue<Seen>) =>
   Helper.toLayer(recording(seen)).pipe(Layer.provide(clerkLive(seen)), Layer.provide(ChatUsersLive))
 
 const engines = {
-  memory: (seen: Queue.Queue<Seen>) => runMemory(handlers(seen)),
-  cluster: (seen: Queue.Queue<Seen>) => runEntity(handlers(seen))
+  memory: (seen: Queue.Queue<Seen>) => runMemory(handlers(seen), Scripted.unused),
+  cluster: (seen: Queue.Queue<Seen>) => runEntity(handlers(seen), Scripted.unused)
 }
 
 for (const [name, engine] of Object.entries(engines)) {

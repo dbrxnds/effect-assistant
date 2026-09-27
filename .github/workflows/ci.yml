@@ -4,6 +4,10 @@ on:
   pull_request:
   push:
     branches: [main]
+  schedule:
+    # The contract tests, nightly: a model or provider change shows up without a push.
+    - cron: "0 4 * * *"
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -20,7 +24,19 @@ jobs:
           cache: true
       - run: vp check
       - run: pnpm build
-      # The tests call the real model.
+      # On a scripted model: no API key needed, so they run for every PR.
       - run: pnpm test
+
+  contract:
+    # The real model: on main, nightly, and on demand.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: voidzero-dev/setup-vp@v1.21.1
+        with:
+          node-version: "24"
+          cache: true
+      - run: pnpm test:contract
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

@@ -19,7 +19,8 @@ import {
   ChatLog
 } from "../src/index.ts"
 import { mayHaveRunOutput } from "../src/internal/history.ts"
-import { layerModel, say, testModel } from "./fixtures.ts"
+import { say, testModel } from "./fixtures.ts"
+import * as Scripted from "./scripted.ts"
 
 const Resumer = Assistant.make("resumer")
 
@@ -45,10 +46,9 @@ describe("AssistantEngine.layerMemory", () => {
       const ran = yield* Deferred.make<ChatId.ChatId>()
 
       const resumed = yield* Effect.scoped(
-        Layer.build(reporting(ran).pipe(Layer.provide(AssistantEngine.layerMemory), Layer.provide(layerModel))).pipe(
-          Effect.andThen(Deferred.await(ran)),
-          Effect.timeout("5 seconds")
-        )
+        Layer.build(
+          reporting(ran).pipe(Layer.provide(AssistantEngine.layerMemory), Layer.provide(Scripted.unused))
+        ).pipe(Effect.andThen(Deferred.await(ran)), Effect.timeout("5 seconds"))
       )
 
       expect(resumed).toBe(cutOff)
@@ -96,10 +96,12 @@ describe("tool calls after a crash", () => {
       )
 
       const call = yield* Effect.scoped(
-        Layer.build(handlers.pipe(Layer.provide(AssistantEngine.layerMemory), Layer.provide(layerModel))).pipe(
-          Effect.andThen(Deferred.await(ran)),
-          Effect.timeout("60 seconds")
-        )
+        Layer.build(
+          handlers.pipe(
+            Layer.provide(AssistantEngine.layerMemory),
+            Layer.provide(Scripted.layer(() => Scripted.reply("Done.")))
+          )
+        ).pipe(Effect.andThen(Deferred.await(ran)), Effect.timeout("60 seconds"))
       )
 
       expect(call).toEqual({ callId: "toolu_report_1", key: "tool-call:toolu_report_1" })
@@ -142,7 +144,12 @@ describe("destructive tool calls after a crash", () => {
       )
 
       const result = yield* Effect.scoped(
-        Layer.build(handlers.pipe(Layer.provide(AssistantEngine.layerMemory), Layer.provide(layerModel))).pipe(
+        Layer.build(
+          handlers.pipe(
+            Layer.provide(AssistantEngine.layerMemory),
+            Layer.provide(Scripted.layer(() => Scripted.reply("Done.")))
+          )
+        ).pipe(
           Effect.andThen(
             log.read(chat).pipe(
               Effect.map((entries) =>
@@ -204,7 +211,7 @@ describe("a chat's log", () => {
           Stream.runCollect
         )
       }).pipe(
-        Effect.provide(handler.pipe(Layer.provideMerge(AssistantEngine.layerMemory), Layer.provide(layerModel))),
+        Effect.provide(handler.pipe(Layer.provideMerge(AssistantEngine.layerMemory), Layer.provide(Scripted.unused))),
         Effect.provide(Layer.effect(ChatLog.ChatLog, slowStorage))
       )
 
@@ -236,7 +243,7 @@ describe("a chat's log", () => {
           Predicate.isTagged(event, "UserMessage") ? [event.text] : []
         )
       }).pipe(
-        Effect.provide(handler.pipe(Layer.provideMerge(AssistantEngine.layerMemory), Layer.provide(layerModel))),
+        Effect.provide(handler.pipe(Layer.provideMerge(AssistantEngine.layerMemory), Layer.provide(Scripted.unused))),
         Effect.provide(ChatLog.layerMemory)
       )
 
@@ -276,7 +283,7 @@ describe("a handler's build", () => {
         yield* Resumer.submit(other, say("hi"))
         yield* turnsIn(other, 1)
       }).pipe(
-        Effect.provide(handler.pipe(Layer.provideMerge(AssistantEngine.layerMemory), Layer.provide(layerModel))),
+        Effect.provide(handler.pipe(Layer.provideMerge(AssistantEngine.layerMemory), Layer.provide(Scripted.unused))),
         Effect.provide(ChatLog.layerMemory)
       )
 

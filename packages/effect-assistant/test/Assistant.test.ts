@@ -1,8 +1,15 @@
+/**
+ * What the library does with what the model answers, on a scripted model:
+ * messages mid-turn, specialist runs, blocks, discovery, skills, and both
+ * engines. How a real model uses it is in `contract.test.ts`.
+ */
+import * as Items from "@effect-uai/core/Items"
 import * as Tool from "@effect-uai/core/Tool"
 import * as Toolkit from "@effect-uai/core/Toolkit"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import {
@@ -13,18 +20,16 @@ import {
   Block,
   BlockKit,
   ChatLog,
-  InputId,
+  Instructions,
   Skill,
   Specialist,
   ToolDiscovery
 } from "../src/index.ts"
 import {
   collectUntil,
-  fact,
   failures,
   finished,
   idle,
-  layerModel,
   layerStorage,
   memoryAssistant,
   newChat,
@@ -40,242 +45,248 @@ import {
   traceEntries,
   turnsDone
 } from "./fixtures.ts"
+import * as Scripted from "./scripted.ts"
 
-const weather = Tool.make({
-  name: "get_weather",
-  description: "Current weather for a city.",
-  inputSchema: Schema.Struct({ city: Schema.String }),
-  run: ({ city }) => Effect.succeed({ city, weather: "hail, 3 degrees celsius" })
+const instructions = "You help a small team."
+
+/** Whether a request is the assistant's (it can message the user), not a specialist's. */
+const isAssistant = (request: Scripted.Request) => request.tools.includes("send_user_message")
+
+const hasCalled = (request: Scripted.Request, tool: string) =>
+  request.history.some((item) => Items.isToolCall(item) && item.name === tool)
+
+describe("a turn", () => {
+  it.live("puts the protocol before the instructions", () =>
+    Effect.gen(function* () {
+      const model = yield* Scripted.make(() => Scripted.reply("Hi."))
+
+      yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* TestAssistant.submit(chat, say("hi"))
+        yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
+      }).pipe(Effect.provide(memoryAssistant(simple({ instructions }), model.layer)))
+
+      const [request] = yield* model.requests
+
+      expect(request?.system).toBe(`${Instructions.protocol}\n\n${instructions}`)
+      expect(request?.toolChoice).toBe("required")
+      expect(request?.tools).toEqual(["send_user_message", "wait"])
+    })
+  )
+
+  it.live("picks up a message sent while a tool runs, at its next step", () =>
+    Effect.gen(function* () {
+      const lookup = Tool.make({
+        name: "lookup_order",
+        description: "Look up an order.",
+        inputSchema: Schema.Struct({ orderId: Schema.String }),
+        run: ({ orderId }) => Effect.sleep("1 second").pipe(Effect.as({ orderId, status: "shipped" }))
+      })
+
+      const script: Scripted.Script = (request) => {
+        const all = Scripted.inputs(request).join("\n")
+
+        // The second message is held until the lookup's result is in; then the model reads both.
+        if (Option.isSome(Scripted.result(request, "lookup_order"))) {
+          return Scripted.reply(all.includes("12 times 12") ? "Shipped. And 144." : "Shipped.")
+        }
+
+        return hasCalled(request, "lookup_order")
+          ? Scripted.wait()
+          : [Scripted.call("lookup_order", { orderId: "A-17" })]
+      }
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* TestAssistant.submit(chat, say("Check order A-17."))
+        yield* collectUntil(TestAssistant, chat, (es) =>
+          es.some(({ event }) => Predicate.isTagged(event, "ToolStarted"))
+        )
+        yield* TestAssistant.submit(chat, say("Also, what's 12 times 12?"))
+
+        return yield* collectUntil(TestAssistant, chat, (es) => text(es).includes("144") && idle(es))
+      }).pipe(
+        Effect.provide(memoryAssistant(simple({ instructions, toolkit: Toolkit.make(lookup) }), Scripted.layer(script)))
+      )
+
+      expect(failures(entries), traceEntries(entries)).toEqual([])
+      // One turn read both messages.
+      expect(turnsDone(entries)).toBe(1)
+    })
+  )
 })
 
-const slowLookup = Tool.make({
-  name: "lookup_order",
-  description: "Look up the status of an order by id. Takes a few seconds.",
-  inputSchema: Schema.Struct({ orderId: Schema.String }),
-  run: ({ orderId }) => Effect.sleep("4 seconds").pipe(Effect.as({ orderId, status: "shipped", carrier: "DHL" }))
-})
+const Research = Specialist.make("research", { description: "Answers research questions." })
 
-const Research = Specialist.make("research", { description: "Answers factual research questions." })
-
-const ResearchLive = Research.toLayer((run) =>
-  run.loop({ model: testModel, instructions: "Answer the question in one sentence." })
-)
+const ResearchLive = Research.toLayer((run) => run.loop({ model: testModel, instructions: "Answer in one line." }))
 
 const ResearchAssistant = Assistant.make("research-test", { specialists: [Research] })
 
-const instructions = "You help a small marketing team. Be brief."
+const researchHandlers = ResearchAssistant.toLayer(simple({ instructions })).pipe(Layer.provide(ResearchLive))
 
-const assistantLayer = <Tools extends Toolkit.Toolkit = Record<never, never>>(toolkit?: Tools) =>
-  memoryAssistant(simple({ instructions, toolkit }))
+/** Spawns research for the first message, follows up for the second, and relays each report. */
+const researchScript: Scripted.Script = (request) => {
+  if (!isAssistant(request)) {
+    return [Scripted.text(Scripted.lastInput(request).includes("province") ? "Ontario." : "Ottawa.")]
+  }
 
-const researchLayer = runMemory(ResearchAssistant.toLayer(simple({ instructions })).pipe(Layer.provide(ResearchLive)))
+  const last = Scripted.lastInput(request)
 
-const SpecialistArgs = Schema.fromJsonString(
-  Schema.Struct({
-    goal: Schema.optional(Schema.String),
-    runId: Schema.optional(Schema.String)
-  })
-)
+  if (last.includes("<specialist"))
+    return Scripted.reply(last.includes("Ontario") ? "It's in Ontario." : "It's Ottawa.")
 
-/** Calls the assistant made to its specialist tools, with their arguments. */
-const specialistCalls = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
-  entries.flatMap(({ event }) =>
-    Predicate.isTagged(event, "ModelOutput")
-      ? event.items.flatMap((item) =>
-          item.type === "function_call" && item.name.endsWith("_specialist")
-            ? [{ name: item.name, args: Schema.decodeUnknownSync(SpecialistArgs)(item.arguments) }]
-            : []
-        )
-      : []
-  )
+  if (Option.isSome(Scripted.lastResult(request, "spawn_specialist"))) return Scripted.reply("Asking research.")
 
-describe("layerMemory", () => {
-  it.live("answers a message through send_user_message", () =>
+  if (Option.isSome(Scripted.lastResult(request, "message_specialist"))) return Scripted.reply("Asking again.")
+
+  const runId = Scripted.spawnedRunId(request)
+
+  return Option.isSome(runId)
+    ? [Scripted.call("message_specialist", { runId: runId.value, message: "Which province is it in?" })]
+    : [Scripted.call("spawn_specialist", { kind: "research", goal: "What's the capital of Canada?" })]
+}
+
+describe("specialist runs", () => {
+  it.live("reports back as an input, and a turn relays it", () =>
     Effect.gen(function* () {
-      const assistant = TestAssistant
-      const chat = yield* newChat
-      yield* assistant.submit(chat, say("Say hi in one short message."))
-      const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 1)
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* ResearchAssistant.submit(chat, say("What's the capital of Canada?"))
+
+        return yield* collectUntil(ResearchAssistant, chat, (es) => text(es).includes("ottawa") && notWorking(es))
+      }).pipe(Effect.provide(runMemory(researchHandlers, Scripted.layer(researchScript))))
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
-      expect(AssistantEvent.assistantTexts(entries).length).toBeGreaterThanOrEqual(1)
-    }).pipe(Effect.provide(assistantLayer()))
+      expect(finished(entries).map((run) => [run.specialist, run.status, run.report])).toEqual([
+        ["research", "answered", "Ottawa."]
+      ])
+      expect(entries.filter(({ event }) => Predicate.isTagged(event, "SpecialistStarted"))).toHaveLength(1)
+    })
   )
 
-  it.live("uses a tool and reports its result", () =>
+  it.live("continues a finished run with a follow-up, as its next brief", () =>
     Effect.gen(function* () {
-      const assistant = TestAssistant
-      const chat = yield* newChat
-      yield* assistant.submit(chat, say("What's the weather in Oslo right now?"))
-      const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 1)
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* ResearchAssistant.submit(chat, say("What's the capital of Canada?"))
+        yield* collectUntil(ResearchAssistant, chat, (es) => text(es).includes("ottawa") && notWorking(es))
+        yield* ResearchAssistant.submit(chat, say("Which province is it in?"))
+
+        return yield* collectUntil(ResearchAssistant, chat, (es) => text(es).includes("ontario") && notWorking(es))
+      }).pipe(Effect.provide(runMemory(researchHandlers, Scripted.layer(researchScript))))
+
+      const [first, second] = finished(entries)
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
-      expect(toolsRun(entries)).toContain("get_weather")
-      expect(text(entries)).toContain("hail")
-    }).pipe(Effect.provide(assistantLayer(Toolkit.make(weather))))
+      expect(second?.runId).toBe(first?.runId)
+      expect([first?.brief, second?.brief]).toEqual([1, 2])
+      expect(toolsRun(entries)).toContain("message_specialist")
+    })
   )
 
-  it.live("picks up a message sent while it is working", () =>
-    Effect.gen(function* () {
-      const assistant = TestAssistant
-      const chat = yield* newChat
-      yield* assistant.submit(chat, say("Can you check order A-17 for me?"))
-      // Wait until the slow tool is running, then send another message.
-      yield* collectUntil(assistant, chat, (es) => es.some(({ event }) => Predicate.isTagged(event, "ModelOutput")))
-      yield* assistant.submit(chat, say("Also, what's 12 times 12?"))
-
-      const entries = yield* collectUntil(
-        assistant,
-        chat,
-        (es) => text(es).includes("144") && text(es).includes("shipped")
-      )
-
-      expect(failures(entries), traceEntries(entries)).toEqual([])
-    }).pipe(Effect.provide(assistantLayer(Toolkit.make(slowLookup))))
-  )
-
-  it.live("background specialist reports back as a fact and the assistant follows up", () =>
-    Effect.gen(function* () {
-      const assistant = ResearchAssistant
-      const chat = yield* newChat
-      yield* assistant.submit(
-        chat,
-        say("Start the research specialist in the background: which planet is the largest in our solar system?")
-      )
-
-      const entries = yield* collectUntil(
-        assistant,
-        chat,
-        (es) => finished(es).length > 0 && text(es).includes("jupiter")
-      )
-
-      expect(failures(entries), traceEntries(entries)).toEqual([])
-      expect(finished(entries).map((run) => [run.specialist, run.status])).toEqual([["research", "answered"]])
-    }).pipe(Effect.provide(researchLayer))
-  )
-
-  it.live("spawns a specialist for a quick question and relays the answer", () =>
-    Effect.gen(function* () {
-      const assistant = ResearchAssistant
-      const chat = yield* newChat
-      yield* assistant.submit(chat, say("Quickly ask the research specialist what the capital of Canada is."))
-      const entries = yield* collectUntil(assistant, chat, (es) => text(es).includes("ottawa") && idle(es))
-
-      expect(failures(entries), traceEntries(entries)).toEqual([])
-      expect(toolsRun(entries)).toContain("spawn_specialist")
-    }).pipe(Effect.provide(researchLayer))
-  )
-})
-
-describe("specialist briefs and follow-ups", () => {
-  it.live("sends a structured brief and follows up on the same run", () =>
-    Effect.gen(function* () {
-      const assistant = ResearchAssistant
-      const chat = yield* newChat
-      yield* assistant.submit(chat, say("Quickly ask the research specialist what the capital of Canada is."))
-      const first = yield* collectUntil(assistant, chat, (es) => text(es).includes("ottawa") && idle(es))
-      const [call] = specialistCalls(first)
-
-      expect(call?.name).toBe("spawn_specialist")
-      expect(call?.args.goal).toEqual(expect.any(String))
-
-      yield* assistant.submit(chat, say("Follow up with that same research run: which province is it in?"))
-      const second = yield* collectUntil(assistant, chat, (es) => text(es).includes("ontario") && idle(es))
-      const followUp = specialistCalls(second).at(-1)
-
-      expect(failures(second), traceEntries(second)).toEqual([])
-      expect(followUp?.name).toBe("message_specialist")
-      expect(followUp?.args.runId).toMatch(/^run:/)
-    }).pipe(Effect.provide(researchLayer))
-  )
-})
-
-describe("steering and stopping a running specialist", () => {
-  // A slow lookup keeps the specialist busy long enough to steer or stop it.
+  // A slow search keeps the specialist busy long enough to steer or stop it.
   const archive = Tool.make({
     name: "search_archive",
-    description: "Search the company archive. Slow.",
+    description: "Search the archive.",
     inputSchema: Schema.Struct({ query: Schema.String }),
-    run: ({ query }) =>
-      Effect.sleep("6 seconds").pipe(
-        Effect.as({ query, results: ["2024 offsite: Lisbon", "2025 offsite: Porto", "2023 offsite: Berlin"] })
-      )
+    run: ({ query }) => Effect.sleep("1 second").pipe(Effect.as({ query, results: ["2024: Lisbon", "2025: Porto"] }))
   })
 
-  const Archivist = Specialist.make("archivist", { description: "Looks things up in the company archive." })
+  const Archivist = Specialist.make("archivist", { description: "Looks things up in the archive." })
 
   const ArchivistLive = Archivist.toLayer((run) =>
-    run.loop({
-      model: testModel,
-      instructions: "Use search_archive, then answer briefly. Follow any new instructions you get.",
-      toolkit: Toolkit.make(archive)
-    })
+    run.loop({ model: testModel, instructions: "Search, then answer.", toolkit: Toolkit.make(archive) })
   )
 
   const ArchiveAssistant = Assistant.make("archive-test", { specialists: [Archivist] })
 
-  const archiveHandlers = ArchiveAssistant.toLayer(simple({ instructions: "You help a small team. Be brief." }))
+  const archiveHandlers = ArchiveAssistant.toLayer(simple({ instructions })).pipe(Layer.provide(ArchivistLive))
 
-  const archiveLayer = runMemory(archiveHandlers.pipe(Layer.provide(ArchivistLive)))
+  /** Spawns the archivist; a second message steers or stops it, as `then` says. */
+  const archiveScript =
+    (then: "message_specialist" | "stop_specialist"): Scripted.Script =>
+    (request) => {
+      if (!isAssistant(request)) {
+        if (!hasCalled(request, "search_archive")) return [Scripted.call("search_archive", { query: "offsites" })]
+
+        return [Scripted.text(Scripted.inputs(request).join(" ").includes("2025") ? "Lisbon, then Porto." : "Lisbon.")]
+      }
+
+      const last = Scripted.lastInput(request)
+      const runId = Option.getOrElse(Scripted.spawnedRunId(request), () => "")
+
+      if (last.includes("<specialist")) return Scripted.reply(last.includes("Porto") ? "Lisbon and Porto." : "Lisbon.")
+
+      if (Scripted.inputs(request).length === 1) {
+        return hasCalled(request, "spawn_specialist")
+          ? Scripted.reply("On it.")
+          : [Scripted.call("spawn_specialist", { kind: "archivist", goal: "Where was the 2024 offsite?" })]
+      }
+
+      return hasCalled(request, then)
+        ? Scripted.reply("Done.")
+        : [
+            then === "message_specialist"
+              ? Scripted.call(then, { runId, message: "Also find the 2025 one." })
+              : Scripted.call(then, { runId })
+          ]
+    }
 
   const Status = Schema.fromJsonString(Schema.Struct({ status: Schema.String }))
 
   const statuses = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
     entries.flatMap(({ event }) =>
       Predicate.isTagged(event, "ToolResult") && event.tool.endsWith("_specialist")
-        ? [Schema.decodeUnknownSync(Status)(event.output).status]
+        ? Option.toArray(Option.map(Schema.decodeUnknownOption(Status)(event.output), (output) => output.status))
         : []
     )
 
-  it.live("steers a running worker with a new brief", () =>
+  it.live("steers a running run: it reads the message at its next step", () =>
     Effect.gen(function* () {
-      const assistant = ArchiveAssistant
-      const chat = yield* newChat
-      yield* assistant.submit(chat, say("Have the archivist find where our 2024 offsite was."))
-      yield* collectUntil(assistant, chat, (es) => statuses(es).includes("started"))
-      yield* assistant.submit(chat, say("Oh, and tell the archivist to also find the 2025 one, same run."))
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* ArchiveAssistant.submit(chat, say("Where was the 2024 offsite?"))
+        yield* collectUntil(ArchiveAssistant, chat, (es) => statuses(es).includes("started"))
+        yield* ArchiveAssistant.submit(chat, say("And the 2025 one?"))
 
-      const entries = yield* collectUntil(
-        assistant,
-        chat,
-        (es) => text(es).includes("lisbon") && text(es).includes("porto") && idle(es)
-      )
+        return yield* collectUntil(ArchiveAssistant, chat, (es) => text(es).includes("porto") && notWorking(es))
+      }).pipe(Effect.provide(runMemory(archiveHandlers, Scripted.layer(archiveScript("message_specialist")))))
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
       expect(statuses(entries)).toContain("steered")
-    }).pipe(Effect.provide(archiveLayer))
+      // Steered, not continued: one report, for the second brief.
+      expect(finished(entries).map((run) => [run.status, run.brief])).toEqual([["answered", 2]])
+    })
   )
 
-  it.live("stops a running worker", () =>
+  it.live("stops a running run: it reports that it stopped, and no turn starts for it", () =>
     Effect.gen(function* () {
-      const assistant = ArchiveAssistant
-      const chat = yield* newChat
-      yield* assistant.submit(chat, say("Have the archivist find where our 2024 offsite was."))
-      yield* collectUntil(assistant, chat, (es) => statuses(es).includes("started"))
-      yield* assistant.submit(chat, say("Actually never mind, stop the archivist."))
-      yield* collectUntil(assistant, chat, (es) => toolsRun(es).includes("stop_specialist"))
-      // Give a stopped run time to (wrongly) report back.
-      yield* Effect.sleep("10 seconds")
-      const log = yield* ChatLog.ChatLog
-      const entries = yield* log.read(chat)
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* ArchiveAssistant.submit(chat, say("Where was the 2024 offsite?"))
+        yield* collectUntil(ArchiveAssistant, chat, (es) => statuses(es).includes("started"))
+        yield* ArchiveAssistant.submit(chat, say("Never mind, stop it."))
+
+        return yield* collectUntil(ArchiveAssistant, chat, (es) => finished(es).length > 0 && notWorking(es))
+      }).pipe(Effect.provide(runMemory(archiveHandlers, Scripted.layer(archiveScript("stop_specialist")))))
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
-      // A stopped run reports that it stopped, and nothing else.
       expect(finished(entries).map((run) => run.status)).toEqual(["stopped"])
-      expect(AssistantActivity.isWorking(AssistantActivity.fromEntries(entries))).toBe(false)
-    }).pipe(Effect.provide(archiveLayer))
+      // The turn that stopped it is the last one: a stopped run wakes nothing.
+      const stoppedAt = entries.find(({ event }) => Predicate.isTagged(event, "SpecialistFinished"))?.seq ?? 0
+      expect(entries.some(({ event, seq }) => seq > stoppedAt && Predicate.isTagged(event, "TurnStarted"))).toBe(false)
+    })
   )
 
-  it.live("closes a run cut off by a shutdown and tells the assistant", () =>
+  it.live("reports a run a shutdown cut off, and lets the chat go", () =>
     Effect.gen(function* () {
       const log = yield* ChatLog.ChatLog
       const chat = yield* newChat
 
       // The engine and the assistant live in this scope; closing it is the shutdown. The storage stays.
       const layer = archiveHandlers.pipe(
-        Layer.provide(ArchivistLive),
         Layer.provideMerge(AssistantEngine.layerMemory),
-        Layer.provide(layerModel)
+        Layer.provide(Scripted.layer(archiveScript("stop_specialist")))
       )
 
       yield* Effect.scoped(
@@ -283,210 +294,173 @@ describe("steering and stopping a running specialist", () => {
           const context = yield* Layer.build(layer)
 
           yield* Effect.gen(function* () {
-            yield* ArchiveAssistant.submit(chat, say("Have the archivist find where our 2024 offsite was."))
+            yield* ArchiveAssistant.submit(chat, say("Where was the 2024 offsite?"))
             yield* collectUntil(ArchiveAssistant, chat, (es) => statuses(es).includes("started"))
           }).pipe(Effect.provide(context))
         })
       )
 
       const entries = yield* log.read(chat)
-      const started = entries.filter(({ event }) => Predicate.isTagged(event, "SpecialistStarted"))
 
-      expect(started).toHaveLength(1)
-      expect(AssistantActivity.fromEntries(entries).specialists.size).toBe(0)
       expect(finished(entries).map((run) => run.status)).toEqual(["cut_off"])
+      expect(AssistantActivity.fromEntries(entries).specialists.size).toBe(0)
     }).pipe(Effect.provide(layerStorage))
   )
 })
 
 describe("UI blocks", () => {
   const ChooseOne = Block.make("choose_one", {
-    description: "Let the user pick one of a few options with buttons.",
+    description: "Pick one of a few options.",
     props: Schema.Struct({ options: Schema.Array(Schema.String) }),
     answer: Schema.Struct({ choice: Schema.String })
   })
 
-  const Confirm = Block.make("confirm", {
-    description: "Ask the user to confirm or deny something.",
-    props: Schema.Struct({ confirmLabel: Schema.String }),
-    answer: Schema.Struct({ confirmed: Schema.Boolean })
-  })
+  const BlockAssistant = Assistant.make("blocks", { blocks: BlockKit.make([ChooseOne]) })
 
-  const BlockAssistant = Assistant.make("blocks", { blocks: BlockKit.make([ChooseOne, Confirm]) })
+  const Sent = Schema.String.check(Schema.isPattern(/^sent as message /))
 
-  const layer = BlockAssistant.toLayer(
-    simple({
-      instructions: "You help a small marketing team. Be brief. Ask for approvals with a confirm block."
-    })
-  ).pipe((handlers) => runMemory(handlers))
+  /** The id of the message the last send_user_message with a block sent. */
+  const sentId = (request: Scripted.Request) =>
+    request.history
+      .flatMap((item) =>
+        Items.isToolCallOutput(item) && Schema.is(Sent)(item.output)
+          ? [item.output.slice("sent as message ".length)]
+          : []
+      )
+      .at(-1) ?? ""
 
-  const withBlock = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
+  const blockScript: Scripted.Script = (request) => {
+    const last = Scripted.lastInput(request)
+
+    if (Option.isSome(Scripted.lastResult(request, "send_user_message"))) return Scripted.wait()
+
+    if (last.includes("<answer")) return Scripted.reply(last.includes("blue") ? "Blue it is." : "Red it is.")
+
+    if (last === "blue")
+      return [
+        Scripted.call("send_user_message", { text: "Blue it is.", closes: [sentId(request)] }),
+        Scripted.call("wait")
+      ]
+
+    return [
+      Scripted.call("send_user_message", {
+        text: "Red or blue?",
+        block: { kind: "choose_one", props: { options: ["red", "blue"] } }
+      })
+    ]
+  }
+
+  const layer = runMemory(BlockAssistant.toLayer(simple({ instructions })), Scripted.layer(blockScript))
+
+  const shown = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
     entries.flatMap(({ event }) =>
       Predicate.isTagged(event, "AssistantMessage") && event.block !== undefined ? [event] : []
     )[0]
 
-  it.live("puts a block in a message, then acts on its answer", () =>
+  it.live("shows a block; its answer is an input, and closes it", () =>
     Effect.gen(function* () {
-      const assistant = BlockAssistant
       const chat = yield* newChat
-      yield* assistant.submit(chat, say("Should the campaign banner be red or blue? Give me buttons to pick."))
-      const shown = yield* collectUntil(assistant, chat, (es) => withBlock(es) !== undefined && turnsDone(es) >= 1)
-      const message = withBlock(shown)!
+      yield* BlockAssistant.submit(chat, say("Pick a banner color."))
+      const first = yield* collectUntil(BlockAssistant, chat, (es) => shown(es) !== undefined && idle(es))
+      const message = shown(first)
 
-      expect(message.block!.kind).toBe("choose_one")
-      expect(message.text.length).toBeGreaterThan(0)
+      expect(message?.block?.kind).toBe("choose_one")
 
-      yield* assistant.submit(
-        chat,
-        AssistantEvent.BlockAnswer.make({
-          id: yield* InputId.make,
-          messageId: message.id,
-          kind: "choose_one",
-          value: { choice: "blue" }
-        })
-      )
-      const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 2 && text(es).includes("blue"))
+      // The client renders the block and the user picks blue: `respond` builds the answer.
+      const answers: Array<AssistantEvent.BlockAnswer> = []
 
-      expect(failures(entries), traceEntries(entries)).toEqual([])
-    }).pipe(Effect.provide(layer))
-  )
-
-  it.live("takes a block answered by typing", () =>
-    Effect.gen(function* () {
-      const assistant = BlockAssistant
-      const chat = yield* newChat
-      yield* assistant.submit(chat, say("Should the campaign banner be red or blue? Give me buttons to pick."))
-      yield* collectUntil(assistant, chat, (es) => withBlock(es) !== undefined && turnsDone(es) >= 1)
-
-      const answer = say("blue")
-      yield* assistant.submit(chat, answer)
-
-      // A turn that read the typed answer ended: the first message may have had more than one turn.
-      const entries = yield* collectUntil(assistant, chat, (es) => {
-        const at = es.find(({ event }) => AssistantEvent.isInput(event) && event.id === answer.id)?.seq
-
-        return at !== undefined && es.some(({ event }) => AssistantEvent.isTurnEnd(event) && event.throughSeq >= at)
+      const render = BlockKit.toClient(BlockKit.make([ChooseOne]), {
+        choose_one: ({ respond }) => respond({ choice: "blue" })
       })
 
-      // The assistant usually closes the block too (`closes`), but may not: `staleAfter` covers that.
+      render(message!, { respond: (answer) => answers.push(answer) })
+      yield* BlockAssistant.submit(chat, answers[0]!)
+
+      const entries = yield* collectUntil(BlockAssistant, chat, (es) => text(es).includes("blue it is") && idle(es))
+      const state = BlockKit.blockStates(entries).get(message!.id)
+
       expect(failures(entries), traceEntries(entries)).toEqual([])
-      expect(text(entries)).toContain("blue")
+      expect(state?.open).toBe(false)
+      expect(state?.answer?.value).toEqual({ choice: "blue" })
     }).pipe(Effect.provide(layer))
   )
 
-  it.live("fills in a block from a fact", () =>
+  it.live("closes a block the user answered by typing, through `closes`", () =>
     Effect.gen(function* () {
-      const assistant = BlockAssistant
       const chat = yield* newChat
-      yield* assistant.submit(
-        chat,
-        fact("workflow:CreateCampaign", {
-          status: "needs_approval",
-          campaign: "Spring promo",
-          budget: 4800,
-          currency: "EUR",
-          next: "Get the user's approval for the budget."
-        })
-      )
-      const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 1)
-      // The host only says what it needs; the assistant writes the message and fills in the block.
-      const message = withBlock(entries)
+      yield* BlockAssistant.submit(chat, say("Pick a banner color."))
+      const first = yield* collectUntil(BlockAssistant, chat, (es) => shown(es) !== undefined && idle(es))
+      yield* BlockAssistant.submit(chat, say("blue"))
+
+      const entries = yield* collectUntil(BlockAssistant, chat, (es) => text(es).includes("blue it is") && idle(es))
+      const state = BlockKit.blockStates(entries).get(shown(first)!.id)
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
-      expect(message?.block?.kind).toBe("confirm")
-      expect(JSON.stringify(message)).toMatch(/4[.,]?8(00|k)/i)
+      expect(state).toEqual({ open: false, answer: undefined })
     }).pipe(Effect.provide(layer))
   )
-})
 
-describe("facts: tell the user or keep it internal", () => {
-  it.live("keeps routine progress internal", () =>
+  it.live("refuses props that don't fit the block, as a result the model sees", () =>
     Effect.gen(function* () {
-      const assistant = TestAssistant
-      const chat = yield* newChat
-      yield* assistant.submit(
-        chat,
-        fact("workflow:InventorySync", { step: "3 of 10", status: "syncing", detail: "routine batch, nothing needed" })
-      )
-      const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 1)
+      const script: Scripted.Script = (request) =>
+        Option.isSome(Scripted.lastResult(request, "send_user_message"))
+          ? Scripted.reply("Red or blue?")
+          : [Scripted.call("send_user_message", { text: "Pick", block: { kind: "choose_one", props: { options: 3 } } })]
 
-      expect(failures(entries), traceEntries(entries)).toEqual([])
-      expect(AssistantEvent.assistantTexts(entries)).toEqual([])
-    }).pipe(Effect.provide(assistantLayer()))
-  )
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* BlockAssistant.submit(chat, say("Pick a banner color."))
 
-  it.live("tells the user when something needs them", () =>
-    Effect.gen(function* () {
-      const assistant = TestAssistant
-      const chat = yield* newChat
-      yield* assistant.submit(
-        chat,
-        fact("workflow:InventorySync", {
-          status: "blocked",
-          detail: "The supplier rejected the order: the shipping address is missing. The user must provide one."
-        })
-      )
-      const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 1)
+        return yield* collectUntil(BlockAssistant, chat, idle)
+      }).pipe(Effect.provide(runMemory(BlockAssistant.toLayer(simple({ instructions })), Scripted.layer(script))))
 
-      expect(failures(entries), traceEntries(entries)).toEqual([])
-      expect(text(entries)).toContain("address")
-    }).pipe(Effect.provide(assistantLayer()))
-  )
-})
+      const results = entries.flatMap(({ event }) => (Predicate.isTagged(event, "ToolResult") ? [event.output] : []))
 
-const clusterLayer = runEntity(TestAssistant.toLayer(simple({ instructions: "You help a small team. Be brief." })))
-
-const researchClusterLayer = runEntity(
-  ResearchAssistant.toLayer(simple({ instructions: "You help a small team. Be brief." })).pipe(
-    Layer.provide(ResearchLive)
-  )
-)
-
-describe("layerEntity", () => {
-  it.live("runs a chat as a cluster entity", () =>
-    Effect.gen(function* () {
-      const assistant = TestAssistant
-      const chat = yield* newChat
-      yield* assistant.submit(chat, say("Say hi in one short message."))
-      const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 1)
-
-      expect(failures(entries), traceEntries(entries)).toEqual([])
-      expect(AssistantEvent.assistantTexts(entries).length).toBeGreaterThanOrEqual(1)
-    }).pipe(Effect.provide(clusterLayer))
-  )
-
-  it.live("runs a background specialist and reports back once", () =>
-    Effect.gen(function* () {
-      const assistant = ResearchAssistant
-      const chat = yield* newChat
-      yield* assistant.submit(
-        chat,
-        say("Start the research specialist in the background: which planet is the largest in our solar system?")
-      )
-
-      // The fact may land while the first turn still runs; then that turn relays it.
-      const entries = yield* collectUntil(
-        assistant,
-        chat,
-        (es) => finished(es).length > 0 && text(es).includes("jupiter") && notWorking(es)
-      )
-
-      expect(failures(entries), traceEntries(entries)).toEqual([])
-      expect(finished(entries).map((run) => run.specialist)).toEqual(["research"])
-      expect(entries.filter(({ event }) => Predicate.isTagged(event, "SpecialistStarted"))).toHaveLength(1)
-    }).pipe(Effect.provide(researchClusterLayer))
-  )
-})
-
-describe("discovery", () => {
-  const filler = (name: string, description: string) =>
-    Tool.make({
-      name,
-      description,
-      inputSchema: Schema.Struct({ id: Schema.String }),
-      run: () => Effect.succeed("not relevant")
+      expect(results[0]).toMatch(/props|Expected/)
+      expect(shown(entries)).toBeUndefined()
     })
+  )
+})
 
+describe("the cluster engine", () => {
+  it.live("runs a chat as an entity", () =>
+    Effect.gen(function* () {
+      const chat = yield* newChat
+      yield* TestAssistant.submit(chat, say("hi"))
+      const entries = yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
+
+      expect(failures(entries), traceEntries(entries)).toEqual([])
+      expect(AssistantEvent.assistantTexts(entries)).toEqual(["Hi."])
+    }).pipe(
+      Effect.provide(
+        runEntity(
+          TestAssistant.toLayer(simple({ instructions })),
+          Scripted.layer(() => Scripted.reply("Hi."))
+        )
+      )
+    )
+  )
+
+  it.live("runs a specialist in the chat's entity, and relays its report once", () =>
+    Effect.gen(function* () {
+      const chat = yield* newChat
+      yield* ResearchAssistant.submit(chat, say("What's the capital of Canada?"))
+
+      const entries = yield* collectUntil(
+        ResearchAssistant,
+        chat,
+        (es) => text(es).includes("ottawa") && notWorking(es)
+      )
+
+      expect(failures(entries), traceEntries(entries)).toEqual([])
+      expect(finished(entries).map((run) => run.status)).toEqual(["answered"])
+      // The report may land within the first turn, before its next step: either way it's relayed once.
+      expect(AssistantEvent.assistantTexts(entries).filter((message) => message === "It's Ottawa.")).toHaveLength(1)
+    }).pipe(Effect.provide(runEntity(researchHandlers, Scripted.layer(researchScript))))
+  )
+})
+
+describe("tools found on demand, and skills", () => {
   const parking = Tool.make({
     name: "parking_availability",
     description: "Free parking spots at an office garage right now.",
@@ -494,65 +468,85 @@ describe("discovery", () => {
     run: ({ office }) => Effect.succeed({ office, freeSpots: 37 })
   })
 
-  const catalog = [
-    parking,
-    filler("invoice_lookup", "Find an invoice by number."),
-    filler("payroll_run", "Start a payroll run for a month."),
-    filler("brand_assets", "Download logos and brand files."),
-    filler("printer_status", "Status of office printers."),
-    filler("vendor_contacts", "Contact details for vendors."),
-    filler("expense_report", "Submit an expense report."),
-    filler("meeting_rooms", "Book a meeting room."),
-    filler("holiday_calendar", "Public holidays per country."),
-    filler("it_ticket", "Open an IT support ticket."),
-    filler("contract_search", "Search signed contracts."),
-    filler("travel_booking", "Book flights and hotels.")
-  ]
+  const invoices = Tool.make({
+    name: "invoice_lookup",
+    description: "Find an invoice by number.",
+    inputSchema: Schema.Struct({ id: Schema.String }),
+    run: () => Effect.succeed("not relevant")
+  })
 
   it.live("finds a tool with search_tools and runs it with execute_tool", () =>
     Effect.gen(function* () {
-      const assistant = TestAssistant
-      const chat = yield* newChat
-      yield* assistant.submit(chat, say("How many parking spots are free at the Amsterdam office right now?"))
-      const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 1)
+      const script: Scripted.Script = (request) => {
+        const found = Scripted.lastResult(request, "search_tools")
+        const ran = Scripted.lastResult(request, "execute_tool")
 
-      expect(failures(entries), traceEntries(entries)).toEqual([])
-      expect(toolsRun(entries)).toContain("search_tools")
-      expect(toolsRun(entries)).toContain("execute_tool")
-      expect(text(entries)).toContain("37")
-    }).pipe(Effect.provide(assistantLayer(ToolDiscovery.make(Toolkit.fromArray(catalog)))))
-  )
+        if (Option.isSome(ran)) return Scripted.reply(ran.value)
 
-  it.live("loads a skill from its catalog and follows it", () =>
-    Effect.gen(function* () {
-      const assistant = TestAssistant
-      const chat = yield* newChat
-      yield* assistant.submit(chat, say("We have a new hire starting Monday. What's our onboarding process?"))
-      const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 1)
+        if (Option.isSome(found)) {
+          return found.value.includes("parking_availability")
+            ? [Scripted.call("execute_tool", { name: "parking_availability", input: { office: "Amsterdam" } })]
+            : Scripted.reply("Not found.")
+        }
 
-      expect(failures(entries), traceEntries(entries)).toEqual([])
-      expect(toolsRun(entries)).toContain("load_skill")
-      expect(text(entries)).toContain("buddy")
-    }).pipe(
-      Effect.provide(
-        memoryAssistant(
-          simple({
-            instructions: "You help an office team. Be brief.",
-            skills: [
-              Skill.make({
-                name: "Onboarding",
-                description: "Use when someone new is joining the team.",
-                instructions: "1. Send the welcome pack. 2. Book a buddy lunch on day one. 3. Set up their laptop."
-              }),
-              Skill.make({
-                name: "Offboarding",
-                description: "Use when someone is leaving.",
-                instructions: "Collect the laptop."
-              })
-            ]
-          })
+        return [Scripted.call("search_tools", { query: "free parking spots" })]
+      }
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* TestAssistant.submit(chat, say("Any parking free in Amsterdam?"))
+
+        return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
+      }).pipe(
+        Effect.provide(
+          memoryAssistant(
+            simple({ instructions, toolkit: ToolDiscovery.make(Toolkit.make(parking, invoices)) }),
+            Scripted.layer(script)
+          )
         )
       )
-    )
+
+      expect(failures(entries), traceEntries(entries)).toEqual([])
+      expect(toolsRun(entries)).toEqual(["search_tools", "execute_tool", "send_user_message", "wait"])
+      expect(text(entries)).toContain("37")
+    })
+  )
+
+  it.live("lists skills in the prompt, and load_skill returns one's instructions", () =>
+    Effect.gen(function* () {
+      const model = yield* Scripted.make((request) => {
+        const loaded = Scripted.lastResult(request, "load_skill")
+
+        return Option.isSome(loaded)
+          ? Scripted.reply(loaded.value)
+          : [Scripted.call("load_skill", { name: "Onboarding" })]
+      })
+
+      const skills = [
+        Skill.make({
+          name: "Onboarding",
+          description: "Use when someone new is joining the team.",
+          instructions: "Book a buddy lunch on day one."
+        }),
+        Skill.make({
+          name: "Offboarding",
+          description: "Use when someone is leaving.",
+          instructions: "Collect the laptop."
+        })
+      ]
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* TestAssistant.submit(chat, say("Someone new starts Monday."))
+
+        return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
+      }).pipe(Effect.provide(memoryAssistant(simple({ instructions, skills }), model.layer)))
+
+      const [request] = yield* model.requests
+
+      expect(failures(entries), traceEntries(entries)).toEqual([])
+      expect(request?.system).toContain("- Onboarding: Use when someone new is joining the team.")
+      expect(text(entries)).toContain("buddy lunch")
+    })
   )
 })

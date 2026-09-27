@@ -25,12 +25,13 @@ export const waitToolName = "wait"
 export const wait = Tool.make({
   name: waitToolName,
   description:
-    "End your turn and wait for the next message or fact. Call it when you have nothing more to do right now, in the same step as your last send_user_message.",
+    "End your turn and wait for the next message or update. Call it when you have nothing more to do right now, in the same step as your last send_user_message.",
   inputSchema: Tool.noInput,
   run: () => Effect.succeed("waiting")
 })
 
-const description = "Send a chat message to the user. This is the only way the user sees anything you write."
+const description =
+  "Send the user a chat message. It's the only way they see anything you write: text outside it is private to you."
 
 const append = (message: AssistantEvent.AssistantMessage) => AssistantChat.use((chat) => chat.append([message]))
 

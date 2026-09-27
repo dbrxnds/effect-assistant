@@ -102,7 +102,8 @@ pnpm install
 pnpm dev            # API on :8787 (in memory, or Postgres with DATABASE_URL), web on :3000
 pnpm docs:dev       # effect-assistant docs on :5173
 pnpm check          # vp check: format, lint, and type check
-pnpm test           # effect-assistant tests call the real model (ANTHROPIC_API_KEY in .env.local)
+pnpm test           # on a scripted model, no API key needed
+pnpm test:contract  # effect-assistant against the real model (ANTHROPIC_API_KEY in .env.local)
 ```
 
 ## Deploy

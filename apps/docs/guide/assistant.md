@@ -62,15 +62,15 @@ an answer (see [a reply to every message](./turns#a-reply-to-every-message)).
 The turn also has the pieces `turn.loop` is built from, for handlers that run
 the loop themselves (see [custom loops](./loops)):
 
-| Field                  | What it is                                                                                     |
-| ---------------------- | ---------------------------------------------------------------------------------------------- |
-| `chatId`               | The chat the turn is for.                                                                      |
-| `history`              | The model's history, rebuilt from the chat's log each time you read it.                        |
-| `entries`              | The chat's entries, with the assistant's [own events](./events#your-own-events) decoded.       |
-| `append(...events)`    | Writes the assistant's own events to the chat's log.                                           |
-| `tools`                | The assistant's own tools: `send_user_message`, `wait`, and the specialist tools.              |
-| `instructions(text)`   | The full system prompt: the colleague preamble, the text, and the specialist runs working now. |
-| `replyIfOwed(options)` | One more pass, reply-only, when the user's latest message has no reply.                        |
+| Field                  | What it is                                                                                      |
+| ---------------------- | ----------------------------------------------------------------------------------------------- |
+| `chatId`               | The chat the turn is for.                                                                       |
+| `history`              | The model's history, rebuilt from the chat's log each time you read it.                         |
+| `entries`              | The chat's entries, with the assistant's [own events](./events#your-own-events) decoded.        |
+| `append(...events)`    | Writes the assistant's own events to the chat's log.                                            |
+| `tools`                | The assistant's own tools: `send_user_message`, `wait`, and the specialist tools.               |
+| `instructions(text)`   | The full system prompt: `Instructions.protocol`, the text, and the specialist runs working now. |
+| `replyIfOwed(options)` | One more pass, reply-only, when the user's latest message has no reply.                         |
 
 ## Code that runs per chat
 
