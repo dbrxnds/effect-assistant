@@ -16,6 +16,11 @@ at a time (each chat has a lock) and send new entries to the chat's
 subscribers; an assistant's `subscribe` streams them. One process writes
 each chat: the cluster engine sends a chat to one entity.
 
+`delete` removes a chat's entries and remembers that it was deleted, so
+nothing is stored in it again. Delete through the assistant
+(`MyAssistant.delete`), which also has an open chat drop its state; use
+`delete` on its own only for a chat nothing has open.
+
 ## Constructors
 
 ### make
@@ -59,7 +64,8 @@ doesn't exist.
 **Details**
 
 One row per entry: `chat_id`, `seq`, `at`, and `event` as JSON, keyed by
-`(chat_id, seq)`.
+`(chat_id, seq)`. Deleting a chat removes its rows and records it in
+`chat_log_deleted` (`chat_id`, `at`), created the same way.
 
 ```ts
 const layerSql: Layer.Layer<ChatLog, never, SqlClient.SqlClient>
@@ -80,12 +86,16 @@ class ChatLog extends Context.Service<
     /** Appends events to a chat and returns them as stored entries. */
     readonly append: (
       chatId: ChatId,
-      events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.AppEvent>
+      events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>
     ) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
     /** Reads a chat's stored entries, in order: all of them, or those after a `seq`. */
     readonly read: (chatId: ChatId, options?: ReadOptions) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
     /** Chats whose last entry doesn't end a turn: the ones that may still owe one, after a restart. */
     readonly unfinished: Effect.Effect<ReadonlyArray<ChatId>>
+    /** Removes a chat's entries, and remembers it was deleted. Deleting it again does nothing. */
+    readonly delete: (chatId: ChatId) => Effect.Effect<void>
+    /** Whether the chat was deleted. A chat the engine opens reads this first: a deleted one takes nothing. */
+    readonly isDeleted: (chatId: ChatId) => Effect.Effect<boolean>
   }
 >()("effect-assistant/ChatLog")
 ```
@@ -110,7 +120,7 @@ interface ReadOptions {
 ### Storage
 
 The storage a `ChatLog` is built on: read a chat, find its last `seq`,
-write new entries, and find every chat's last entry.
+write new entries, find every chat's last entry, and delete a chat.
 
 ```ts
 interface Storage {
@@ -119,70 +129,10 @@ interface Storage {
   readonly write: (chatId: ChatId, entries: ReadonlyArray<AssistantEvent.Entry>) => Effect.Effect<void>
   /** Every chat's last entry. */
   readonly lastEntries: Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
+  /** Removes the chat's entries and keeps a record that it was deleted, at this time (epoch milliseconds). */
+  readonly delete: (chatId: ChatId, at: number) => Effect.Effect<void>
+  readonly isDeleted: (chatId: ChatId) => Effect.Effect<boolean>
 }
-
-/**
- * Creates a `ChatLog` from a {@link Storage}.
- *
- * **When to use**
- *
- * Use to back the log with a store other than memory or SQL.
- *
- * **Details**
- *
- * `append` numbers entries after the chat's last `seq`. It takes no lock:
- * the engine's chats write through their own, which also sends the entries
- * to the chat's subscribers. Write a chat outside its engine only while
- * nothing else writes it.
- *
- * @category constructors
- * @since 0.1.0
- */
-export const make = (storage: Storage): ChatLog["Service"] =>
-  ChatLog.of({
-    read: storage.read,
-    append: Effect.fn(function* (
-      chatId: ChatId,
-      events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.AppEvent>
-    ) {
-      if (events.length === 0) return []
-
-      const seq = yield* storage.lastSeq(chatId)
-      const at = yield* Clock.currentTimeMillis
-      const entries = events.map((event, n) => AssistantEvent.Entry.make({ chatId, seq: seq + n + 1, at, event }))
-
-      yield* storage.write(chatId, entries)
-
-      return entries
-    }),
-    unfinished: Effect.map(storage.lastEntries, (last) =>
-      last.flatMap((entry) => (AssistantEvent.isTurnEnd(entry.event) ? [] : [entry.chatId]))
-    )
-  })
-
-/**
- * Layer that keeps every chat in memory.
- *
- * @category layers
- * @since 0.1.0
- */
-export const layerMemory: Layer.Layer<ChatLog> = Layer.effect(
-  ChatLog,
-  Effect.gen(function* () {
-    const chats = yield* Ref.make(new Map<ChatId, ReadonlyArray<AssistantEvent.Entry>>())
-
-    return make({
-      read: (chatId, options) =>
-        Effect.map(Ref.get(chats), (all) =>
-          (all.get(chatId) ?? []).filter((entry) => entry.seq > (options?.after ?? 0))
-        ),
-      lastSeq: (chatId) => Effect.map(Ref.get(chats), (all) => all.get(chatId)?.at(-1)?.seq ?? 0),
-      write: (chatId, entries) =>
-        Ref.update(chats, (all) => new Map(all).set(chatId, [...(all.get(chatId) ?? []), ...entries])),
-      lastEntries: Effect.map(Ref.get(chats), (all) => [...all.values()].flatMap((entries) => entries.slice(-1)))
-    })
-  })
-)
 ```
 
 <small>Since 0.1.0</small>

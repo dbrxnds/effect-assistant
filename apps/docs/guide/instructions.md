@@ -15,9 +15,9 @@ const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
 The library adds only what the loop needs to work, `Instructions.protocol`:
 every step is a tool call, a last message with `wait: true` (or `wait`) ends
 the turn, and messages can arrive mid-turn. The rest the model learns where it applies: `send_user_message`'s
-description says the user sees nothing else, and a `<fact>` or a
-`<specialist>` report in the history says what it is and that the user
-hasn't seen it. Who the assistant is, its voice, and what's worth telling the
+description says the user sees nothing else, a `<specialist>` report in
+the history says what it is and that the user hasn't seen it, and your own
+events read as their `render` says (so say it there too). Who the assistant is, its voice, and what's worth telling the
 user are yours to write. `turn.instructions(text)` returns the full prompt,
 for a [custom loop](./loops).
 

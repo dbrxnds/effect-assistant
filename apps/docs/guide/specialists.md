@@ -2,7 +2,7 @@
 
 A [`Specialist`](/api/Specialist) is a focused agent with its own
 instructions, skills, and tools. The assistant hands it work and keeps chatting;
-the answer comes back as a fact.
+the answer comes back as its report, which wakes a turn.
 
 A specialist has two parts, like a workflow:
 
@@ -138,7 +138,7 @@ const AnalystLive = Analyst.toLayer(
 A run works in the chat of the turn that spawned it (`run.chatId`), so its
 handler looks up the same user the assistant's does (see
 [chats and users](./chats#specialists)). Its answer is written to that chat's
-log as a fact and gets a turn there.
+log as a `SpecialistFinished` and gets a turn there.
 
 ## Runs live with their chat
 
@@ -154,7 +154,7 @@ Runs aren't durable. That's deliberate: a specialist is a quick helper, not
 a durable job. A run cut off by a shutdown answers that it was cut off, so
 the assistant can spawn it again; with the cluster engine, the chat's entity
 starts again after the restart and runs a turn for that answer. For durable
-work, start a [workflow](./facts#long-running-work) from a tool instead.
+work, start a [workflow](./app-events#long-running-work) from a tool instead.
 
 Every time a run starts working (spawned, or continued by a follow-up) the
 chat's log gets `SpecialistStarted`, and when it stops, however it stops,

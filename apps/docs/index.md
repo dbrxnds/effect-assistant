@@ -15,11 +15,11 @@ hero:
 
 features:
   - title: One log per chat
-    details: Every message, model call, tool result, and fact is an event in an append-only log. The chat UI renders it; the model's history is rebuilt from it.
+    details: Every message, model call, tool result, and workflow update is an event in an append-only log. The chat UI gets what its user sees of it; the model's history is rebuilt from it.
   - title: Interruptible
     details: Submitting returns at once. The assistant reads the log before every model call, so a message sent mid-task joins the running turn.
   - title: It decides what you hear
-    details: The assistant talks only through a send_user_message tool. Workflow updates and specialist results arrive as facts, and the assistant chooses whether to tell you.
+    details: The assistant talks only through a send_user_message tool. Workflow updates and specialist results arrive as events it reads, and the assistant chooses whether to tell you.
   - title: Specialists, skills, blocks
     details: Hand work to background specialists, load playbooks on demand, and put buttons or inputs in messages when a structured answer is easier.
   - title: Memory or cluster

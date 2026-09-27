@@ -17,8 +17,8 @@ either shown to you or lost. A colleague is different:
 ## The idea in one paragraph
 
 Everything that happens in a chat is an event in an **append-only log**: your
-messages, the model's calls, tool results, and facts from workflows or
-specialists. `submit` appends an input (a message, a block answer, or a fact) and returns
+messages, the model's calls, tool results, specialists' reports, and your
+app's own events, like a workflow's progress. `submit` appends an input (a message, a block answer, or one of your events) and returns
 immediately. A **turn** runs the agent loop over the log: before every model
 call it rebuilds the history from the log, so anything that arrived meanwhile
 is seen. The assistant can only reach you through a `send_user_message` tool, so

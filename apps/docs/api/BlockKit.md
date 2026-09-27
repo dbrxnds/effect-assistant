@@ -13,8 +13,9 @@ renders them on the client.
   take a block from the kit. Answers need no server code: they arrive as
   `BlockAnswer` inputs.
 - Client: `toClient` maps each kind to a renderer, type-checked so
-  every kind is covered, and `blockStates` says which blocks are still
-  open.
+  every kind is covered, and renders the blocks of a chat's view
+  (`ChatView`), which says where each one stands. `blockStates`
+  folds the same from the log, for server-side code.
 
 ## Constructors
 
@@ -77,6 +78,8 @@ interface RenderArgs<B> {
   readonly open: boolean
   /** The user's answer, if they used the block. */
   readonly answer: AnswerOf<B> | undefined
+  /** For the decision block: what each decision is about (its preview), and how it was decided. Empty otherwise. */
+  readonly decisions: ReadonlyArray<ChatView.Decision>
   /** Sends an answer. Only call it while `open`. */
   readonly respond: (answer: AnswerOf<B>) => void
 }
@@ -102,46 +105,9 @@ Options for rendering one message's block.
 
 ```ts
 interface RenderOptions {
-  /** This message's block state, from {@link blockStates}. Default: open, unanswered. */
-  readonly state?: BlockState | undefined
   /** Submits an answer, for example over RPC. */
   readonly respond: (answer: AssistantEvent.BlockAnswer) => void
 }
-
-/**
- * Creates a client-side renderer for the blocks in a kit's messages.
- *
- * **Details**
- *
- * The renderer returns `undefined` when a message has no block, or one this
- * client can't show (an unknown kind, or props that don't decode). Show just
- * the text then. `respond` encodes the answer with the block's answer schema
- * and passes a `BlockAnswer` to {@link RenderOptions.respond}. Answers cross
- * the wire in their schema's JSON form, so dates and the like survive.
- *
- * **Example** (Rendering blocks in React)
- *
- * ```tsx
- * import { BlockKit } from "effect-assistant"
- * import type { ReactNode } from "react"
- * import { Blocks } from "./blocks"
- *
- * const render = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
- *   choose_one: ({ props, open, answer, respond }) =>
- *     props.options.map((option) => (
- *       <button key={option} disabled={!open} onClick={() => respond({ choice: option })}>
- *         {answer?.choice === option ? `✓ ${option}` : option}
- *       </button>
- *     )),
- *   confirm: ({ props, open, respond }) => (
- *     <button disabled={!open} onClick={() => respond({ confirmed: true })}>{props.confirmLabel}</button>
- *   )
- * })
- * ```
- *
- * @category constructors
- * @since 0.1.0
- */
 ```
 
 <small>Since 0.1.0</small>

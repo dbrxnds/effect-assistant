@@ -40,7 +40,7 @@ One `SqlClient` serves everything:
   doesn't exist.
 - `SingleRunner` keeps the cluster's messages and shards in the same
   database, so a persisted `submit` survives a crash.
-- `ClusterWorkflowEngine` runs the [workflows](./facts#long-running-work)
+- `ClusterWorkflowEngine` runs the [workflows](./app-events#long-running-work)
   your tools start, on the same cluster.
 - Your app's own chat table (see [chats and users](./chats)) can share the
   pool.
@@ -49,8 +49,10 @@ One `SqlClient` serves everything:
 
 Your server is where users meet the assistant. Before it submits or
 subscribes for a signed-in user, it checks the chat is theirs (see
-[check access at the edge](./chats#check-access-at-the-edge)). Facts from
-webhooks and workflows are submitted by your server, and never come from the client.
+[check access at the edge](./chats#check-access-at-the-edge)). The events
+webhooks and workflows report are submitted by your server, and never come
+from the client, and the client gets the chat's [view](./client), never its
+log.
 
 ## One writer per chat
 

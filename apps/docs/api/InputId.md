@@ -7,7 +7,7 @@ import { InputId } from "effect-assistant"
 ```
 
 The `InputId` module defines the id of one input to an assistant: a user message,
-a block answer, or a fact.
+a block answer, or one of the app's events (in its `id` field).
 
 Input ids make submitting idempotent: an assistant stores an input once, so a
 client or workflow can retry with the same id safely. Unlike chat and run

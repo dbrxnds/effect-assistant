@@ -1,12 +1,14 @@
 import { defineConfig } from "vitepress"
 
 const modules = [
+  "AppEvent",
   "Assistant",
   "AssistantActivity",
   "AssistantChat",
   "AssistantEngine",
   "AssistantEvent",
   "ChatLog",
+  "ChatView",
   "AssistantLoop",
   "Block",
   "BlockKit",
@@ -57,11 +59,12 @@ export default defineConfig({
           items: [
             { text: "Tools", link: "/guide/tools" },
             { text: "Chats and users", link: "/guide/chats" },
-            { text: "Facts and background work", link: "/guide/facts" },
+            { text: "Your own events and background work", link: "/guide/app-events" },
             { text: "Specialists", link: "/guide/specialists" },
             { text: "Skills", link: "/guide/skills" },
             { text: "UI blocks", link: "/guide/blocks" },
             { text: "Decisions", link: "/guide/decisions" },
+            { text: "The chat client", link: "/guide/client" },
             { text: "Instructions and prompts", link: "/guide/instructions" }
           ]
         },

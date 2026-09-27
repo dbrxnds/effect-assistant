@@ -46,7 +46,9 @@ Effect cluster, keyed by chat id.
   stores the input, then runs turns until nothing is pending.
 - A crash mid-turn leaves the message unprocessed, so the cluster
   **redelivers** it and the work resumes.
-- `subscribe` streams from the entity, which is where the events are written.
+- `subscribe` and `subscribeView` stream from the entity, which is where the
+  events are written, and `delete` goes to it, so the entity stops what
+  works in the chat.
 - The chat's [specialist](./specialists) runs live in its entity, which
   keeps itself alive while they, or turns for their answers, work. When an
   entity starts, it runs a turn for any input no turn has read.
@@ -67,4 +69,4 @@ It needs `Sharding`: a `SingleRunner` for one process with SQL storage, or
 
 Specialist runs are in memory with both: they're quick helpers. A run cut
 off by a shutdown answers that it was, so the assistant is told and can
-spawn it again. Put durable work in a [workflow](./facts#long-running-work).
+spawn it again. Put durable work in a [workflow](./app-events#long-running-work).

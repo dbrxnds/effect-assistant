@@ -123,7 +123,7 @@ const ExportToolsLive = ExportTools.toLayer(
 
 Tools can also depend on the turn's other service, `Specialist.Runner`. The
 `AssistantEngine` isn't one of them. A tool whose work reports back later
-starts a [workflow](./facts#long-running-work), and the workflow notifies
+starts a [workflow](./app-events#long-running-work), and the workflow notifies
 the chat.
 
 ## Tools that change things
