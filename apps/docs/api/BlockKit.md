@@ -159,7 +159,7 @@ messages. Run it from a turn, before or after its loop; it records a
 ```ts
 const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
   Stream.unwrap(
-    BlockKit.closeStale({ messages: 3 }).pipe(Effect.as(turn.loop({ model: "claude-sonnet-5", instructions })))
+    BlockKit.closeStale({ messages: 3 }).pipe(Effect.as(turn.loop({ instructions })))
   )
 )
 ```

@@ -16,7 +16,9 @@ every model call.
 - What the user sees: `AssistantMessage`, optionally with a
   `MessageBlock`.
 - What the model did: `ModelOutput`, then `ToolStarted` and
-  `ToolResult` for each tool call.
+  `ToolResult` for each tool call. These are the assistant's own
+  work: a chat UI shows the user only `AssistantMessage`s (and whether the
+  assistant is working).
 - Turn bookkeeping: `TurnStarted`, `TurnCompleted`,
   `TurnFailed`.
 - Specialist runs: `SpecialistStarted`, `SpecialistFinished`. A
@@ -28,6 +30,17 @@ every model call.
 
 Turns and specialist runs are the chat's activity: each opens with one event
 and closes with another (see `AssistantActivity`).
+
+**Versioning**
+
+A log is kept for good, so an event's stored form is versioned. An event
+with a `format` field is at that format; one without is at format 1. A
+change to what an event stores gives it the next format, and its schema
+goes on decoding every earlier one, migrated to the new form, so an old
+log reads as it did. `ModelOutput` and `ToolResult` are at
+format 2, `effect/unstable/ai`'s response parts and a tool's encoded result;
+their format 1 (history items, and results as text) came before the first
+release and isn't read.
 
 ## Models
 
@@ -62,18 +75,73 @@ class AssistantMessage extends Schema.TaggedClass<AssistantMessage>()("Assistant
 
 <small>Since 0.1.0</small>
 
+### ToolCallPart
+
+Schema for a tool call the model made: `effect/unstable/ai`'s tool call
+part (`Response.ToolCallPart`) for any tool, with its params in JSON, as the
+model wrote them.
+
+```ts
+const ToolCallPart = Schema.Struct({ …
+```
+
+<small>Since 0.1.0</small>
+
+### ToolCallPart
+
+A tool call the model made.
+
+```ts
+type ToolCallPart = typeof ToolCallPart.Type
+```
+
+<small>Since 0.1.0</small>
+
+### ModelPart
+
+Schema for what the log keeps of a model call: `effect/unstable/ai`'s
+response parts for text, reasoning (with the provider's metadata, like a
+thinking block's signature), and tool calls.
+
+```ts
+const ModelPart = Schema.Union([Response.TextPart, Response.ReasoningPart, ToolCallPart])
+```
+
+<small>Since 0.1.0</small>
+
+### ModelPart
+
+A part of a model call's output.
+
+```ts
+type ModelPart = typeof ModelPart.Type
+```
+
+<small>Since 0.1.0</small>
+
 ### ModelOutput
 
-The items of one model call: text, and tool calls.
+What one model call wrote: text, reasoning, and tool calls, as response
+parts. `Prompt.fromResponseParts` turns them into history.
 
 ```ts
 class ModelOutput extends Schema.TaggedClass<ModelOutput>()("ModelOutput", {
-  items: HistoryItems,
+  /** The stored form's version (see "Versioning" above). */
+  format: Schema.tag(2),
+  parts: Schema.Array(ModelPart),
   /**
    * The last entry the model had read when it wrote this. Inputs after it
    * arrived while the model was working.
    */
-  seenThroughSeq: Schema.optional(Schema.Int)
+  seenThroughSeq: Schema.optional(Schema.Int),
+  /** The model that wrote it: the provider's id for it, or the name the context gave it. */
+  model: Schema.optional(Schema.String),
+  /** The provider's id for the response, when it gives one. */
+  responseId: Schema.optional(Schema.String),
+  /** The call's tokens: input (with the cache's reads and writes) and output. */
+  usage: Schema.optional(Response.Usage),
+  /** How long the call took, in milliseconds. */
+  durationMillis: Schema.optional(Schema.Finite)
 })
 ```
 
@@ -94,15 +162,42 @@ class ToolStarted extends Schema.TaggedClass<ToolStarted>()("ToolStarted", {
 
 <small>Since 0.1.0</small>
 
+### ToolOutcome
+
+Schema for how a tool call went: `"success"`, or `"failure"`, which the
+model reads as an error.
+
+```ts
+const ToolOutcome = Schema.Literals(["success", "failure"])
+```
+
+<small>Since 0.1.0</small>
+
+### ToolOutcome
+
+How a tool call went.
+
+```ts
+type ToolOutcome = typeof ToolOutcome.Type
+```
+
+<small>Since 0.1.0</small>
+
 ### ToolResult
 
-The output of one tool call, as the model sees it.
+The result of one tool call, as the model reads it: the tool's success or
+failure in its encoded (JSON) form, and which one it is. A failure says its
+kind when it has one: a `ToolFailure`'s `kind`, or its tag.
 
 ```ts
 class ToolResult extends Schema.TaggedClass<ToolResult>()("ToolResult", {
+  /** The stored form's version (see "Versioning" above). */
+  format: Schema.tag(2),
   callId: Schema.String,
   tool: Schema.String,
-  output: Schema.String
+  outcome: ToolOutcome,
+  result: Schema.Json,
+  kind: Schema.optional(Schema.String)
 })
 ```
 
@@ -173,16 +268,10 @@ interface AnyEntry {
 
 ### Entry
 
-A stored event with its position in the chat. `seq` starts at 1 and has no
-gaps; `at` is the time it was stored, in epoch milliseconds.
+A stored event with its position in the chat.
 
 ```ts
-class Entry extends Schema.Class<Entry>("effect-assistant/AssistantEvent/Entry")({
-  chatId: ChatId,
-  seq: Schema.Int,
-  at: Schema.Finite,
-  event: Schema.Union([AssistantEvent, AppEvent])
-})
+type Entry = typeof Entry.Type
 ```
 
 <small>Since 0.1.0</small>
@@ -208,6 +297,17 @@ event in.
 
 ```ts
 const AppTag = Schema.String.pipe(Schema.brand("effect-assistant/AppTag"))
+```
+
+<small>Since 0.1.0</small>
+
+### Entry
+
+Schema for a stored event with its position in the chat. `seq` starts at 1
+and has no gaps; `at` is the time it was stored, in epoch milliseconds.
+
+```ts
+const Entry = Schema.Struct({ …
 ```
 
 <small>Since 0.1.0</small>
@@ -317,7 +417,9 @@ A turn started.
 ```ts
 class TurnStarted extends Schema.TaggedClass<TurnStarted>()("TurnStarted", {
   /** The assistant that runs it. */
-  assistant: Schema.String
+  assistant: Schema.String,
+  /** The id of the turn's trace, when a tracer records it (not Effect's own, which exports nothing). */
+  traceId: Schema.optional(Schema.String)
 })
 ```
 

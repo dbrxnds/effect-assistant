@@ -26,7 +26,7 @@ const MyAssistantLive = MyAssistant.toLayer(Effect.gen(function*() {
   const prompts = yield* Prompts
 
   return Effect.fn(function*(turn: Assistant.Turn) {
-    return turn.loop({ model: "claude-sonnet-5", instructions: yield* prompts.get("my-assistant") })
+    return turn.loop({ instructions: yield* prompts.get("my-assistant") })
   })
 }))
 ```

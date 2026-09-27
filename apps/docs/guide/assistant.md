@@ -12,7 +12,7 @@ import { Assistant } from "effect-assistant"
 export const MyAssistant = Assistant.make("my-assistant")
 
 export const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
-  turn.loop({ model: "claude-sonnet-5", instructions: "You help a small marketing team." })
+  turn.loop({ instructions: "You help a small marketing team." })
 )
 ```
 
@@ -50,9 +50,8 @@ history wired in.
 
 | Option         | What it is                                                                        |
 | -------------- | --------------------------------------------------------------------------------- |
-| `model`        | The model to call, by the name the `LanguageModel` layer knows it by.             |
 | `instructions` | The assistant's role and rules: text, or [resolved instructions](./instructions). |
-| `toolkit`      | Its [tools](./tools), next to its own.                                            |
+| `toolkit`      | Its [tools](./tools), next to its own: `AssistantLoop.tools(...)`.                |
 | `skills`       | [Playbooks](./skills) it loads when a task matches.                               |
 | `maxSteps`     | Model calls per turn. Default 16.                                                 |
 
@@ -94,10 +93,7 @@ const MyAssistantHandlers = MyAssistant.toLayer(
     return Effect.fn(function* (turn: Assistant.Turn) {
       const summary = yield* catalog.summary // every turn
 
-      return turn.loop({
-        model: "claude-sonnet-5",
-        instructions: `You help a small marketing team. We sell: ${summary}`
-      })
+      return turn.loop({ instructions: `You help a small marketing team. We sell: ${summary}` })
     })
   })
 )
@@ -129,17 +125,25 @@ names the missing services. For a tool's own services, see
 
 ## The model
 
-The handler names the model, and the loop calls whatever effect-uai
-`LanguageModel` the layer is given: `Anthropic.layer` in these docs. Swap the
-layer for another provider, or name a smaller model, as the
-[tests](./testing) do.
+The loop calls whatever `LanguageModel` (from `effect/unstable/ai`) the
+layer is given: `AnthropicLanguageModel.model("claude-sonnet-5")` in these
+docs. Swap it for another provider or model, or a scripted one, as the
+[tests](./testing) do. A specialist's layer can be given a model of its own
+(see [specialists](./specialists)).
+
+Prompt caching is the provider's setting. With Anthropic,
+`AnthropicLanguageModel.model(name, { cache_control: { type: "ephemeral" } })`
+sets one breakpoint for the whole request, which Anthropic puts on its last
+block: the system prompt, the tools, and the history so far are read from
+the cache at the next step. Each `ModelOutput` in the log records the step's
+usage, with the cache's reads and writes.
 
 ## What the layer needs
 
 `MyAssistant.toLayer(...)` is a layer that needs:
 
 - `AssistantEngine`, which runs the chats (see [engines](./engines));
-- `LanguageModel`, the model API;
+- `LanguageModel`, the model;
 - each of its specialists' handlers (`Research.toLayer(...)`);
 - what its build Effect required.
 

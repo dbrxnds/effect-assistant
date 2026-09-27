@@ -18,20 +18,25 @@ subscribers.
 **Example** (A tool that reads the chat)
 
 ```ts
-import * as Tool from "@effect-uai/core/Tool"
 import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
+import * as Tool from "effect/unstable/ai/Tool"
+import * as Toolkit from "effect/unstable/ai/Toolkit"
 import { AssistantChat } from "effect-assistant"
 
-const countMessages = Tool.make({
-  name: "count_messages",
+const CountMessages = Tool.make("count_messages", {
   description: "How many messages this chat has.",
-  inputSchema: Tool.noInput,
-  run: Effect.fn(function*() {
-    const chat = yield* AssistantChat.AssistantChat
-    const entries = yield* chat.entries
+  success: Schema.Int,
+  dependencies: [AssistantChat.AssistantChat]
+})
 
-    return entries.filter((entry) => entry.event._tag === "UserMessage").length
-  })
+const ChatToolsLive = Toolkit.make(CountMessages).toLayer({
+  count_messages: () =>
+    Effect.gen(function*() {
+      const entries = yield* (yield* AssistantChat.AssistantChat).entries
+
+      return entries.filter((entry) => Predicate.isTagged(entry.event, "UserMessage")).length
+    })
 })
 ```
 

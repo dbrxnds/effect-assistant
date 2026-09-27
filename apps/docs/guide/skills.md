@@ -19,9 +19,7 @@ const orderingCampaigns = Skill.make({
 3. When you have both, call start_campaign.`
 })
 
-const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
-  turn.loop({ model: "claude-sonnet-5", instructions, skills: [orderingCampaigns] })
-)
+const MyAssistantHandlers = MyAssistant.toLayer((turn) => turn.loop({ instructions, skills: [orderingCampaigns] }))
 ```
 
 Write the description as a trigger ("Use when…"): it's all the model sees

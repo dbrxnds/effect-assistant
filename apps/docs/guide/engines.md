@@ -11,7 +11,7 @@ import { AssistantEngine, ChatLog } from "effect-assistant"
 import * as Layer from "effect/Layer"
 
 const MyAssistantLive = MyAssistantHandlers.pipe(
-  Layer.provide(AnthropicLive),
+  Layer.provide(ModelLive), // the LanguageModel
   Layer.provideMerge(AssistantEngine.layerMemory),
   Layer.provideMerge(ChatLog.layerMemory)
 )

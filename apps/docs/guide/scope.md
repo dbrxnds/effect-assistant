@@ -9,7 +9,7 @@ Effect already has most of what a framework builds itself:
 | A workflow engine              | `effect/unstable/workflow`                                |
 | Durable runs, scaling out      | `effect/unstable/cluster` entities                        |
 | A request context              | Services the handler looks up from the [chat id](./chats) |
-| Model and tool adapters        | [effect-uai](https://github.com/betalyra/effect-uai)      |
+| Model and tool adapters        | `effect/unstable/ai` and its providers                    |
 | Tracing                        | Effect's OpenTelemetry support                            |
 | Storage adapters               | `SqlClient`                                               |
 | Retries, timeouts, concurrency | Effect                                                    |
@@ -41,7 +41,7 @@ your app, built from services, tools, instructions, and [loops](./loops).
 | Long-term memory, RAG  | A search tool over a store you choose, scoped to the chat's user                               |
 | Evals                  | Tests that drive the client from outside, like a user would                                    |
 | Vector stores          | Your app                                                                                       |
-| Model providers        | effect-uai                                                                                     |
+| Model providers        | `effect/unstable/ai` providers, like `@effect/ai-anthropic`                                    |
 | Cost caps, rate limits | A custom loop, or your RPC handler before `submit`                                             |
 | A studio or dashboard  | Your tracing backend                                                                           |
 

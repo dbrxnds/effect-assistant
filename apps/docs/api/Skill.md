@@ -42,11 +42,11 @@ const make: <R = never>(skill: Skill<R>) => Skill<R>
 
 ### toolkit
 
-Returns the `load_skill` tool for these skills, or an empty toolkit when
-there are none.
+Returns the `load_skill` tool for these skills, or no tools when there are
+none.
 
 ```ts
-const toolkit: <R>(skills: ReadonlyArray<Skill<R>>) => Toolkit.Toolkit
+const toolkit: <R>(skills: ReadonlyArray<Skill<R>>) => AssistantLoop.Tools<R>
 ```
 
 <small>Since 0.1.0</small>

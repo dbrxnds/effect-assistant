@@ -18,29 +18,33 @@ directly.
 **Example** (Common tools up front, the rest on demand)
 
 ```ts
-import * as Toolkit from "@effect-uai/core/Toolkit"
-import { ToolDiscovery } from "effect-assistant"
+import { AssistantLoop, ToolDiscovery } from "effect-assistant"
 
-const toolkit = {
-  ...Toolkit.make(listProducts, startCampaign),
-  ...ToolDiscovery.make(Toolkit.make(offices, shipmentEta))
-}
+const MyAssistantLive = MyAssistant.toLayer(Effect.gen(function*() {
+  const toolkit = AssistantLoop.merge(
+    AssistantLoop.tools(yield* OrderTools),
+    ToolDiscovery.make(AssistantLoop.tools(yield* OfficeTools))
+  )
+
+  return (turn) => turn.loop({ instructions: "You help a small team.", toolkit })
+}))
 ```
 
 ## Constructors
 
 ### make
 
-Creates `search_tools` and `execute_tool` for a toolkit.
+Creates `search_tools` and `execute_tool` for these tools.
 
 **Details**
 
 Search scores the query's words against tool names and descriptions and
 returns the top five. `execute_tool` runs the tool the way a model call
-would, so its input is validated and its failures come back as results.
+would, so its input is validated, and a failure of the tool is a failure
+of `execute_tool`, with the tool's result.
 
 ```ts
-const make: <Tools extends Toolkit.Toolkit>(toolkit: Tools) => …
+const make: <R>(tools: AssistantLoop.Tools<R>) => AssistantLoop.Tools<R>
 ```
 
 <small>Since 0.1.0</small>

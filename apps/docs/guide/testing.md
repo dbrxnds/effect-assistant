@@ -7,9 +7,31 @@ assertions about what the user was shown. Test two things separately.
 
 What your tools and handlers do with what the model answers doesn't depend
 on the model: a tool's side effects, a workflow's facts, a custom loop.
-Script the model's answers (a `LanguageModel` layer that returns the tool
-calls you want) and assert on the log. These tests are fast, free, and
-deterministic, so they run on every change.
+Script the model's answers and assert on the log: `LanguageModel.make` from
+`effect/unstable/ai` takes a `generateText` that returns the response parts
+you want (tool calls, text), and sees each request's prompt and tools. These
+tests are fast, free, and deterministic, so they run on every change.
+
+**Example** (A model that always replies)
+
+```ts
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Stream from "effect/Stream"
+import * as LanguageModel from "effect/unstable/ai/LanguageModel"
+
+const Replies = Layer.effect(
+  LanguageModel.LanguageModel,
+  LanguageModel.make({
+    generateText: () =>
+      Effect.succeed([
+        { type: "tool-call", id: "call_1", name: "send_user_message", params: { text: "Hi.", wait: true } },
+        { type: "finish", reason: "tool-calls", usage: { inputTokens: {}, outputTokens: {} } }
+      ]),
+    streamText: () => Stream.die("not streamed")
+  })
+)
+```
 
 effect-assistant's own tests do this for its mechanics: messages that
 arrive mid-turn, specialist runs, blocks, crash recovery, both engines.
@@ -32,10 +54,9 @@ memory event log. That's all an engine needs. A chat is just a new id,
 ```ts
 import { describe, expect, it } from "@effect/vitest"
 
-const AssistantTest = MyAssistant.toLayer((turn) =>
-  turn.loop({ model: "claude-haiku-4-5", instructions, toolkit })
-).pipe(
-  Layer.provide(AnthropicLive),
+const AssistantTest = MyAssistant.toLayer((turn) => turn.loop({ instructions, toolkit })).pipe(
+  Layer.provide(AnthropicLanguageModel.model("claude-haiku-4-5")),
+  Layer.provide(AnthropicClientLive),
   Layer.provideMerge(AssistantEngine.layerMemory),
   Layer.provideMerge(ChatLog.layerMemory)
 )
@@ -76,7 +97,7 @@ what arrived from the chat's log. Give each specialist an empty handler too
 
 ```ts
 const QuietAssistant = MyAssistant.toLayer(() => Stream.empty).pipe(
-  Layer.provide(AnthropicLive), // the layer wants a model API; nothing calls it
+  Layer.provide(Replies), // the layer wants a model; nothing calls it
   Layer.provideMerge(AssistantEngine.layerMemory),
   Layer.provideMerge(ChatLog.layerMemory)
 )

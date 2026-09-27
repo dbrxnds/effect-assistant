@@ -35,11 +35,13 @@ nothing the model writes reaches you unless it chooses to send it.
 | [`Specialist`](/api/Specialist)                                    | Focused agents the assistant hands work to, in the background.          |
 | [`Skill`](/api/Skill)                                              | Playbooks the assistant loads when a task matches.                      |
 | [`ToolDiscovery`](/api/ToolDiscovery)                              | Search-and-run for tool catalogs too big for the prompt.                |
+| [`ToolFailure`](/api/ToolFailure)                                  | A tool's failure, as a message the model reads.                         |
 | [`Block`](/api/Block), [`BlockKit`](/api/BlockKit)                 | Small UI in messages: options, confirm, inputs.                         |
 | [`Instructions`](/api/Instructions)                                | Prompts: text, optionally with span attributes (for prompt management). |
 
-It's built on [Effect](https://effect.website) (v4) and
-[effect-uai](https://github.com/betalyra/effect-uai) for model calls and tools.
+It's built on [Effect](https://effect.website) (v4), with Effect's AI modules
+(`effect/unstable/ai`) for model calls and tools: any `LanguageModel`
+provider, and native `Tool`s.
 Every module follows Effect's conventions: services, layers, and schemas.
 
 It's a chat turn engine, not an agent framework: memory, RAG, and evals are

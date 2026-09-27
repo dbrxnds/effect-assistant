@@ -89,7 +89,8 @@ ends with `turn.replyIfOwed` too.
 
 ## When a turn fails
 
-A failing handler, or a tool that fails with anything but `Tool.fail` (see
-[tool failures](./tools#failures)), ends the turn with `TurnFailed`. Its
+A failing handler, a failing model call, or a tool that dies (a tool's
+failures are results the model reads: see [tool failures](./tools#failures))
+ends the turn with `TurnFailed`. Its
 `throughSeq` covers everything stored so far, so a failing input isn't
 retried forever. The next input starts a fresh turn.
