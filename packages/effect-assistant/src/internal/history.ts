@@ -4,11 +4,69 @@
  * @since 0.1.0
  * @internal
  */
-import * as Items from "@effect-uai/core/Items"
 import * as Match from "effect/Match"
 import * as Predicate from "effect/Predicate"
+import * as Prompt from "effect/unstable/ai/Prompt"
+import * as Response from "effect/unstable/ai/Response"
 import * as AssistantEvent from "../AssistantEvent.ts"
-import { toJsonText } from "./schema.ts"
+import { toJson, toJsonText } from "./schema.ts"
+
+/**
+ * A user message with this text.
+ *
+ * @internal
+ */
+export const userText = (text: string): Prompt.UserMessage =>
+  Prompt.userMessage({ content: [Prompt.textPart({ text })] })
+
+/**
+ * A tool call's result, as a tool message.
+ *
+ * @internal
+ */
+export const toolMessage = (result: AssistantEvent.ToolResult): Prompt.ToolMessage =>
+  Prompt.toolMessage({
+    content: [
+      Prompt.toolResultPart({
+        id: result.callId,
+        name: result.tool,
+        isFailure: result.outcome === "failure",
+        result: result.result,
+        providerExecuted: false
+      })
+    ]
+  })
+
+/**
+ * The calls in the history with no result: the ones a crash cut off.
+ *
+ * @internal
+ */
+export const unansweredCalls = (history: ReadonlyArray<Prompt.Message>): ReadonlyArray<AssistantEvent.ToolCallPart> => {
+  const answered = new Set(
+    history.flatMap((message) =>
+      message.role === "tool" ? message.content.flatMap((part) => (part.type === "tool-result" ? [part.id] : [])) : []
+    )
+  )
+
+  return history.flatMap((message) =>
+    message.role === "assistant"
+      ? message.content.flatMap((part) =>
+          part.type === "tool-call" && !part.providerExecuted && !answered.has(part.id)
+            ? [
+                Response.makePart("tool-call", {
+                  id: part.id,
+                  name: part.name,
+                  params: toJson(part.params),
+                  providerExecuted: false,
+                  metadata: part.options
+                })
+              ]
+            : []
+        )
+      : []
+  )
+}
 
 const factText = (fact: AssistantEvent.Fact) =>
   `<fact source="${fact.source}">\nAn update from a tool or workflow. The user hasn't seen it: tell them if it matters to them.\n${toJsonText(fact.payload)}\n</fact>`
@@ -102,9 +160,9 @@ const answerText = (answer: AssistantEvent.BlockAnswer) =>
 export const fromEntries = (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
   inputs: ReadonlySet<string>
-): ReadonlyArray<Items.HistoryItem> => {
-  const history: Array<Items.HistoryItem> = []
-  const held: Array<Items.HistoryItem> = []
+): ReadonlyArray<Prompt.Message> => {
+  const history: Array<Prompt.Message> = []
+  const held: Array<Prompt.Message> = []
   const open = new Set<string>()
 
   const flushIfClosed = () => {
@@ -120,7 +178,7 @@ export const fromEntries = (
       : undefined
   }
 
-  const input = (index: number, item: Items.HistoryItem) => {
+  const input = (index: number, item: Prompt.Message) => {
     const seen = nextSeen(index)
 
     if (open.size > 0 || (seen !== undefined && seen < entries[index]!.seq)) held.push(item)
@@ -130,24 +188,24 @@ export const fromEntries = (
   entries.forEach(({ event }, index) => {
     if (!AssistantEvent.isLibraryEvent(event)) {
       // The app's own events: its inputs the model reads; the rest are the app's records.
-      if (inputs.has(event._tag)) input(index, Items.userText(appInputText(event)))
+      if (inputs.has(event._tag)) input(index, userText(appInputText(event)))
 
       return
     }
 
     Match.value(event).pipe(
       Match.tagsExhaustive({
-        UserMessage: (message) => input(index, Items.userText(message.text)),
-        BlockAnswer: (answer) => input(index, Items.userText(answerText(answer))),
-        Fact: (fact) => input(index, Items.userText(factText(fact))),
+        UserMessage: (message) => input(index, userText(message.text)),
+        BlockAnswer: (answer) => input(index, userText(answerText(answer))),
+        Fact: (fact) => input(index, userText(factText(fact))),
         ModelOutput: (output) => {
-          history.push(...output.items)
+          history.push(...Prompt.fromResponseParts(output.parts).content)
 
-          for (const call of output.items.filter(Items.isToolCall)) open.add(call.call_id)
+          for (const part of output.parts) if (part.type === "tool-call") open.add(part.id)
           flushIfClosed()
         },
         ToolResult: (result) => {
-          history.push(Items.toolCallOutput(result.callId, result.output))
+          history.push(toolMessage(result))
           open.delete(result.callId)
           flushIfClosed()
         },
@@ -156,7 +214,7 @@ export const fromEntries = (
         TurnStarted: () => undefined,
         TurnCompleted: () => undefined,
         TurnFailed: () => undefined,
-        SpecialistFinished: (finished) => input(index, Items.userText(finishedText(entries, index, finished))),
+        SpecialistFinished: (finished) => input(index, userText(finishedText(entries, index, finished))),
         SpecialistStarted: () => undefined,
         BlocksClosed: () => undefined
       })

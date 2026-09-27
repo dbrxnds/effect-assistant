@@ -13,24 +13,36 @@
  * workflow step (it runs once per key, however often the tool call does) or
  * behind the user's approval, with a block.
  *
+ * A tool whose handler uses it declares it as a dependency, like any service
+ * its handler needs.
+ *
  * **Example** (A tool that starts a workflow once per call)
  *
  * ```ts
- * import * as Tool from "@effect-uai/core/Tool"
  * import * as Effect from "effect/Effect"
+ * import * as Schema from "effect/Schema"
+ * import * as Tool from "effect/unstable/ai/Tool"
+ * import * as Toolkit from "effect/unstable/ai/Toolkit"
  * import { AssistantToolCall, RunId } from "effect-assistant"
  *
- * const placeOrder = Tool.make({
- *   name: "place_order",
+ * const PlaceOrder = Tool.make("place_order", {
  *   description: "Places the order the user confirmed.",
- *   inputSchema: OrderInput,
- *   run: Effect.fn(function*(input: typeof OrderInput.Type) {
- *     // The same run id every time this call runs.
- *     const runId = RunId.fromKey(yield* AssistantToolCall.idempotencyKey)
- *     yield* ProductOrder.execute({ runId, ...input }, { discard: true })
+ *   parameters: OrderInput,
+ *   success: Schema.Struct({ runId: RunId.RunId }),
+ *   dependencies: [AssistantToolCall.AssistantToolCall]
+ * })
  *
- *     return { runId }
- *   })
+ * const OrderTools = Toolkit.make(PlaceOrder)
+ *
+ * const OrderToolsLive = OrderTools.toLayer({
+ *   place_order: (input) =>
+ *     Effect.gen(function*() {
+ *       // The same run id every time this call runs.
+ *       const runId = RunId.fromKey(yield* AssistantToolCall.idempotencyKey)
+ *       yield* ProductOrder.execute({ runId, ...input }, { discard: true })
+ *
+ *       return { runId }
+ *     })
  * })
  * ```
  *

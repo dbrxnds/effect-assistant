@@ -6,20 +6,6 @@ import { flow } from "effect/Function"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 
-/**
- * Drops a codec's decoding and encoding services from its type.
- *
- * Use it for schemas that declare `unknown` services but need none at
- * runtime, such as effect-uai's history items, which are plain JSON.
- *
- * @internal
- */
-export function withoutServices<T, E>(schema: Schema.Codec<T, E, unknown, unknown>): Schema.Codec<T, E>
-// The overload states what callers get; the codec itself is returned as it is.
-export function withoutServices(schema: Schema.Top): Schema.Top {
-  return schema
-}
-
 const JsonText = Schema.fromJsonString(Schema.Unknown)
 
 /**
@@ -39,3 +25,17 @@ export const toJsonText = flow(
  * @internal
  */
 export const isJsonText = (text: string): boolean => Option.isSome(Schema.decodeOption(JsonText)(text))
+
+const decodeJsonText = Schema.decodeOption(Schema.fromJsonString(Schema.Json))
+
+/**
+ * A value in its JSON form, as `JSON.stringify` writes it (a `Date` as its
+ * ISO string, a class as its fields), or `null` when it has none.
+ *
+ * @internal
+ */
+export const toJson = flow(
+  Schema.encodeUnknownOption(JsonText),
+  Option.flatMap(decodeJsonText),
+  Option.getOrElse((): Schema.Json => null)
+)

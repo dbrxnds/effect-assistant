@@ -5,10 +5,6 @@
  * @since 0.1.0
  * @internal
  */
-import * as HistoryCheck from "@effect-uai/core/HistoryCheck"
-import * as Items from "@effect-uai/core/Items"
-import type * as LanguageModel from "@effect-uai/core/LanguageModel"
-import * as Toolkit from "@effect-uai/core/Toolkit"
 import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import type * as Context from "effect/Context"
@@ -21,6 +17,8 @@ import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
+import type * as LanguageModel from "effect/unstable/ai/LanguageModel"
+import type * as Prompt from "effect/unstable/ai/Prompt"
 import type * as Assistant from "../Assistant.ts"
 import * as AssistantActivity from "../AssistantActivity.ts"
 import type { AssistantChat } from "../AssistantChat.ts"
@@ -36,6 +34,7 @@ import { mapText } from "./instructions.ts"
 import { toJsonText } from "./schema.ts"
 import * as Specialists from "./specialists.ts"
 import * as Telemetry from "./telemetry.ts"
+import * as Toolkits from "./toolkit.ts"
 import * as Tools from "./tools.ts"
 
 /** Host-visible failure when a turn handled the user's input but never spoke. */
@@ -86,7 +85,7 @@ export interface Registration {
   readonly open: Effect.Effect<TurnHandler, never, Scope.Scope | AssistantChat>
   readonly specialists: ReadonlyArray<{ readonly specialist: Specialist.Any; readonly built: Specialist.Built }>
   /** The assistant's own tools: `send_user_message`, `wait`, and the specialist tools. */
-  readonly builtins: Toolkit.Toolkit
+  readonly builtins: AssistantLoop.Tools<Assistant.TurnServices>
 }
 
 /**
@@ -109,11 +108,10 @@ export const makeRegistration = Effect.fn(function* (
     )
   )
 
-  // Fails on a tool name used twice.
-  const builtins = yield* Toolkit.compose(
-    Toolkit.make(Tools.sendUserMessage(definition.blocks), Tools.wait),
-    Specialists.toolkit(definition.specialists)
-  ).pipe(Effect.orDie)
+  const builtins = Toolkits.merge(
+    yield* Tools.messaging(definition.blocks),
+    yield* Specialists.toolkit(definition.specialists)
+  )
 
   const registration: Registration = { definition, model, open: options.open, specialists, builtins }
 
@@ -148,13 +146,13 @@ const lastSeq = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, otherwise: num
 
 /**
  * A history view's result as a history: each run of entries as the model
- * reads them, and history items as they are, in order.
+ * reads them, and prompt messages as they are, in order.
  */
 const toHistory = (
-  viewed: ReadonlyArray<Assistant.Entry<any> | Items.HistoryItem>,
+  viewed: ReadonlyArray<Assistant.Entry<any> | Prompt.Message>,
   inputs: ReadonlySet<string>
-): ReadonlyArray<Items.HistoryItem> => {
-  const out: Array<Items.HistoryItem> = []
+): ReadonlyArray<Prompt.Message> => {
+  const out: Array<Prompt.Message> = []
   let run: Array<AssistantEvent.AnyEntry> = []
 
   const flush = () => {
@@ -175,7 +173,7 @@ const toHistory = (
   return out
 }
 
-const isEntry = (item: Assistant.Entry<any> | Items.HistoryItem): item is Assistant.Entry<any> =>
+const isEntry = (item: Assistant.Entry<any> | Prompt.Message): item is Assistant.Entry<any> =>
   Predicate.hasProperty(item, "seq")
 
 /**
@@ -191,24 +189,19 @@ const closeOpenCalls = Effect.fn(function* (chat: AssistantChat["Service"], star
     entries.flatMap(({ event }) => (Predicate.isTagged(event, "ToolStarted") ? [event.callId] : []))
   )
 
-  const items = entries.flatMap(({ event }) =>
-    Predicate.isTagged(event, "ModelOutput")
-      ? event.items
-      : Predicate.isTagged(event, "ToolResult")
-        ? [Items.toolCallOutput(event.callId, event.output)]
-        : []
-  )
-
-  const open = HistoryCheck.findUnansweredCalls(items)
+  const open = History.unansweredCalls(History.fromEntries(entries, new Set()))
 
   if (open.length === 0) return
 
   yield* chat.append(
     open.map((call) =>
       AssistantEvent.ToolResult.make({
-        callId: call.call_id,
+        callId: call.id,
         tool: call.name,
-        output: started.has(call.call_id) ? History.mayHaveRunOutput : History.notRunOutput
+        outcome: "failure",
+        ...(started.has(call.id)
+          ? { result: History.mayHaveRunOutput, kind: "may_have_run" }
+          : { result: History.notRunOutput, kind: "not_run" })
       })
     )
   )
@@ -265,7 +258,7 @@ const makeTurnApi = (
     mapText(given, (text) => `${Instructions.protocol}\n\n${text}${running}`)
 
   // Only send_user_message, and the call is forced: the reply pass can only reply.
-  const replyOnly = Toolkit.fromArray(Object.values(builtins).filter((tool) => tool.name === Tools.sendUserMessageName))
+  const replyOnly = Toolkits.only(builtins, [Tools.sendUserMessageName])
 
   const replyIfOwed = (options: Assistant.ReplyOptions) =>
     Stream.unwrap(
@@ -277,7 +270,6 @@ const makeTurnApi = (
         if (History.unreadAfter(all, through, app.inputs) || !History.owesReply(all, through)) return Stream.empty
 
         return AssistantLoop.stream({
-          model: options.model,
           instructions: mapText(
             instructions(options.instructions),
             (text) => `${text}\n\n${options.nudge ?? defaultReplyNudge}`
@@ -287,7 +279,7 @@ const makeTurnApi = (
           history: Effect.map(chat.entries, (all) => History.fromEntries(all, app.inputs)),
           maxSteps: 1,
           // Named, not just required: a model used to calling wait would otherwise call a tool that isn't there.
-          toolChoice: { type: "function", name: Tools.sendUserMessageName }
+          toolChoice: { tool: Tools.sendUserMessageName }
         })
       })
     )
@@ -305,27 +297,21 @@ const makeTurnApi = (
     replyIfOwed,
     loop: (options) => {
       const skills = options.skills ?? []
+      const toolkit = Toolkits.merge(Toolkits.merge(builtins, Skill.toolkit(skills)), options.toolkit ?? Toolkits.empty)
+      const twice = Toolkits.duplicateNames(toolkit)
 
-      const loop = Stream.unwrap(
-        Effect.map(
-          // Fails on a tool name used twice, like a tool named after a built-in.
-          Effect.orDie(Toolkit.compose(builtins, Skill.toolkit(skills), options.toolkit ?? {})),
-          (toolkit) =>
-            AssistantLoop.stream({
-              model: options.model,
+      const loop =
+        twice.length > 0
+          ? Stream.die(`Tool names used twice, like one named after a built-in: ${twice.join(", ")}`)
+          : AssistantLoop.stream({
               instructions: mapText(instructions(options.instructions), (text) => Skill.withCatalog(text, skills)),
               toolkit,
               history: history(options.history),
               maxSteps: options.maxSteps ?? 16,
               toolChoice: "required"
             })
-        )
-      )
 
-      return Stream.concat(
-        loop,
-        replyIfOwed({ model: options.model, instructions: options.instructions, nudge: options.replyNudge })
-      )
+      return Stream.concat(loop, replyIfOwed({ instructions: options.instructions, nudge: options.replyNudge }))
     }
   }
 }
@@ -349,8 +335,13 @@ export const runTurn = Effect.fn(
 
     yield* Telemetry.agentInput(History.unhandledInputs(before, options.registration.definition.app.inputs))
 
+    const assistant = options.registration.definition.name
+    const traceId = yield* Telemetry.currentTraceId
+
     const started = yield* chat.append([
-      AssistantEvent.TurnStarted.make({ assistant: options.registration.definition.name })
+      AssistantEvent.TurnStarted.make(
+        Option.match(traceId, { onNone: () => ({ assistant }), onSome: (id) => ({ assistant, traceId: id }) })
+      )
     ])
 
     const startSeq = lastSeq(started, 0)
@@ -363,7 +354,14 @@ export const runTurn = Effect.fn(
       Effect.flatMap(Ref.get(read), (seenThroughSeq) =>
         chat.append([
           Predicate.isTagged(event, "ModelOutput")
-            ? AssistantEvent.ModelOutput.make({ items: event.items, seenThroughSeq })
+            ? AssistantEvent.ModelOutput.make({
+                parts: event.parts,
+                seenThroughSeq,
+                model: event.model,
+                responseId: event.responseId,
+                usage: event.usage,
+                durationMillis: event.durationMillis
+              })
             : event
         ])
       )

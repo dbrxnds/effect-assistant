@@ -5,10 +5,6 @@
  * @since 0.1.0
  * @internal
  */
-import * as Items from "@effect-uai/core/Items"
-import type * as LanguageModel from "@effect-uai/core/LanguageModel"
-import * as Tool from "@effect-uai/core/Tool"
-import * as Toolkit from "@effect-uai/core/Toolkit"
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -22,6 +18,10 @@ import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Semaphore from "effect/Semaphore"
 import * as Stream from "effect/Stream"
+import type * as LanguageModel from "effect/unstable/ai/LanguageModel"
+import * as Prompt from "effect/unstable/ai/Prompt"
+import * as Tool from "effect/unstable/ai/Tool"
+import * as Toolkit from "effect/unstable/ai/Toolkit"
 import { AssistantChat } from "../AssistantChat.ts"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import * as AssistantLoop from "../AssistantLoop.ts"
@@ -29,8 +29,11 @@ import * as InputId from "../InputId.ts"
 import * as RunId from "../RunId.ts"
 import * as Skill from "../Skill.ts"
 import * as Specialist from "../Specialist.ts"
+import * as ToolFailure from "../ToolFailure.ts"
+import { toolMessage, userText } from "./history.ts"
 import { mapText } from "./instructions.ts"
 import * as Telemetry from "./telemetry.ts"
+import * as Toolkits from "./toolkit.ts"
 
 /**
  * A specialist's handler once its build ran for the chat.
@@ -55,11 +58,10 @@ export const briefText = (brief: Specialist.Brief): string =>
     .filter(Boolean)
     .join("\n")
 
-/** The last text the model wrote. */
-const finalText = (items: ReadonlyArray<Items.HistoryItem>): string =>
-  items
-    .flatMap((item) => (Items.isMessage(item) && item.role === "assistant" ? item.content : []))
-    .flatMap((content) => (Items.isOutputText(content) ? [content.text] : []))
+/** The text the model wrote in one call. */
+const finalText = (output: AssistantEvent.ModelOutput): string =>
+  output.parts
+    .flatMap((part) => (part.type === "text" ? [part.text] : []))
     .join("")
     .trim()
 
@@ -83,14 +85,14 @@ export const runBrief = Effect.fn(
       readonly specialist: Specialist.Any
       readonly runId: RunId.RunId
       readonly brief: Specialist.Brief
-      readonly history: Ref.Ref<ReadonlyArray<Items.HistoryItem>>
-      readonly inbox: Queue.Queue<Items.HistoryItem>
+      readonly history: Ref.Ref<ReadonlyArray<Prompt.Message>>
+      readonly inbox: Queue.Queue<Prompt.Message>
       readonly chatId: AssistantChat["Service"]["chatId"]
     }
   ) {
     const { history, inbox } = options
     const answer = yield* Ref.make("")
-    const add = (items: ReadonlyArray<Items.HistoryItem>) => Ref.update(history, (all) => [...all, ...items])
+    const add = (messages: ReadonlyArray<Prompt.Message>) => Ref.update(history, (all) => [...all, ...messages])
 
     // Read before every model call, when no tool calls are open: messages sent meanwhile join it now.
     const current = Effect.gen(function* () {
@@ -108,9 +110,8 @@ export const runBrief = Effect.fn(
         const skills = loop.skills ?? []
 
         return AssistantLoop.stream({
-          model: loop.model,
           instructions: mapText(loop.instructions, (text) => Skill.withCatalog(text, skills)),
-          toolkit: { ...Skill.toolkit(skills), ...loop.toolkit },
+          toolkit: Toolkits.merge(Skill.toolkit(skills), loop.toolkit ?? Toolkits.empty),
           history: current,
           maxSteps: loop.maxSteps ?? 8
         })
@@ -122,10 +123,10 @@ export const runBrief = Effect.fn(
       Predicate.isTagged(event, "ToolStarted")
         ? Effect.void
         : Predicate.isTagged(event, "ToolResult")
-          ? add([Items.toolCallOutput(event.callId, event.output)])
+          ? add([toolMessage(event)])
           : Effect.gen(function* () {
-              yield* add(event.items)
-              const text = finalText(event.items)
+              yield* add(Prompt.fromResponseParts(event.parts).content)
+              const text = finalText(event)
 
               if (text.length > 0) yield* Ref.set(answer, text)
             })
@@ -171,66 +172,74 @@ export const finished = (
     ...outcome
   })
 
+const RunIdInput = Schema.String.annotate({ description: "The runId spawn_specialist returned." })
+
+const RunStatus = <const Status extends string>(status: ReadonlyArray<Status>) =>
+  Schema.Struct({ runId: Schema.String, status: Schema.Literals(status) })
+
+const MessageSpecialist = Tool.make("message_specialist", {
+  description:
+    "Send more to one of your specialists: new instructions for a running one (it reads them at its next step), or a follow-up for a finished one (it continues with what it already found).",
+  parameters: Schema.Struct({ runId: RunIdInput, message: Schema.String }),
+  success: RunStatus(["steered", "continued"]),
+  failure: ToolFailure.ToolFailure,
+  dependencies: [Specialist.Runner]
+})
+
+const StopSpecialist = Tool.make("stop_specialist", {
+  description:
+    "Stop one of your running specialists, for example when the user changed their mind. It posts no answer.",
+  parameters: Schema.Struct({ runId: RunIdInput }),
+  success: RunStatus(["stopped"]),
+  failure: ToolFailure.ToolFailure,
+  dependencies: [Specialist.Runner]
+})
+
+/** A runner's refusal, for the model. */
+const refused = <A, R>(effect: Effect.Effect<A, Specialist.SpecialistError, R>) =>
+  Effect.catch(effect, (error) => ToolFailure.fail(error.message))
+
 /**
  * Returns `spawn_specialist`, `message_specialist`, and `stop_specialist` for
- * these specialists, or an empty toolkit when there are none.
+ * these specialists, or no tools when there are none.
  *
  * @internal
  */
-export const toolkit = (specialists: ReadonlyArray<Specialist.Any>): Toolkit.Toolkit => {
-  if (specialists.length === 0) return {}
+export const toolkit = (
+  specialists: ReadonlyArray<Specialist.Any>
+): Effect.Effect<AssistantLoop.Tools<Specialist.Runner>> => {
+  if (specialists.length === 0) return Effect.succeed(Toolkits.empty)
 
   const catalog = specialists.map((specialist) => `- ${specialist.name}: ${specialist.description}`).join("\n")
-  const RunIdInput = Schema.String.annotate({ description: "The runId spawn_specialist returned." })
 
-  const fail = <A>(effect: Effect.Effect<A, Specialist.SpecialistError, Specialist.Runner>) =>
-    Effect.catch(effect, (error) => Tool.fail(error.message))
-
-  const SpawnInput = Schema.Struct({
-    kind: Schema.Literals(specialists.map((specialist) => specialist.name)),
-    ...Specialist.Brief.fields
-  })
-
-  const spawn = Tool.make({
-    name: "spawn_specialist",
+  const SpawnSpecialist = Tool.make("spawn_specialist", {
     description: `Start a specialist on a job. It works in the background and its report arrives as a <specialist> input, often within seconds. Write a self-contained brief: it can't see this chat. For a quick question, just call wait; for slow work, tell the user in one line first.\n${catalog}`,
-    inputSchema: SpawnInput,
-    run: Effect.fn(function* ({ kind, ...brief }: typeof SpawnInput.Type) {
-      const runId = yield* fail(Specialist.Runner.use((runner) => runner.spawn({ kind, brief })))
-
-      return { runId, status: "started" }
-    })
+    parameters: Schema.Struct({
+      kind: Schema.Literals(specialists.map((specialist) => specialist.name)),
+      ...Specialist.Brief.fields
+    }),
+    success: RunStatus(["started"]),
+    failure: ToolFailure.ToolFailure,
+    dependencies: [Specialist.Runner]
   })
 
-  const MessageInput = Schema.Struct({ runId: RunIdInput, message: Schema.String })
+  const SpecialistTools = Toolkit.make(SpawnSpecialist, MessageSpecialist, StopSpecialist)
 
-  const message = Tool.make({
-    name: "message_specialist",
-    description:
-      "Send more to one of your specialists: new instructions for a running one (it reads them at its next step), or a follow-up for a finished one (it continues with what it already found).",
-    inputSchema: MessageInput,
-    run: Effect.fn(function* ({ runId, message }: typeof MessageInput.Type) {
-      const status = yield* fail(Specialist.Runner.use((runner) => runner.message(runId, message)))
-
-      return { runId, status }
-    })
-  })
-
-  const StopInput = Schema.Struct({ runId: RunIdInput })
-
-  const stop = Tool.make({
-    name: "stop_specialist",
-    description:
-      "Stop one of your running specialists, for example when the user changed their mind. It posts no answer.",
-    inputSchema: StopInput,
-    run: Effect.fn(function* ({ runId }: typeof StopInput.Type) {
-      yield* fail(Specialist.Runner.use((runner) => runner.stop(runId)))
-
-      return { runId, status: "stopped" }
-    })
-  })
-
-  return Toolkit.make(spawn, message, stop)
+  return SpecialistTools.toHandlers({
+    spawn_specialist: ({ kind, ...brief }) =>
+      refused(Specialist.Runner.use((runner) => runner.spawn({ kind, brief }))).pipe(
+        Effect.map((runId) => ({ runId, status: "started" }))
+      ),
+    message_specialist: ({ runId, message }) =>
+      refused(Specialist.Runner.use((runner) => runner.message(runId, message))).pipe(
+        Effect.map((status) => ({ runId, status }))
+      ),
+    stop_specialist: ({ runId }) =>
+      refused(Specialist.Runner.use((runner) => runner.stop(runId))).pipe(Effect.as({ runId, status: "stopped" }))
+  }).pipe(
+    Effect.flatMap((handlers) => Effect.provideContext(SpecialistTools, handlers)),
+    Effect.map(Toolkits.fromWithHandler)
+  )
 }
 
 /** How long a finished run stays available for follow-ups. */
@@ -243,9 +252,9 @@ interface Run {
   readonly handler: RunHandler
   readonly goal: string
   readonly brief: Specialist.Brief
-  readonly history: Ref.Ref<ReadonlyArray<Items.HistoryItem>>
+  readonly history: Ref.Ref<ReadonlyArray<Prompt.Message>>
   /** Messages sent while it works; the loop reads them at its next step. */
-  readonly inbox: Queue.Queue<Items.HistoryItem>
+  readonly inbox: Queue.Queue<Prompt.Message>
   /** Briefs so far, counting follow-ups; numbers the reports. */
   readonly briefs: Ref.Ref<number>
   /** Whether it works on a brief; read and changed under `lock`. */
@@ -366,12 +375,12 @@ export const makeRunner = Effect.fn(function* (options: {
     yield* Ref.update(run.briefs, (n) => n + 1)
 
     if (yield* Ref.get(run.busy)) {
-      yield* Queue.offer(run.inbox, Items.userText(text))
+      yield* Queue.offer(run.inbox, userText(text))
 
       return "steered"
     }
 
-    yield* Ref.update(run.history, (all) => [...all, Items.userText(text)])
+    yield* Ref.update(run.history, (all) => [...all, userText(text)])
     yield* Ref.set(run.busy, true)
     yield* launch(run)
 
@@ -392,8 +401,8 @@ export const makeRunner = Effect.fn(function* (options: {
         handler: found.handler,
         goal: request.brief.goal,
         brief: request.brief,
-        history: yield* Ref.make<ReadonlyArray<Items.HistoryItem>>([Items.userText(briefText(request.brief))]),
-        inbox: yield* Queue.unbounded<Items.HistoryItem>(),
+        history: yield* Ref.make<ReadonlyArray<Prompt.Message>>([userText(briefText(request.brief))]),
+        inbox: yield* Queue.unbounded<Prompt.Message>(),
         briefs: yield* Ref.make(1),
         busy: yield* Ref.make(true),
         lock: yield* Semaphore.make(1)

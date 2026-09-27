@@ -198,12 +198,9 @@ importers:
 
   packages/effect-assistant:
     devDependencies:
-      '@effect-uai/anthropic':
-        specifier: 0.17.0
-        version: 0.17.0(@effect-uai/core@0.17.0(effect@4.0.0-rc.117))(effect@4.0.0-rc.117)
-      '@effect-uai/core':
-        specifier: 0.17.0
-        version: 0.17.0(effect@4.0.0-rc.117)
+      '@effect/ai-anthropic':
+        specifier: 4.0.0-rc.117
+        version: 4.0.0-rc.117(effect@4.0.0-rc.117)
       '@effect/vitest':
         specifier: 4.0.0-rc.117
         version: 4.0.0-rc.117(effect@4.0.0-rc.117)(vitest@5.0.1)
@@ -543,6 +540,11 @@ packages:
 
   '@effect-uai/core@0.17.0':
     resolution: {integrity: sha512-KR5XE0HFoKelexeHMoyL+aZ5CfZd+e43jKQ492zWynTK5YsMVsCrQQ+3qKIFnmOs/p4P4QdShfK1BCNL3GvgrQ==}
+    peerDependencies:
+      effect: 4.0.0-rc.117
+
+  '@effect/ai-anthropic@4.0.0-rc.117':
+    resolution: {integrity: sha512-UENH5wxqQud9NLlX2WqauiWuJ+Q9dBW2bOxMOsUJalZ0YdjbcK3LgNTZjrOR+0jPGTlBR9OIgF9qqFPZg6J0AA==}
     peerDependencies:
       effect: 4.0.0-rc.117
 
@@ -4617,6 +4619,10 @@ snapshots:
   '@effect-uai/core@0.17.0(effect@4.0.0-rc.117)':
     dependencies:
       '@standard-schema/spec': 1.1.0
+      effect: 4.0.0-rc.117
+
+  '@effect/ai-anthropic@4.0.0-rc.117(effect@4.0.0-rc.117)':
+    dependencies:
       effect: 4.0.0-rc.117
 
   '@effect/atom-react@4.0.0-beta.107(effect@4.0.0-rc.117)(react@19.3.0)(scheduler@0.28.0)':

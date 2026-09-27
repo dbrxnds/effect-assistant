@@ -1,8 +1,9 @@
-import * as HistoryCheck from "@effect-uai/core/HistoryCheck"
-import * as Effect from "effect/Effect"
-import type * as Items from "@effect-uai/core/Items"
 import { describe, expect, it } from "@effect/vitest"
-import * as Match from "effect/Match"
+import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
+import type * as Prompt from "effect/unstable/ai/Prompt"
+import * as Response from "effect/unstable/ai/Response"
 import { AssistantEvent, ChatId, InputId, RunId } from "../src/index.ts"
 import * as History from "../src/internal/history.ts"
 import { say } from "./fixtures.ts"
@@ -14,26 +15,25 @@ const chatId = Effect.runSync(ChatId.make)
 const entries = (events: ReadonlyArray<AssistantEvent.AssistantEvent>) =>
   events.map((event, i) => AssistantEvent.Entry.make({ chatId, seq: i + 1, at: 0, event }))
 
-const call = (id: string, name: string): Items.HistoryItem => ({
-  type: "function_call",
-  call_id: id,
-  name,
-  arguments: "{}"
-})
+const call = (id: string, name: string) =>
+  Response.makePart("tool-call", { id, name, params: {}, providerExecuted: false })
 
-/** A readable trace: user text, tool calls by name, and tool outputs by call id. */
-const trace = (history: ReadonlyArray<Items.HistoryItem>) =>
-  history.map((item) =>
-    Match.value(item).pipe(
-      Match.when(
-        { type: "message" },
-        (message) => `user: ${message.content.map((content) => ("text" in content ? content.text : "")).join("")}`
-      ),
-      Match.when({ type: "function_call" }, (call) => `call: ${call.name}`),
-      Match.when({ type: "function_call_output" }, (output) => `result: ${output.call_id}`),
-      Match.orElse((other) => other.type)
-    )
-  )
+const result = (callId: string, tool: string) => ToolResult.make({ callId, tool, outcome: "success", result: "sent" })
+
+/** A readable trace: user text, tool calls by name, and tool results by call id. */
+const trace = (history: ReadonlyArray<Prompt.Message>) =>
+  history.flatMap((message) => {
+    switch (message.role) {
+      case "user":
+        return [`user: ${message.content.map((part) => (part.type === "text" ? part.text : "")).join("")}`]
+      case "assistant":
+        return message.content.flatMap((part) => (part.type === "tool-call" ? [`call: ${part.name}`] : []))
+      case "tool":
+        return message.content.flatMap((part) => (part.type === "tool-result" ? [`result: ${part.id}`] : []))
+      case "system":
+        return []
+    }
+  })
 
 // These tests use the library's inputs only.
 const noInputs: ReadonlySet<string> = new Set()
@@ -51,11 +51,11 @@ describe("History.fromEntries", () => {
       entries([
         say("what orders does amsterdam have"),
         TurnStarted.make({ assistant: "test" }),
-        ModelOutput.make({ items: [call("a", "order_history")], seenThroughSeq: 2 }),
-        ToolResult.make({ callId: "a", tool: "order_history", output: "[]" }),
+        ModelOutput.make({ parts: [call("a", "order_history")], seenThroughSeq: 2 }),
+        result("a", "order_history"),
         say("and do it for amsterdam"),
-        ModelOutput.make({ items: [call("b", "send_user_message")], seenThroughSeq: 4 }),
-        ToolResult.make({ callId: "b", tool: "send_user_message", output: "sent" })
+        ModelOutput.make({ parts: [call("b", "send_user_message")], seenThroughSeq: 4 }),
+        result("b", "send_user_message")
       ])
     )
 
@@ -75,8 +75,8 @@ describe("History.fromEntries", () => {
         say("hi"),
         TurnStarted.make({ assistant: "test" }),
         say("also this"),
-        ModelOutput.make({ items: [call("a", "send_user_message")], seenThroughSeq: 3 }),
-        ToolResult.make({ callId: "a", tool: "send_user_message", output: "sent" })
+        ModelOutput.make({ parts: [call("a", "send_user_message")], seenThroughSeq: 3 }),
+        result("a", "send_user_message")
       ])
     )
 
@@ -87,10 +87,10 @@ describe("History.fromEntries", () => {
     const history = fromEntries(
       entries([
         say("check A-17"),
-        ModelOutput.make({ items: [call("a", "lookup_order")], seenThroughSeq: 1 }),
+        ModelOutput.make({ parts: [call("a", "lookup_order")], seenThroughSeq: 1 }),
         say("also 12 x 12?"),
-        ToolResult.make({ callId: "a", tool: "lookup_order", output: "shipped" }),
-        ModelOutput.make({ items: [call("b", "send_user_message")], seenThroughSeq: 4 })
+        result("a", "lookup_order"),
+        ModelOutput.make({ parts: [call("b", "send_user_message")], seenThroughSeq: 4 })
       ])
     )
 
@@ -110,7 +110,7 @@ describe("History.fromEntries, after a crash", () => {
       entries([
         say("look up the orders"),
         TurnStarted.make({ assistant: "test" }),
-        ModelOutput.make({ items: [call("a", "order_history")], seenThroughSeq: 2 }),
+        ModelOutput.make({ parts: [call("a", "order_history")], seenThroughSeq: 2 }),
         ToolStarted.make({ callId: "a", tool: "order_history" }),
         // The process died here; the resumed turn starts, and a message arrives.
         TurnStarted.make({ assistant: "test" }),
@@ -120,7 +120,7 @@ describe("History.fromEntries, after a crash", () => {
 
     // The message waits until the call has its result.
     expect(trace(history)).toEqual(["user: look up the orders", "call: order_history", "user: any news?"])
-    expect(HistoryCheck.findUnansweredCalls(history).map((open) => open.call_id)).toEqual(["a"])
+    expect(History.unansweredCalls(history).map((open) => open.id)).toEqual(["a"])
   })
 })
 
@@ -179,5 +179,20 @@ describe("History.fromEntries, a finished specialist run", () => {
         }
       ]
     })
+  })
+})
+
+describe("stored forms", () => {
+  it("reads a model step and a tool result at format 2, and not the forms before it", () => {
+    const decode = Schema.decodeUnknownOption(AssistantEvent.AssistantEvent)
+    const step = Schema.encodeSync(ModelOutput)(ModelOutput.make({ parts: [call("a", "t")] }))
+    const stored = Schema.encodeSync(ToolResult)(result("a", "t"))
+    const { format: _step, parts: _parts, ...stepBefore } = step
+    const { format: _result, outcome: _outcome, result: _value, ...resultBefore } = stored
+
+    expect(Option.isSome(decode(step))).toBe(true)
+    expect(Option.isNone(decode({ ...stepBefore, items: [] }))).toBe(true)
+    expect(Option.isSome(decode(stored))).toBe(true)
+    expect(Option.isNone(decode({ ...resultBefore, output: "sent" }))).toBe(true)
   })
 })

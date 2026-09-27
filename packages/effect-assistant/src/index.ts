@@ -93,3 +93,8 @@ export * as Specialist from "./Specialist.ts"
  * @since 0.1.0
  */
 export * as ToolDiscovery from "./ToolDiscovery.ts"
+
+/**
+ * @since 0.1.0
+ */
+export * as ToolFailure from "./ToolFailure.ts"

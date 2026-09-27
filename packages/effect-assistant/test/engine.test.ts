@@ -1,5 +1,3 @@
-import * as Tool from "@effect-uai/core/Tool"
-import * as Toolkit from "@effect-uai/core/Toolkit"
 import { describe, expect, it } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -7,17 +5,22 @@ import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import * as Ref from "effect/Ref"
+import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import * as Response from "effect/unstable/ai/Response"
+import * as Tool from "effect/unstable/ai/Tool"
+import * as Toolkit from "effect/unstable/ai/Toolkit"
 import {
   Assistant,
   AssistantChat,
   AssistantEngine,
   AssistantEvent,
+  AssistantLoop,
   AssistantToolCall,
   ChatId,
   ChatLog
 } from "../src/index.ts"
-import { collectUntil, say, simple, testModel, turnsDone } from "./fixtures.ts"
+import { collectUntil, say, simple, turnsDone } from "./fixtures.ts"
 import * as Scripted from "./scripted.ts"
 
 const Resumer = Assistant.make("resumer")
@@ -61,11 +64,14 @@ describe("tool calls after a crash", () => {
       const chat = yield* ChatId.make
       const ran = yield* Deferred.make<{ readonly callId: string; readonly key: string }>()
 
-      const sendReport = Tool.make({
-        name: "send_report",
+      const SendReport = Tool.make("send_report", {
         description: "Sends the weekly report.",
-        inputSchema: Tool.noInput,
-        run: () =>
+        success: Schema.String,
+        dependencies: [AssistantToolCall.AssistantToolCall]
+      })
+
+      const sendReport = AssistantLoop.tools(Toolkit.make(SendReport), {
+        send_report: () =>
           Effect.gen(function* () {
             const call = yield* AssistantToolCall.AssistantToolCall
             yield* Deferred.succeed(ran, { callId: call.callId, key: yield* AssistantToolCall.idempotencyKey })
@@ -79,18 +85,21 @@ describe("tool calls after a crash", () => {
         say("Send the weekly report."),
         AssistantEvent.TurnStarted.make({ assistant: "resumer" }),
         AssistantEvent.ModelOutput.make({
-          items: [{ type: "function_call", call_id: "toolu_report_1", name: "send_report", arguments: "{}" }],
+          parts: [
+            Response.makePart("tool-call", {
+              id: "toolu_report_1",
+              name: "send_report",
+              params: {},
+              providerExecuted: false
+            })
+          ],
           seenThroughSeq: 2
         }),
         AssistantEvent.ToolStarted.make({ callId: "toolu_report_1", tool: "send_report" })
       ])
 
       const handlers = Resumer.toLayer((turn) =>
-        turn.loop({
-          model: testModel,
-          instructions: "You help a small team. Be brief.",
-          toolkit: Toolkit.make(sendReport)
-        })
+        turn.loop({ instructions: "You help a small team. Be brief.", toolkit: sendReport })
       )
 
       const call = yield* Effect.scoped(

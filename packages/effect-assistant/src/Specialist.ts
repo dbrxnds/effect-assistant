@@ -8,7 +8,7 @@
  *   assistant sees this). An assistant lists the specialists it can use in
  *   its own definition.
  * - **Handler**: `toLayer` takes a function of the {@link Run} that returns
- *   the run's loop as a stream, usually `run.loop({ model, instructions, toolkit })`.
+ *   the run's loop as a stream, usually `run.loop({ instructions, toolkit })`.
  *   The build Effect runs once per chat activation, like an entity's, with
  *   the layer's services and `AssistantChat`; the function runs for each
  *   brief. A run works in the chat that spawned it: look up whom it works
@@ -31,15 +31,19 @@
  * off (the assistant is told), and a finished run is forgotten after 15
  * minutes.
  *
- * **Example** (A research specialist)
+ * A run calls the assistant's `LanguageModel`, unless the specialist's layer
+ * is given one of its own, like a smaller model for quick lookups.
+ *
+ * **Example** (A research specialist, on its own model)
  *
  * ```ts
- * import * as Toolkit from "@effect-uai/core/Toolkit"
+ * import * as AnthropicLanguageModel from "@effect/ai-anthropic/AnthropicLanguageModel"
  * import * as Effect from "effect/Effect"
+ * import * as Layer from "effect/Layer"
  * import * as Stream from "effect/Stream"
- * import { Assistant, Specialist } from "effect-assistant"
+ * import { Assistant, AssistantLoop, Specialist } from "effect-assistant"
  * import { ChatUsers, CurrentUser } from "./CurrentUser.ts"
- * import { orderHistory, similarCampaigns } from "./tools.ts" // tools that yield CurrentUser
+ * import { ResearchTools, ResearchToolsLive } from "./tools.ts" // tools whose handlers yield CurrentUser
  *
  * const Research = Specialist.make("research", {
  *   description: "Researches past campaigns and orders. Give it the question and any context."
@@ -47,31 +51,30 @@
  *
  * const ResearchLive = Research.toLayer(Effect.gen(function*() {
  *   const users = yield* ChatUsers // the app's: whose chat is it
+ *   const toolkit = AssistantLoop.tools(yield* ResearchTools)
  *
  *   return (run) =>
  *     Stream.unwrap(Effect.map(users.forChat(run.chatId), (user) =>
  *       run.loop({
- *         model: "claude-sonnet-5",
  *         instructions: "Answer with the findings and numbers the colleague needs, in a few short lines.",
- *         toolkit: Toolkit.make(similarCampaigns, orderHistory)
+ *         toolkit
  *       }).pipe(Stream.provideService(CurrentUser, user))))
- * }))
+ * })).pipe(Layer.provide([ResearchToolsLive, AnthropicLanguageModel.model("claude-haiku-4-5")]))
  *
  * const MyAssistant = Assistant.make("my-assistant", { specialists: [Research] })
  * ```
  *
  * @since 0.1.0
  */
-import type * as AiError from "@effect-uai/core/AiError"
-import type * as Items from "@effect-uai/core/Items"
-import type * as LanguageModel from "@effect-uai/core/LanguageModel"
-import type * as Toolkit from "@effect-uai/core/Toolkit"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
+import type * as AiError from "effect/unstable/ai/AiError"
+import type * as LanguageModel from "effect/unstable/ai/LanguageModel"
+import type * as Prompt from "effect/unstable/ai/Prompt"
 import type { AssistantChat } from "./AssistantChat.ts"
 import type * as AssistantLoop from "./AssistantLoop.ts"
 import type { ChatId } from "./ChatId.ts"
@@ -170,13 +173,12 @@ export type RunServices = AssistantChat | Runner | LanguageModel.LanguageModel
  * @category models
  * @since 0.1.0
  */
-export interface LoopOptions<Tools extends Toolkit.Toolkit, R> {
-  /** The model to call, as the `LanguageModel` in context names it (e.g. `"claude-haiku-4-5"`). */
-  readonly model: string
+export interface LoopOptions<RT = never, RS = never> {
   readonly instructions: string | Instructions.Resolved
-  readonly toolkit?: Tools | undefined
+  /** Its tools: `AssistantLoop.tools(toolkit)` of a native toolkit. */
+  readonly toolkit?: AssistantLoop.Tools<RT> | undefined
   /** Playbooks: a catalog in the prompt, loaded with `load_skill` when a task matches. */
-  readonly skills?: ReadonlyArray<Skill<R>> | undefined
+  readonly skills?: ReadonlyArray<Skill<RS>> | undefined
   /** Model calls per brief. Default 8. */
   readonly maxSteps?: number | undefined
 }
@@ -197,15 +199,11 @@ export interface Run {
    * it since (follow-ups, steering). Read it before every model call; the
    * loop does.
    */
-  readonly history: Effect.Effect<ReadonlyArray<Items.HistoryItem>>
+  readonly history: Effect.Effect<ReadonlyArray<Prompt.Message>>
   /** The agent loop over the run's history, with these instructions, tools, and skills. */
-  readonly loop: <Tools extends Toolkit.Toolkit = Record<never, never>, R = never>(
-    options: LoopOptions<Tools, R>
-  ) => Stream.Stream<
-    AssistantLoop.Event,
-    AiError.AiError | AssistantLoop.ToolErrors<Tools>,
-    LanguageModel.LanguageModel | AssistantLoop.ToolServices<Tools> | R
-  >
+  readonly loop: <RT = never, RS = never>(
+    options: LoopOptions<RT, RS>
+  ) => Stream.Stream<AssistantLoop.Event, AiError.AiError, LanguageModel.LanguageModel | RT | RS>
 }
 
 /**

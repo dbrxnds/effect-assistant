@@ -1,12 +1,13 @@
-import * as Tool from "@effect-uai/core/Tool"
-import * as Toolkit from "@effect-uai/core/Toolkit"
 import { describe, expect, it } from "@effect/vitest"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Queue from "effect/Queue"
+import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { Assistant, ChatId, Specialist } from "../src/index.ts"
+import * as Tool from "effect/unstable/ai/Tool"
+import * as Toolkit from "effect/unstable/ai/Toolkit"
+import { Assistant, AssistantLoop, ChatId, Specialist } from "../src/index.ts"
 import { fact, runEntity, runMemory, say } from "./fixtures.ts"
 import * as Scripted from "./scripted.ts"
 
@@ -66,19 +67,15 @@ const clerkLive = (seen: Queue.Queue<Seen>) =>
     })
   )
 
-const adminReport = Tool.make({
-  name: "admin_report",
-  description: "Admins only.",
-  inputSchema: Tool.noInput,
-  run: () => Effect.succeed("report")
+const AdminReport = Tool.make("admin_report", { description: "Admins only.", success: Schema.String })
+
+const Greet = Tool.make("greet", {
+  description: "Greets the current user.",
+  success: Schema.String,
+  dependencies: [CurrentUser]
 })
 
-const greet = Tool.make({
-  name: "greet",
-  description: "Greets the current user.",
-  inputSchema: Tool.noInput,
-  run: () => Effect.map(CurrentUser, (user) => `hi ${user.name}`)
-})
+const greet = () => CurrentUser.useSync((user) => `hi ${user.name}`)
 
 /**
  * A handler that records what a turn got instead of calling the model, and
@@ -94,12 +91,19 @@ const recording = (seen: Queue.Queue<Seen>) =>
 
       return Effect.gen(function* () {
         const current = yield* CurrentUser
+
         // This turn's tools: only admins get the report.
-        const toolkit = current.admin ? Toolkit.make(adminReport, greet) : Toolkit.make(greet)
+        const toolkit = current.admin
+          ? AssistantLoop.tools(Toolkit.make(AdminReport, Greet), {
+              admin_report: () => Effect.succeed("report"),
+              greet
+            })
+          : AssistantLoop.tools(Toolkit.make(Greet), { greet })
+
         yield* Queue.offer(seen, {
           by: "assistant",
           instructions: `You help ${current.name}.`,
-          tools: Object.keys(toolkit)
+          tools: toolkit.definitions.map((tool) => tool.name)
         })
 
         const history = JSON.stringify(yield* turn.history())
