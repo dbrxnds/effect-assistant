@@ -1,7 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import * as Option from "effect/Option"
-import * as Schema from "effect/Schema"
 import type * as Prompt from "effect/unstable/ai/Prompt"
 import * as Response from "effect/unstable/ai/Response"
 import { AssistantEvent, ChatId, Decision, DecisionId, InputId, RunId } from "../src/index.ts"
@@ -310,20 +308,5 @@ describe("History.fromEntries, decisions", () => {
     expect(texts(fromEntries(log)).at(-1)).toBe(
       `<decision id="${request.id}" source="workflow:Launch" status="requested">\nWork that's running needs the user's decision. The user hasn't seen it: send them a message with a decision block for this id that says what they decide on.\n{"budget":2000}\n</decision>`
     )
-  })
-})
-
-describe("stored forms", () => {
-  it("reads a model step and a tool result at format 2, and not the forms before it", () => {
-    const decode = Schema.decodeUnknownOption(AssistantEvent.AssistantEvent)
-    const step = Schema.encodeSync(ModelOutput)(ModelOutput.make({ parts: [call("a", "t")] }))
-    const stored = Schema.encodeSync(ToolResult)(result("a", "t"))
-    const { format: _step, parts: _parts, ...stepBefore } = step
-    const { format: _result, outcome: _outcome, result: _value, ...resultBefore } = stored
-
-    expect(Option.isSome(decode(step))).toBe(true)
-    expect(Option.isNone(decode({ ...stepBefore, items: [] }))).toBe(true)
-    expect(Option.isSome(decode(stored))).toBe(true)
-    expect(Option.isNone(decode({ ...resultBefore, output: "sent" }))).toBe(true)
   })
 })

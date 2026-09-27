@@ -94,7 +94,6 @@ describe("a turn", () => {
 
       const [step] = entries.flatMap(({ event }) => (Predicate.isTagged(event, "ModelOutput") ? [event] : []))
 
-      expect(step?.format).toBe(2)
       expect(step?.parts.map((part) => part.type)).toEqual(["tool-call"])
       expect(step?.model).toBe(Scripted.model)
       expect(step?.responseId).toBe("response_1")

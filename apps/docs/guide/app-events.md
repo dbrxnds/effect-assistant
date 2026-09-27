@@ -137,9 +137,8 @@ the chat id and submits an event. The handler looks the user up from
 ## Evolving an event's schema
 
 A log is kept for good, and an event's schema decodes every one stored with
-it, in its JSON form (a `Date` or a `bigint` survives). The library's events
-are versioned (see [`AssistantEvent`](/api/AssistantEvent)); yours evolve in
-your schema:
+it, in its JSON form (a `Date` or a `bigint` survives). Yours evolve in your
+schema:
 
 - A field added later is optional, or has a decoding default
   (`Schema.optionalKey(...)`, `Schema.withDecodingDefaultKey(...)`), so the
