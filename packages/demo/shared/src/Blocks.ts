@@ -6,6 +6,7 @@
  */
 import * as Block from "effect-assistant/Block"
 import * as BlockKit from "effect-assistant/BlockKit"
+import * as Decision from "effect-assistant/Decision"
 import * as Schema from "effect/Schema"
 
 /**
@@ -18,21 +19,6 @@ export const ChooseOne = Block.make("choose_one", {
   description: "Buttons for picking one of a few options, e.g. which campaign product. Keep options short.",
   props: Schema.Struct({ options: Schema.Array(Schema.String) }),
   answer: Schema.Struct({ choice: Schema.String })
-})
-
-/**
- * Approve / deny buttons.
- *
- * @category blocks
- * @since 0.1.0
- */
-export const Confirm = Block.make("confirm", {
-  description: "Approve / deny buttons for a yes-or-no decision, e.g. approving a campaign order.",
-  props: Schema.Struct({
-    confirmLabel: Schema.String.annotate({ description: 'e.g. "Approve"' }),
-    denyLabel: Schema.String.annotate({ description: 'e.g. "Deny"' })
-  }),
-  answer: Schema.Struct({ confirmed: Schema.Boolean })
 })
 
 /**
@@ -51,9 +37,11 @@ export const TextInput = Block.make("text_input", {
 })
 
 /**
- * Every block Acme can use.
+ * Every block Acme can use. Orders and campaigns are approved with the
+ * library's decision block: a plain choice is a block like the others, an
+ * approval is a decision.
  *
  * @category blocks
  * @since 0.1.0
  */
-export const Blocks = BlockKit.make([ChooseOne, Confirm, TextInput])
+export const Blocks = BlockKit.make([ChooseOne, TextInput, Decision.block])

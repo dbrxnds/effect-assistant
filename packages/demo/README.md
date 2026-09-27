@@ -16,13 +16,15 @@ ask for reports.
 - `api/src/Prompts.ts`: the prompts, from Langfuse (label `production`), with defaults in code.
   `pnpm --filter @acme/demo-api prompts:push` uploads the defaults.
 - `api/src/Tools.ts`: order history and status, offices, budgets, and the `research` specialist.
-- `api/src/Campaign.ts`: `start_campaign` and the `CreateCampaign` workflow.
-- `api/src/PrintOrders.ts`: `order_products` and the `PrintOrder` workflow.
+- `api/src/Campaign.ts`: `start_campaign` and the `CreateCampaign` workflow, which asks for the
+  user's decision (`Decision.durable`) before the campaign goes ahead.
+- `api/src/PrintOrders.ts`: `order_products`, which waits for the user's decision with its quote as
+  the preview, and the `PrintOrder` workflow.
 - `api/src/Steps.ts`: what the workflows share: reporting a step to the chat as a fact, and
   durable waits at demo pace.
 - `api/src/LiveOrders.ts`: orders placed through Acme, kept up to date by the workflows.
 - `api/src/Chats.ts`: the thread list.
-- `api/src/Server.ts`: `/health`, `/rpc`, `/approve`, and the web app.
+- `api/src/Server.ts`: `/health`, `/rpc`, and the web app.
 - `api/src/main.ts`: wires it together on Postgres (`DATABASE_URL`) or in memory.
 - `api/scripts/smoke.ts`: an end-to-end check against a running server. It deletes the chats it
   creates.
@@ -41,16 +43,17 @@ or so while the chat stays free.
 
 The empty thread shows these as suggestions:
 
-1. **"Order 300 cotton tote bags for the Berlin office"**. The order is placed within budget.
-   Then, without anyone asking, the chat hears it has shipped (with a UPS tracking number) and
-   been delivered.
+1. **"Order 300 cotton tote bags for the Berlin office"**. Acme asks you to approve the order,
+   with its total and the budget left. Approve it, and the order is placed. Then, without anyone
+   asking, the chat hears it has shipped (with a UPS tracking number) and been delivered.
 2. **"Where is the Amsterdam office?"**. Acme returns the address, locale, and contact from the
    demo data.
 3. **"How much budget does Amsterdam have left this quarter?"**. Ask again after an order, and
    the order counts.
 4. **"I want to run a campaign for the London office"**. Acme offers campaign types as
-   buttons, and asks for the audience and budget. Then it sends an approval link. Open the
-   link, and the campaign moves on: creative, scheduled, live, first results.
+   buttons, and asks for the audience and budget. The campaign's workflow then asks for your
+   decision, and Acme shows it with Approve / Decline. Approve, and the campaign moves on:
+   creative, scheduled, live, first results.
 5. **"Have research compare this year's campaigns and suggest Q4 budgets"**. The research
    specialist runs in the background. Keep chatting meanwhile; the report arrives when it's
    done.

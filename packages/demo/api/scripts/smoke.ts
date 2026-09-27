@@ -10,10 +10,11 @@
  *   works.
  * - interrupt: a second question while the assistant works on the first; both get
  *   answered.
- * - campaign: order with office, audience, and budget up front; approve with
- *   the confirm block; the assistant reports going live and the first results.
- * - products: order tote bags; the assistant reports shipping (with tracking) and
- *   delivery.
+ * - campaign: order with office, audience, and budget up front; approve the
+ *   workflow's decision with the decision block; the assistant reports going
+ *   live and the first results.
+ * - products: order tote bags; approve the order's decision; the assistant
+ *   reports shipping (with tracking) and delivery.
  * - research: a performance report across campaigns, from the research
  *   specialist, in the background.
  *
@@ -22,6 +23,7 @@
 import { AcmeRpcs } from "@acme/demo-shared/Rpc"
 import * as AssistantEvent from "effect-assistant/AssistantEvent"
 import type * as ChatId from "effect-assistant/ChatId"
+import * as Decision from "effect-assistant/Decision"
 import * as InputId from "effect-assistant/InputId"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -156,7 +158,7 @@ const program = Effect.gen(function* () {
   const answer = (
     chatId: ChatId.ChatId,
     message: AssistantEvent.AssistantMessage,
-    value: Record<string, string | boolean>
+    value: Record<string, string | boolean> | Decision.Answer
   ) =>
     client.Submit({
       chatId,
@@ -167,6 +169,22 @@ const program = Effect.gen(function* () {
         value
       })
     })
+
+  /** Waits for the decision block, and approves everything it asks for. */
+  const approve = Effect.fn(function* (chatId: ChatId.ChatId, label: string) {
+    const asked = yield* waitFor(
+      chatId,
+      `${label}: decision block`,
+      (es) => blockMessages(es, Decision.kind).length > 0 && idle(es),
+      150
+    )
+
+    const ask = blockMessages(asked, Decision.kind)[0]!
+    const props = yield* Schema.decodeUnknownEffect(Decision.Props)(ask.block!.props).pipe(Effect.orDie)
+
+    console.log(`     ${label} > ${oneLine(ask.text)} [decision]`)
+    yield* answer(chatId, ask, Decision.answerAll(props, "approved"))
+  })
 
   const timed = Effect.fn(function* <A, E, R>(label: string, effect: Effect.Effect<A, E, R>) {
     const start = Date.now()
@@ -234,16 +252,7 @@ const program = Effect.gen(function* () {
         "Order the Summer Campaign for the Amsterdam office, for parents in Austin planning trips, budget $4,000."
       )
 
-      const parked = yield* waitFor(
-        chatId,
-        "approval block",
-        (es) => blockMessages(es, "confirm").length > 0 && idle(es),
-        150
-      )
-
-      const ask = blockMessages(parked, "confirm")[0]!
-      console.log(`     campaign > ${oneLine(ask.text)} [confirm]`)
-      yield* answer(chatId, ask, { confirmed: true })
+      yield* approve(chatId, "campaign")
 
       const done = yield* waitFor(
         chatId,
@@ -257,10 +266,11 @@ const program = Effect.gen(function* () {
   )
 
   const products = timed(
-    "products: order, shipped, delivered",
+    "products: approval, shipped, delivered",
     Effect.gen(function* () {
       const chatId = yield* newChat
       yield* send(chatId, "Please order 300 cotton tote bags for the Berlin office.")
+      yield* approve(chatId, "products")
 
       const shipped = yield* waitFor(
         chatId,
