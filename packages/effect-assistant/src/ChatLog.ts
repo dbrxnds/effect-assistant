@@ -138,6 +138,8 @@ const SqlNumber = Schema.Union([Schema.Finite, Schema.FiniteFromString])
 
 const Row = Schema.Struct({ chat_id: ChatId, seq: SqlNumber, at: SqlNumber, event: EventJson })
 
+const decodeLastSeq = Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ seq: Schema.NullOr(SqlNumber) })))
+
 /**
  * Layer that stores chats in a SQL table, `chat_log`, and creates it if it
  * doesn't exist.
@@ -184,11 +186,11 @@ export const layerSql: Layer.Layer<ChatLog, never, SqlClient.SqlClient> = Layer.
         return yield* toEntries(rows)
       }, Effect.orDie),
       lastSeq: Effect.fn(function* (chatId: ChatId) {
-        const rows = yield* sql<{ readonly seq: string | number | null }>`
+        const rows = yield* sql`
           SELECT MAX(seq) AS seq FROM chat_log WHERE chat_id = ${chatId}
-        `
+        `.pipe(Effect.flatMap(decodeLastSeq))
 
-        return Number(rows[0]?.seq ?? 0)
+        return rows[0]?.seq ?? 0
       }, Effect.orDie),
       write: Effect.fn(function* (chatId: ChatId, entries: ReadonlyArray<AssistantEvent.Entry>) {
         const rows = yield* Effect.forEach(entries, (entry) =>

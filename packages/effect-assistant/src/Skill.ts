@@ -73,7 +73,7 @@ export const withCatalog = <R>(prompt: string, skills: ReadonlyArray<Skill<R>>):
         prompt,
         "",
         "## Skills",
-        "Playbooks for common tasks. When one matches what you're doing, load it with load_skill and follow it.",
+        "Playbooks for common tasks. When one matches what you're doing, load it with load_skill in the same step as your first lookups, and follow it.",
         ...skills.map((skill) => `- ${skill.name}: ${skill.description}`)
       ].join("\n")
 
@@ -93,7 +93,8 @@ export const toolkit = <R>(skills: ReadonlyArray<Skill<R>>): Toolkit.Toolkit => 
   return Toolkit.make(
     Tool.make({
       name: "load_skill",
-      description: "Load a skill's instructions by name. Follow them for the rest of the task.",
+      description:
+        "Load a skill's instructions by name, in the same step as your first lookups (not in a step of its own). Follow them for the rest of the task.",
       inputSchema: Input,
       run: Effect.fn(function* ({ name }: typeof Input.Type) {
         const skill = byName.get(name)

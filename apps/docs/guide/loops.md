@@ -27,7 +27,8 @@ and a tool call required at every step, followed by `turn.replyIfOwed`.
 `ModelOutput`, then runs the tool calls and emits a `ToolStarted` and a
 `ToolResult` for each. `then` gets `{ output, done }` and returns
 `Loop.next(state)` or `Loop.stop()`. `done` means the model made no tool calls,
-or called `wait`.
+or ended its turn (`wait`, or a message with `wait: true`) and none of the
+step's calls failed.
 
 **Example** (At most 12 steps)
 

@@ -37,12 +37,12 @@ describe("the app's own events", () => {
         ).pipe(Stream.drain)
       )
 
-      const [entries, stored] = yield* Effect.gen(function* () {
+      const { entries, stored } = yield* Effect.gen(function* () {
         const chat = yield* newChat
         yield* Compacting.submit(chat, say("hi"))
         const entries = yield* collectUntil(Compacting, chat, (es) => turnsDone(es) >= 1)
 
-        return [entries, yield* ChatLog.ChatLog.use((log) => log.read(chat))] as const
+        return { entries, stored: yield* ChatLog.ChatLog.use((log) => log.read(chat)) }
       }).pipe(Effect.provide(runMemory(handlers, Scripted.unused)))
 
       // Stored as the event itself, with its Date in JSON; read back (by the turn and by subscribe) as a Summary.

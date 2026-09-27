@@ -98,24 +98,31 @@ export const makeChat = Effect.fn(function* (options: {
 
   // Every writer (the turn's loop, specialist runs, a handler's own appends) goes through here, one at a time: each
   // append is numbered after the last, and its entries go to the chat's subscribers.
+  // Uninterruptible: a stored append must reach memory and the subscribers too, or a turn misses it and replies twice.
+  const write = (events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.AppEvent>) =>
+    storage.append(chatId, events).pipe(
+      Effect.tap((stored) => Ref.update(entries, (all) => [...all, ...stored])),
+      Effect.tap((stored) => PubSub.publishAll(channel, stored)),
+      Effect.uninterruptible
+    )
+
   const chat = AssistantChat.of({
     chatId,
     entries: Ref.get(entries),
-    append: (events) =>
-      storage.append(chatId, events).pipe(
-        Effect.tap((stored) => Ref.update(entries, (all) => [...all, ...stored])),
-        Effect.tap((stored) => PubSub.publishAll(channel, stored)),
-        Semaphore.withPermit(writes)
-      )
+    append: (events) => Semaphore.withPermit(writes)(write(events))
   })
 
   /** Stores the input unless an input with its id is already stored. */
-  const store = Effect.fn(function* (input: AssistantEvent.Input | AssistantEvent.AppEvent) {
-    const id = idOf(input)
-    const stored = yield* chat.entries
+  const store = Effect.fn(
+    function* (input: AssistantEvent.Input | AssistantEvent.AppEvent) {
+      const id = idOf(input)
+      const stored = yield* Ref.get(entries)
 
-    if (id === undefined || !stored.some(({ event }) => idOf(event) === id)) yield* chat.append([input])
-  })
+      if (id === undefined || !stored.some(({ event }) => idOf(event) === id)) yield* write([input])
+    },
+    // Checked under the write lock: a retry that arrives while the first submit is storing is stored once.
+    Semaphore.withPermit(writes)
+  )
 
   // The handlers' builds run now, in the chat's scope: what they set up lives while the chat does.
   const handler = yield* Effect.provideService(registration.open, AssistantChat, chat)

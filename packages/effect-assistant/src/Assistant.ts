@@ -326,20 +326,6 @@ export type EventSchema = Schema.Codec<{ readonly _tag: string }, { readonly _ta
  */
 export type Any = Assistant<any, any, any, any>
 
-/**
- * Defines an assistant: its name, its UI blocks, and its specialists.
- *
- * **Example** (Defining an assistant)
- *
- * ```ts
- * import { Assistant } from "effect-assistant"
- *
- * export const MyAssistant = Assistant.make("my-assistant", { blocks: Blocks, specialists: [Research] })
- * ```
- *
- * @category constructors
- * @since 0.1.0
- */
 /** The entry schema for these app schemas, in JSON: the library's events, and the app's. */
 function entrySchema<E>(schemas: ReadonlyArray<EventSchema>): Schema.Codec<Entry<E>, Schema.Json>
 // The overload states the decoded type: the library's events, or one of these schemas' types.

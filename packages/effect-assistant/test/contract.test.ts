@@ -58,7 +58,7 @@ const weather = Tool.make({
 })
 
 describe("with a real model", () => {
-  it.live("replies through send_user_message, and ends the turn with wait", () =>
+  it.live("replies through send_user_message, and ends the turn", () =>
     Effect.gen(function* () {
       const chat = yield* newChat
       yield* TestAssistant.submit(chat, say("Say hi in one short message."))
@@ -66,7 +66,6 @@ describe("with a real model", () => {
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
       expect(AssistantEvent.assistantTexts(entries).length).toBeGreaterThanOrEqual(1)
-      expect(toolsRun(entries)).toContain("wait")
     }).pipe(Effect.provide(memoryAssistant(simple({ instructions }), realModel)))
   )
 

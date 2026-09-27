@@ -50,7 +50,7 @@ import * as AssistantEvent from "./AssistantEvent.ts"
 import { AssistantToolCall } from "./AssistantToolCall.ts"
 import type * as Instructions from "./Instructions.ts"
 import * as Telemetry from "./internal/telemetry.ts"
-import { waitToolName } from "./internal/tools.ts"
+import { endsTurn } from "./internal/tools.ts"
 
 /**
  * What the loop produces: each model call's output, then for each of its tool
@@ -115,7 +115,10 @@ export interface Options<Tools extends Toolkit.Toolkit = Toolkit.Toolkit> extend
 export interface StepResult {
   /** The model's output; unset when the step only ran calls a crash cut off. */
   readonly output: AssistantEvent.ModelOutput | undefined
-  /** Whether the model is done: it made no tool calls, or called `wait`. */
+  /**
+   * Whether the model is done: it made no tool calls, or ended its turn (`wait`, or a message
+   * with `wait: true`) and none of the step's calls failed.
+   */
   readonly done: boolean
   /** The history's length with this step's output and results: a longer one got something new meanwhile. */
   readonly historyLength: number
@@ -137,15 +140,29 @@ const runCall = <Tools extends Toolkit.Toolkit>(toolkit: Tools, call: Items.Tool
       results.map((result) => {
         const wire = ToolResultWire.toToolCallOutput(result)
 
-        return AssistantEvent.ToolResult.make({ callId: wire.call_id, tool: call.name, output: wire.output })
+        return {
+          event: AssistantEvent.ToolResult.make({
+            callId: wire.call_id,
+            tool: call.name,
+            output: wire.output
+          }),
+          failed: ToolResultWire.isFailure(result)
+        }
       })
     ),
-    Effect.tap((results) => Telemetry.toolOutput(results.map((result) => result.output).join("\n"))),
+    Effect.tap((results) => Telemetry.toolOutput(results.map((result) => result.event.output).join("\n"))),
     Telemetry.toolSpan(call)
   )
 
-/** Runs the calls: first a `ToolStarted` for each (stored before any runs), then their results, concurrently. */
-const runCalls = <Tools extends Toolkit.Toolkit>(toolkit: Tools, calls: ReadonlyArray<Items.ToolCall>) =>
+/**
+ * Runs the calls: first a `ToolStarted` for each (stored before any runs), then their results,
+ * concurrently, then `then`, told whether any of them failed.
+ */
+const runCalls = <Tools extends Toolkit.Toolkit, S, E, R>(
+  toolkit: Tools,
+  calls: ReadonlyArray<Items.ToolCall>,
+  then: (failed: boolean) => Stream.Stream<Loop.Step<never, S>, E, R>
+) =>
   Stream.fromIterable(
     calls.map((call) => Loop.value(AssistantEvent.ToolStarted.make({ callId: call.call_id, tool: call.name })))
   ).pipe(
@@ -153,7 +170,13 @@ const runCalls = <Tools extends Toolkit.Toolkit>(toolkit: Tools, calls: Readonly
       Stream.unwrap(
         Effect.map(
           Effect.forEach(calls, (call) => runCall(toolkit, call), { concurrency: "unbounded" }),
-          (all) => Stream.fromIterable(all.flat().map(Loop.value))
+          (all) => {
+            const results = all.flat()
+
+            return Stream.fromIterable(results.map((result) => Loop.value(result.event))).pipe(
+              Stream.concat(then(results.some((result) => result.failed)))
+            )
+          }
         )
       )
     )
@@ -212,8 +235,8 @@ export const step = <Tools extends Toolkit.Toolkit, S, E2 = never, R2 = never>(
       const cutOff = HistoryCheck.findUnansweredCalls(history)
 
       if (cutOff.length > 0) {
-        return runCalls(toolkit, cutOff).pipe(
-          Stream.concat(next({ output: undefined, done: false, historyLength: history.length + cutOff.length }))
+        return runCalls(toolkit, cutOff, () =>
+          next({ output: undefined, done: false, historyLength: history.length + cutOff.length })
         )
       }
 
@@ -228,12 +251,19 @@ export const step = <Tools extends Toolkit.Toolkit, S, E2 = never, R2 = never>(
 
       const output = AssistantEvent.ModelOutput.make({ items: turn.items.map(withJsonArguments) })
       const calls = Turn.getToolCalls(turn)
-      const done = calls.length === 0 || calls.some((call) => call.name === waitToolName)
       const historyLength = history.length + turn.items.length + calls.length
 
+      // A failed call doesn't end the turn: a message that failed never reached the user, so the model reads why.
       return Stream.make(Loop.value(output)).pipe(
-        Stream.concat(runCalls(toolkit, calls)),
-        Stream.concat(next({ output, done, historyLength }))
+        Stream.concat(
+          runCalls(toolkit, calls, (failed) =>
+            next({
+              output,
+              done: calls.length === 0 || (!failed && calls.some(endsTurn)),
+              historyLength
+            })
+          )
+        )
       )
     })
   )
@@ -241,8 +271,8 @@ export const step = <Tools extends Toolkit.Toolkit, S, E2 = never, R2 = never>(
 
 /**
  * Runs the agent loop as a stream: {@link step} after step, until the model
- * is done (it made no tool calls, or called `wait`) and nothing new arrived
- * while it worked, or after `maxSteps` model calls.
+ * is done (see {@link StepResult}) and nothing new arrived while it worked,
+ * or after `maxSteps` model calls.
  *
  * **Details**
  *

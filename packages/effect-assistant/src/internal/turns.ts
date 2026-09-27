@@ -33,6 +33,7 @@ import type * as Specialist from "../Specialist.ts"
 import * as AppEvents from "./events.ts"
 import * as History from "./history.ts"
 import { mapText } from "./instructions.ts"
+import { toJsonText } from "./schema.ts"
 import * as Specialists from "./specialists.ts"
 import * as Telemetry from "./telemetry.ts"
 import * as Tools from "./tools.ts"
@@ -125,7 +126,7 @@ const ProviderError = Schema.Struct({ _tag: Schema.optional(Schema.String), raw:
 const failureMessage = (cause: Cause.Cause<unknown>): string =>
   Option.match(Schema.decodeUnknownOption(ProviderError)(Cause.squash(cause)), {
     onNone: () => Cause.pretty(cause),
-    onSome: ({ _tag, raw }) => `${_tag ?? "Error"}: ${Predicate.isString(raw) ? raw : JSON.stringify(raw)}`
+    onSome: ({ _tag, raw }) => `${_tag ?? "Error"}: ${Predicate.isString(raw) ? raw : toJsonText(raw)}`
   })
 
 /** The specialist runs working now, for the prompt: what's in flight, without reading back through the chat. */
@@ -264,7 +265,7 @@ const makeTurnApi = (
     mapText(given, (text) => `${Instructions.protocol}\n\n${text}${running}`)
 
   // Only send_user_message, and the call is forced: the reply pass can only reply.
-  const replyOnly = Toolkit.fromArray(Object.values(builtins).filter((tool) => tool.name === "send_user_message"))
+  const replyOnly = Toolkit.fromArray(Object.values(builtins).filter((tool) => tool.name === Tools.sendUserMessageName))
 
   const replyIfOwed = (options: Assistant.ReplyOptions) =>
     Stream.unwrap(
@@ -286,7 +287,7 @@ const makeTurnApi = (
           history: Effect.map(chat.entries, (all) => History.fromEntries(all, app.inputs)),
           maxSteps: 1,
           // Named, not just required: a model used to calling wait would otherwise call a tool that isn't there.
-          toolChoice: { type: "function", name: "send_user_message" }
+          toolChoice: { type: "function", name: Tools.sendUserMessageName }
         })
       })
     )

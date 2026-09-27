@@ -12,6 +12,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 import {
   Assistant,
   AssistantActivity,
@@ -278,6 +279,84 @@ describe("specialist runs", () => {
     })
   )
 
+  it.live("continues a finished run once when two messages arrive together", () =>
+    Effect.gen(function* () {
+      const script: Scripted.Script = (request) => {
+        if (!isAssistant(request)) {
+          return [Scripted.text(Scripted.inputs(request).join(" ").includes("province") ? "Ontario." : "Ottawa.")]
+        }
+
+        const last = Scripted.lastInput(request)
+        const runId = Option.getOrElse(Scripted.spawnedRunId(request), () => "")
+
+        if (last.includes("Ontario")) return Scripted.reply("It's in Ontario.")
+
+        if (last.includes("Ottawa")) {
+          return [
+            Scripted.call("message_specialist", { runId, message: "Which province is it in?" }),
+            Scripted.call("message_specialist", { runId, message: "Just the province." })
+          ]
+        }
+
+        if (Option.isSome(Scripted.lastResult(request, "message_specialist"))) return Scripted.wait()
+
+        return hasCalled(request, "spawn_specialist")
+          ? Scripted.reply("Asking research.")
+          : [
+              Scripted.call("spawn_specialist", {
+                kind: "research",
+                goal: "What's the capital of Canada?"
+              })
+            ]
+      }
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* ResearchAssistant.submit(chat, say("What's the capital of Canada?"))
+
+        return yield* collectUntil(ResearchAssistant, chat, (es) => text(es).includes("ontario") && notWorking(es))
+      }).pipe(Effect.provide(runMemory(researchHandlers, Scripted.layer(script))))
+
+      expect(failures(entries), traceEntries(entries)).toEqual([])
+      expect(statuses(entries).toSorted()).toEqual(["continued", "started", "steered"])
+      expect(finished(entries).map((run) => [run.status, run.brief])).toEqual([
+        ["answered", 1],
+        ["answered", 3]
+      ])
+    })
+  )
+
+  it.live("reports a run whose handler died as failed, and a turn relays it", () =>
+    Effect.gen(function* () {
+      const Crasher = Specialist.make("crasher", { description: "Crashes." })
+      const CrasherAssistant = Assistant.make("crasher-test", { specialists: [Crasher] })
+
+      const handlers = CrasherAssistant.toLayer(simple({ instructions })).pipe(
+        Layer.provide(Crasher.toLayer(() => Stream.die(new Error("boom"))))
+      )
+
+      const script: Scripted.Script = (request) => {
+        const last = Scripted.lastInput(request)
+
+        if (last.includes("<specialist")) return Scripted.reply(last.includes("boom") ? "It broke." : "Hm.")
+
+        return hasCalled(request, "spawn_specialist")
+          ? Scripted.reply("On it.")
+          : [Scripted.call("spawn_specialist", { kind: "crasher", goal: "Crash." })]
+      }
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* CrasherAssistant.submit(chat, say("Go."))
+
+        return yield* collectUntil(CrasherAssistant, chat, (es) => text(es).includes("broke") && notWorking(es))
+      }).pipe(Effect.provide(runMemory(handlers, Scripted.layer(script))))
+
+      expect(failures(entries), traceEntries(entries)).toEqual([])
+      expect(finished(entries).map((run) => run.status)).toEqual(["failed"])
+    })
+  )
+
   it.live("reports a run a shutdown cut off, and lets the chat go", () =>
     Effect.gen(function* () {
       const log = yield* ChatLog.ChatLog
@@ -337,14 +416,12 @@ describe("UI blocks", () => {
     if (last.includes("<answer")) return Scripted.reply(last.includes("blue") ? "Blue it is." : "Red it is.")
 
     if (last === "blue")
-      return [
-        Scripted.call("send_user_message", { text: "Blue it is.", closes: [sentId(request)] }),
-        Scripted.call("wait")
-      ]
+      return [Scripted.call("send_user_message", { text: "Blue it is.", wait: true, closes: [sentId(request)] })]
 
     return [
       Scripted.call("send_user_message", {
         text: "Red or blue?",
+        wait: false,
         block: { kind: "choose_one", props: { options: ["red", "blue"] } }
       })
     ]
@@ -400,24 +477,33 @@ describe("UI blocks", () => {
     }).pipe(Effect.provide(layer))
   )
 
-  it.live("refuses props that don't fit the block, as a result the model sees", () =>
+  it.live("refuses props that don't fit the block, as a result the model sees, and the turn goes on", () =>
     Effect.gen(function* () {
-      const script: Scripted.Script = (request) =>
+      const model = yield* Scripted.make((request) =>
         Option.isSome(Scripted.lastResult(request, "send_user_message"))
           ? Scripted.reply("Red or blue?")
-          : [Scripted.call("send_user_message", { text: "Pick", block: { kind: "choose_one", props: { options: 3 } } })]
+          : [
+              Scripted.call("send_user_message", {
+                text: "Pick",
+                wait: true,
+                block: { kind: "choose_one", props: { options: 3 } }
+              })
+            ]
+      )
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
         yield* BlockAssistant.submit(chat, say("Pick a banner color."))
 
         return yield* collectUntil(BlockAssistant, chat, idle)
-      }).pipe(Effect.provide(runMemory(BlockAssistant.toLayer(simple({ instructions })), Scripted.layer(script))))
+      }).pipe(Effect.provide(runMemory(BlockAssistant.toLayer(simple({ instructions })), model.layer)))
 
       const results = entries.flatMap(({ event }) => (Predicate.isTagged(event, "ToolResult") ? [event.output] : []))
 
       expect(results[0]).toMatch(/props|Expected/)
       expect(shown(entries)).toBeUndefined()
+      // The failed message's `wait` doesn't end the turn: the loop's next step reads the failure.
+      expect((yield* model.requests).map((request) => request.toolChoice)).toEqual(["required", "required"])
     })
   )
 })
@@ -507,8 +593,38 @@ describe("tools found on demand, and skills", () => {
       )
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
-      expect(toolsRun(entries)).toEqual(["search_tools", "execute_tool", "send_user_message", "wait"])
+      expect(toolsRun(entries)).toEqual(["search_tools", "execute_tool", "send_user_message"])
       expect(text(entries)).toContain("37")
+    })
+  )
+
+  it.live("fails execute_tool when its tool fails, so a waiting message doesn't end the turn", () =>
+    Effect.gen(function* () {
+      const broken = Tool.make({
+        name: "broken_printer",
+        description: "Prints, when it works.",
+        inputSchema: Schema.Struct({}),
+        run: () => Tool.fail("Out of paper.")
+      })
+
+      const model = yield* Scripted.make((request) =>
+        Option.isSome(Scripted.result(request, "execute_tool"))
+          ? Scripted.wait()
+          : [Scripted.call("execute_tool", { name: "broken_printer", input: {} }), ...Scripted.reply("Printed.")]
+      )
+
+      yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* TestAssistant.submit(chat, say("Print it."))
+        yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
+      }).pipe(
+        Effect.provide(
+          memoryAssistant(simple({ instructions, toolkit: ToolDiscovery.make(Toolkit.make(broken)) }), model.layer)
+        )
+      )
+
+      // The model got another step to read the failure.
+      expect(yield* model.requests).toHaveLength(2)
     })
   )
 

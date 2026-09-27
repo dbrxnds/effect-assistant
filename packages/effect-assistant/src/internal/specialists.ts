@@ -9,6 +9,7 @@ import * as Items from "@effect-uai/core/Items"
 import type * as LanguageModel from "@effect-uai/core/LanguageModel"
 import * as Tool from "@effect-uai/core/Tool"
 import * as Toolkit from "@effect-uai/core/Toolkit"
+import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -19,6 +20,7 @@ import * as Predicate from "effect/Predicate"
 import * as Queue from "effect/Queue"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
+import * as Semaphore from "effect/Semaphore"
 import * as Stream from "effect/Stream"
 import { AssistantChat } from "../AssistantChat.ts"
 import * as AssistantEvent from "../AssistantEvent.ts"
@@ -145,6 +147,10 @@ type Outcome =
   | { readonly status: "failed"; readonly error: string }
   | { readonly status: "stopped" | "cut_off" }
 
+/** A brief that didn't answer: only `stop` interrupts its loop alone; a failure or a defect failed it. */
+const unanswered = (cause: Cause.Cause<unknown>): Outcome =>
+  Cause.hasInterruptsOnly(cause) ? { status: "stopped" } : { status: "failed", error: String(Cause.squash(cause)) }
+
 /**
  * What a run reports when it finishes a brief. Its id is fixed per run and
  * brief, so a replay is stored once.
@@ -242,6 +248,10 @@ interface Run {
   readonly inbox: Queue.Queue<Items.HistoryItem>
   /** Briefs so far, counting follow-ups; numbers the reports. */
   readonly briefs: Ref.Ref<number>
+  /** Whether it works on a brief; read and changed under `lock`. */
+  readonly busy: Ref.Ref<boolean>
+  /** Orders a message against the run finishing, so none is dropped or starts a second loop. */
+  readonly lock: Semaphore.Semaphore
 }
 
 /**
@@ -296,9 +306,9 @@ export const makeRunner = Effect.fn(function* (options: {
       chatId: chat.chatId
     }).pipe(
       Effect.provideContext(Context.merge(options.model, services)),
-      Effect.match({
+      Effect.matchCause({
         onSuccess: (answer): Outcome => ({ status: "answered", report: answer }),
-        onFailure: (error): Outcome => ({ status: "failed", error: String(error) })
+        onFailure: unanswered
       })
     )
 
@@ -318,15 +328,29 @@ export const makeRunner = Effect.fn(function* (options: {
         AssistantEvent.SpecialistStarted.make({ runId: run.runId, specialist: run.specialist.name, goal: run.goal })
       ])
 
-      const exit = yield* Fiber.await(yield* FiberMap.run(working, run.runId, untilCaughtUp(run)))
+      let finished = false
 
-      // Only `stop` interrupts the loop alone.
-      yield* report(run, Exit.isSuccess(exit) ? exit.value : { status: "stopped" })
-      yield* FiberMap.run(
-        forgetting,
-        run.runId,
-        Effect.sleep(warm).pipe(Effect.andThen(Effect.sync(() => runs.delete(run.runId))))
-      )
+      while (!finished) {
+        const exit = yield* Fiber.await(yield* FiberMap.run(working, run.runId, untilCaughtUp(run)))
+        const outcome = Exit.isSuccess(exit) ? exit.value : unanswered(exit.cause)
+
+        finished = yield* run.lock.withPermit(
+          Effect.gen(function* () {
+            // A message steered in after the loop's last read: work on it before reporting.
+            if (outcome.status !== "stopped" && (yield* Queue.size(run.inbox)) > 0) return false
+
+            yield* report(run, outcome)
+            yield* Ref.set(run.busy, false)
+            yield* FiberMap.run(
+              forgetting,
+              run.runId,
+              Effect.sleep(warm).pipe(Effect.andThen(Effect.sync(() => runs.delete(run.runId))))
+            )
+
+            return true
+          })
+        )
+      }
     },
     // A shutdown interrupts the whole run: no turn can start now, so the report waits for the chat's next start.
     (effect, run) => Effect.onInterrupt(effect, () => report(run, { status: "cut_off" }))
@@ -335,6 +359,23 @@ export const makeRunner = Effect.fn(function* (options: {
   const launch = Effect.fn(function* (run: Run) {
     yield* FiberMap.remove(forgetting, run.runId)
     yield* FiberSet.run(background, options.holding(work(run)))
+  })
+
+  /** Steers a working run, or continues a finished one. Runs under the run's lock. */
+  const send = Effect.fn(function* (run: Run, text: string): Effect.fn.Return<"steered" | "continued"> {
+    yield* Ref.update(run.briefs, (n) => n + 1)
+
+    if (yield* Ref.get(run.busy)) {
+      yield* Queue.offer(run.inbox, Items.userText(text))
+
+      return "steered"
+    }
+
+    yield* Ref.update(run.history, (all) => [...all, Items.userText(text)])
+    yield* Ref.set(run.busy, true)
+    yield* launch(run)
+
+    return "continued"
   })
 
   const runner = Specialist.Runner.of({
@@ -353,7 +394,9 @@ export const makeRunner = Effect.fn(function* (options: {
         brief: request.brief,
         history: yield* Ref.make<ReadonlyArray<Items.HistoryItem>>([Items.userText(briefText(request.brief))]),
         inbox: yield* Queue.unbounded<Items.HistoryItem>(),
-        briefs: yield* Ref.make(1)
+        briefs: yield* Ref.make(1),
+        busy: yield* Ref.make(true),
+        lock: yield* Semaphore.make(1)
       }
 
       runs.set(run.runId, run)
@@ -361,7 +404,10 @@ export const makeRunner = Effect.fn(function* (options: {
 
       return run.runId
     }),
-    message: Effect.fn(function* (runId: string, text: string) {
+    message: Effect.fn(function* (
+      runId: string,
+      text: string
+    ): Effect.fn.Return<"steered" | "continued", Specialist.SpecialistError> {
       const run = runs.get(runId)
 
       if (run === undefined) {
@@ -370,18 +416,7 @@ export const makeRunner = Effect.fn(function* (options: {
         })
       }
 
-      yield* Ref.update(run.briefs, (n) => n + 1)
-
-      if (yield* FiberMap.has(working, runId)) {
-        yield* Queue.offer(run.inbox, Items.userText(text))
-
-        return "steered" as const
-      }
-
-      yield* Ref.update(run.history, (all) => [...all, Items.userText(text)])
-      yield* launch(run)
-
-      return "continued" as const
+      return yield* run.lock.withPermit(send(run, text))
     }),
     stop: Effect.fn(function* (runId: string) {
       if (!(yield* FiberMap.has(working, runId))) {
