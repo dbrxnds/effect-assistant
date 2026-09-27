@@ -34,18 +34,6 @@ history is rebuilt from it before every model call.
 Turns and specialist runs are the chat's activity: each opens with one event
 and closes with another (see `AssistantActivity`).
 
-**Versioning**
-
-A log is kept for good, so an event's stored form is versioned. An event
-with a `format` field is at that format; one without is at format 1. A
-change to what an event stores gives it the next format, and its schema
-goes on decoding every earlier one, migrated to the new form, so an old
-log reads as it did. `ModelOutput` and `ToolResult` are at
-format 2, `effect/unstable/ai`'s response parts and a tool's encoded result;
-their format 1 (history items, and results as text) came before the first
-release and isn't read. The app's own events carry their own tag, and
-their schemas evolve the same way (see `AppEvent`).
-
 ## Models
 
 ### MessageBlock
@@ -130,8 +118,6 @@ parts. `Prompt.fromResponseParts` turns them into history.
 
 ```ts
 class ModelOutput extends Schema.TaggedClass<ModelOutput>()("ModelOutput", {
-  /** The stored form's version (see "Versioning" above). */
-  format: Schema.tag(2),
   parts: Schema.Array(ModelPart),
   /**
    * The last entry the model had read when it wrote this. Inputs after it
@@ -195,8 +181,6 @@ kind when it has one: a `ToolFailure`'s `kind`, or its tag.
 
 ```ts
 class ToolResult extends Schema.TaggedClass<ToolResult>()("ToolResult", {
-  /** The stored form's version (see "Versioning" above). */
-  format: Schema.tag(2),
   callId: Schema.String,
   tool: Schema.String,
   outcome: ToolOutcome,

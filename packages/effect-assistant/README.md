@@ -158,8 +158,7 @@ now, so `@effect-uai/*` isn't a peer dependency any more.
   history view's extra items are `effect/unstable/ai/Prompt` messages
   instead of `Items.HistoryItem`s: `Items.userText(text)` becomes
   `...Prompt.make(text).content`.
-- **The stored forms changed** (both at format 2, see `AssistantEvent`'s
-  versioning): `ModelOutput.items` is `parts` (native response parts, with
+- **The stored forms changed**: `ModelOutput.items` is `parts` (native response parts, with
   the call's `model`, `responseId`, `usage`, and `durationMillis`), and
   `ToolResult.output` (text) is `result` (the encoded result in JSON) with
   `outcome` (`"success"` or `"failure"`) and a failure's `kind`. Logs written
