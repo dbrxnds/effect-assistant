@@ -313,6 +313,15 @@ export interface Assistant<Name extends string = string, Specs extends Specialis
     chatId: ChatId,
     options?: { readonly after?: number | undefined }
   ) => Stream.Stream<Entry<Events>, never, AssistantEngine>
+  /**
+   * Deletes a chat: its log, and what works in it. A turn or specialist run
+   * working in it stops, subscribers' streams end, and the chat stores
+   * nothing again: a later `submit`, a run's report, or a workflow's event
+   * for it is dropped, quietly. A workflow waiting on one of its decisions
+   * gets `"declined"`, since no one can answer it now. Deleting it again
+   * does nothing.
+   */
+  readonly delete: (chatId: ChatId) => Effect.Effect<void, never, AssistantEngine>
   /** Schema for the chat's entries, the assistant's own events included, in JSON. */
   readonly Entry: Schema.Codec<Entry<Events>, Schema.Json>
 }
@@ -455,6 +464,7 @@ export const make = <
           Filter.fromPredicateOption((entry: AssistantEvent.Entry) => AppEvents.decodeEntry(definition.app, entry))
         )
       ),
+    delete: (chatId) => AssistantEngine.use((engine) => engine.delete(name, chatId)),
     Entry: entrySchema(events)
   }
 

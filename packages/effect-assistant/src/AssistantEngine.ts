@@ -73,6 +73,8 @@ export class AssistantEngine extends Context.Service<
     ) => Effect.Effect<void>
     /** Streams the chat's stored events after `after`, then live ones. */
     readonly subscribe: (assistant: string, chatId: ChatId, after: number) => Stream.Stream<AssistantEvent.Entry>
+    /** Deletes a chat of the assistant: its log, and what works in it. */
+    readonly delete: (assistant: string, chatId: ChatId) => Effect.Effect<void>
   }
 >()("effect-assistant/AssistantEngine") {}
 
@@ -163,6 +165,11 @@ export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.e
         yield* Effect.forkScoped(resumeAll(registration))
       }),
       submit: (assistant, chatId, input) => withChat(assistant, chatId, (chat) => chat.submitInBackground(input)),
+      // The chat deletes itself, so a chat that's open stops; the entry goes, and the next open finds it deleted.
+      delete: (assistant, chatId) =>
+        withChat(assistant, chatId, (chat) => chat.delete).pipe(
+          Effect.andThen(RcMap.invalidate(chats, new ChatKey({ assistant, chatId })))
+        ),
       // The subscriber holds the chat open while it streams.
       subscribe: (assistant, chatId, after) =>
         Stream.unwrap(
@@ -176,6 +183,7 @@ export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.e
 interface EntityClient {
   readonly submit: (chatId: ChatId, input: AssistantEvent.Input | AssistantEvent.StoredAppEvent) => Effect.Effect<void>
   readonly subscribe: (chatId: ChatId, after: number) => Stream.Stream<AssistantEvent.Entry>
+  readonly delete: (chatId: ChatId) => Effect.Effect<void>
 }
 
 const Submit = Rpc.make("Submit", {
@@ -187,6 +195,8 @@ const Subscribe = Rpc.make("Subscribe", {
   success: AssistantEvent.Entry,
   stream: true
 })
+
+const Delete = Rpc.make("Delete")
 
 /**
  * Layer that runs chats as cluster entities, one per chat, keyed by chat id.
@@ -212,7 +222,7 @@ export const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Shardin
     const clients = new Map<string, EntityClient>()
 
     const register = Effect.fn(function* (registration: Turns.Registration) {
-      const ChatEntity = Entity.make(`Assistant/${registration.definition.name}`, [Submit, Subscribe])
+      const ChatEntity = Entity.make(`Assistant/${registration.definition.name}`, [Submit, Subscribe, Delete])
 
       const handlers = Effect.gen(function* () {
         const address = yield* Entity.CurrentAddress
@@ -235,7 +245,8 @@ export const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Shardin
         return ChatEntity.of({
           // The turns run inside the request, so a crash leaves it unprocessed and the cluster redelivers it.
           Submit: (request) => chat.submit(request.payload.input),
-          Subscribe: (request) => chat.stream(request.payload.after)
+          Subscribe: (request) => chat.stream(request.payload.after),
+          Delete: () => chat.delete
         })
       })
 
@@ -248,7 +259,8 @@ export const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Shardin
 
       clients.set(registration.definition.name, {
         submit: (chatId, input) => makeClient(chatId).Submit({ input }, { discard: true }).pipe(Effect.orDie),
-        subscribe: (chatId, after) => makeClient(chatId).Subscribe({ after }).pipe(Stream.orDie)
+        subscribe: (chatId, after) => makeClient(chatId).Subscribe({ after }).pipe(Stream.orDie),
+        delete: (chatId) => makeClient(chatId).Delete().pipe(Effect.orDie)
       })
     })
 
@@ -263,7 +275,8 @@ export const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Shardin
       submit: (assistant, chatId, input) =>
         clientOf(assistant).pipe(Effect.flatMap((client) => client.submit(chatId, input))),
       subscribe: (assistant, chatId, after) =>
-        Stream.unwrap(Effect.map(clientOf(assistant), (client) => client.subscribe(chatId, after)))
+        Stream.unwrap(Effect.map(clientOf(assistant), (client) => client.subscribe(chatId, after))),
+      delete: (assistant, chatId) => clientOf(assistant).pipe(Effect.flatMap((client) => client.delete(chatId)))
     })
   })
 )

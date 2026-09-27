@@ -596,6 +596,29 @@ describe("a decision that running work asks for", () => {
     })
   )
 
+  it.live("deleting the chat declines the decision the workflow waits on, and the workflow goes on", () =>
+    Effect.gen(function* () {
+      const layer = layerLaunch.pipe(
+        Layer.provideMerge(Launcher.toLayer(simple({ instructions }))),
+        Layer.provideMerge(WorkflowEngine.layerMemory),
+        Layer.provideMerge(AssistantEngine.layerMemory),
+        Layer.provideMerge(layerStorage),
+        Layer.provide(Scripted.layer(workScript))
+      )
+
+      const outcome = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        const run = yield* Effect.forkChild(Launch.execute({ chatId: chat }))
+        yield* collectUntil(Launcher, chat, waitingFor, "10 seconds")
+        yield* Launcher.delete(chat)
+
+        return yield* Fiber.join(run).pipe(Effect.timeout("5 seconds"))
+      }).pipe(Effect.provide(layer))
+
+      expect(outcome).toBe("declined")
+    })
+  )
+
   it.live("from app code: the outcome is in the log, and outcome waits for it", () =>
     Effect.gen(function* () {
       const outcome = yield* Effect.gen(function* () {
