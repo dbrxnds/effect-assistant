@@ -69,6 +69,7 @@
 import * as Effect from "effect/Effect"
 import * as Filter from "effect/Filter"
 import * as Layer from "effect/Layer"
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type * as SchemaAST from "effect/SchemaAST"
 import type * as Scope from "effect/Scope"
@@ -344,6 +345,10 @@ function entrySchema(schemas: ReadonlyArray<EventSchema>): Schema.Top {
   )
 }
 
+const isLibraryInput = (input: { readonly _tag: string }): input is AssistantEvent.Input =>
+  AssistantEvent.isInput(input) ||
+  (AssistantEvent.isLibraryEvent(input) && Predicate.isTagged(input, "DecisionRequested"))
+
 /**
  * Defines an assistant: its name, its UI blocks, its specialists, and its own
  * events and inputs.
@@ -440,13 +445,12 @@ export const make = <
     )
   }
 
-  // The app's own inputs go to the engine as they're stored; the library's as they are.
+  // The app's own inputs go to the engine as they're stored; the library's as they are (a parked call too: the
+  // chat refuses it).
   const stored = (
     input: AssistantEvent.Input | Inputs[number]["Type"]
   ): Effect.Effect<AssistantEvent.Input | AssistantEvent.AppEvent> =>
-    AssistantEvent.isLibraryEvent(input) && AssistantEvent.isInput(input)
-      ? Effect.succeed(input)
-      : AppEvents.encode(definition.app, input)
+    isLibraryInput(input) ? Effect.succeed(input) : AppEvents.encode(definition.app, input)
 
   const assistant: Assistant<Name, Specs[number], Events[number]["Type"], Inputs[number]["Type"]> = {
     name,

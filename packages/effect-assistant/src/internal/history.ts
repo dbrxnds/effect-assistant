@@ -5,10 +5,13 @@
  * @internal
  */
 import * as Match from "effect/Match"
+import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
+import * as Schema from "effect/Schema"
 import * as Prompt from "effect/unstable/ai/Prompt"
 import * as Response from "effect/unstable/ai/Response"
 import * as AssistantEvent from "../AssistantEvent.ts"
+import * as Decision from "../Decision.ts"
 import { toJson, toJsonText } from "./schema.ts"
 
 /**
@@ -143,6 +146,75 @@ const answerText = (answer: AssistantEvent.BlockAnswer) =>
   `<answer message="${answer.messageId}" kind="${answer.kind}">\nThe user answered with the block on your message ${answer.messageId}.\n${toJsonText(answer.value)}\n</answer>`
 
 /**
+ * A parked call's result, as the model reads it: it waits for the user, and
+ * what to do about it.
+ *
+ * @internal
+ */
+export const parkedResult = (
+  request: AssistantEvent.DecisionRequested,
+  origin: AssistantEvent.CallOrigin
+): Prompt.ToolMessage =>
+  Prompt.toolMessage({
+    content: [
+      Prompt.toolResultPart({
+        id: origin.callId,
+        name: origin.tool,
+        isFailure: false,
+        result: {
+          status: "waiting_for_decision",
+          decisionId: request.id,
+          preview: request.preview,
+          next: "Not run: it runs only if the user approves it. Send them a message with a decision block for this decisionId that says what they approve (the preview's key facts). Their answer runs it, or declines it."
+        },
+        providerExecuted: false
+      })
+    ]
+  })
+
+const workRequestText = (request: AssistantEvent.DecisionRequested, origin: AssistantEvent.WorkOrigin) =>
+  `<decision id="${request.id}" source="${origin.source}" status="requested">\nWork that's running needs the user's decision. The user hasn't seen it: send them a message with a decision block for this id that says what they decide on.\n${toJsonText(request.preview)}\n</decision>`
+
+const whatDecided = (request: AssistantEvent.DecisionRequested, outcome: AssistantEvent.DecisionOutcome) =>
+  Match.value(request.origin).pipe(
+    Match.tagsExhaustive({
+      Call: ({ tool }) =>
+        outcome === "approved"
+          ? `approved: ${tool} runs now, and its result follows.`
+          : `declined: ${tool} didn't run, and won't.`,
+      Work: ({ source }) => `${outcome}: ${source} is told.`
+    })
+  )
+
+const decodeDecisionAnswer = Schema.decodeUnknownOption(Decision.Answer)
+
+/** A decision block's answer: what the user decided, decision by decision. */
+const decisionAnswerText = (
+  answer: AssistantEvent.BlockAnswer,
+  requests: ReadonlyMap<string, AssistantEvent.DecisionRequested>
+) =>
+  Option.match(decodeDecisionAnswer(answer.value), {
+    onNone: () => answerText(answer),
+    onSome: ({ decisions }) => {
+      const lines = Object.entries(decisions).map(([id, outcome]) => {
+        const request = requests.get(id)
+
+        return `- ${id}: ${request === undefined ? outcome : whatDecided(request, outcome)}`
+      })
+
+      return `<answer message="${answer.messageId}" kind="${answer.kind}">\nThe user decided with the block on your message ${answer.messageId}:\n${lines.join("\n")}\n</answer>`
+    }
+  })
+
+/** An approved call's result, as the model reads it: the call ran after the user approved it. */
+const approvedResultText = (
+  request: AssistantEvent.DecisionRequested,
+  tool: string,
+  result: AssistantEvent.ToolResult
+) =>
+  `<decision id="${request.id}" tool="${tool}" outcome="approved">\nThe user approved it, and ${tool} ran: ${result.outcome}.\n${toJsonText(result.result)}\n</decision>`
+
+/**
  * Rebuilds model history from a chat's entries, in the order the model saw
  * them.
  *
@@ -154,6 +226,9 @@ const answerText = (answer: AssistantEvent.BlockAnswer) =>
  * - Tool calls still open when a new turn starts belong to a turn a crash cut
  *   off. They stay open: the agent loop runs them again, with the same ids,
  *   before its next model call.
+ * - A parked call's result is that it waits for the user's decision. If the
+ *   user approves and it runs, its result reads as the decision's, where it
+ *   ran, since the call already has one.
  *
  * @internal
  */
@@ -164,6 +239,9 @@ export const fromEntries = (
   const history: Array<Prompt.Message> = []
   const held: Array<Prompt.Message> = []
   const open = new Set<string>()
+  const requests = new Map<string, AssistantEvent.DecisionRequested>()
+  // Parked calls by call id: their result came with the parking, so a later one reads as the decision's.
+  const parked = new Map<string, AssistantEvent.DecisionRequested>()
 
   const flushIfClosed = () => {
     if (open.size === 0) history.push(...held.splice(0))
@@ -196,7 +274,11 @@ export const fromEntries = (
     Match.value(event).pipe(
       Match.tagsExhaustive({
         UserMessage: (message) => input(index, userText(message.text)),
-        BlockAnswer: (answer) => input(index, userText(answerText(answer))),
+        BlockAnswer: (answer) =>
+          input(
+            index,
+            userText(answer.kind === Decision.kind ? decisionAnswerText(answer, requests) : answerText(answer))
+          ),
         Fact: (fact) => input(index, userText(factText(fact))),
         ModelOutput: (output) => {
           history.push(...Prompt.fromResponseParts(output.parts).content)
@@ -205,10 +287,30 @@ export const fromEntries = (
           flushIfClosed()
         },
         ToolResult: (result) => {
+          const request = parked.get(result.callId)
+
+          if (request !== undefined) return input(index, userText(approvedResultText(request, result.tool, result)))
+
           history.push(toolMessage(result))
           open.delete(result.callId)
           flushIfClosed()
         },
+        DecisionRequested: (request) => {
+          requests.set(request.id, request)
+
+          Match.value(request.origin).pipe(
+            Match.tagsExhaustive({
+              Call: (origin) => {
+                parked.set(origin.callId, request)
+                history.push(parkedResult(request, origin))
+                open.delete(origin.callId)
+                flushIfClosed()
+              },
+              Work: (origin) => input(index, userText(workRequestText(request, origin)))
+            })
+          )
+        },
+        DecisionResolved: () => undefined,
         AssistantMessage: () => undefined,
         ToolStarted: () => undefined,
         TurnStarted: () => undefined,

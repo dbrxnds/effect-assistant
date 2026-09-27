@@ -7,7 +7,7 @@
  */
 import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
-import type * as Context from "effect/Context"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import { identity } from "effect/Function"
@@ -19,15 +19,18 @@ import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import type * as LanguageModel from "effect/unstable/ai/LanguageModel"
 import type * as Prompt from "effect/unstable/ai/Prompt"
+import * as WorkflowEngine from "effect/unstable/workflow/WorkflowEngine"
 import type * as Assistant from "../Assistant.ts"
 import * as AssistantActivity from "../AssistantActivity.ts"
 import type { AssistantChat } from "../AssistantChat.ts"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import * as AssistantLoop from "../AssistantLoop.ts"
 import type * as BlockKit from "../BlockKit.ts"
+import * as Decision from "../Decision.ts"
 import * as Instructions from "../Instructions.ts"
 import * as Skill from "../Skill.ts"
 import type * as Specialist from "../Specialist.ts"
+import * as Decisions from "./decisions.ts"
 import * as AppEvents from "./events.ts"
 import * as History from "./history.ts"
 import { mapText } from "./instructions.ts"
@@ -86,6 +89,8 @@ export interface Registration {
   readonly specialists: ReadonlyArray<{ readonly specialist: Specialist.Any; readonly built: Specialist.Built }>
   /** The assistant's own tools: `send_user_message`, `wait`, and the specialist tools. */
   readonly builtins: AssistantLoop.Tools<Assistant.TurnServices>
+  /** The workflow engine the assistant's layer was given, if any: an answer completes a workflow's decision with it. */
+  readonly workflows: Option.Option<Context.Context<WorkflowEngine.WorkflowEngine>>
 }
 
 /**
@@ -100,6 +105,16 @@ export const makeRegistration = Effect.fn(function* (
 ) {
   const model = yield* Effect.context<LanguageModel.LanguageModel>()
 
+  const workflows = Option.map(yield* Effect.serviceOption(WorkflowEngine.WorkflowEngine), (engine) =>
+    Context.make(WorkflowEngine.WorkflowEngine, engine)
+  )
+
+  const decisionBlock = definition.blocks?.byKind.get(Decision.kind)
+
+  if (decisionBlock !== undefined && decisionBlock !== Decision.block) {
+    return yield* Effect.die(`The ${Decision.kind} block kind is the library's: use Decision.block.`)
+  }
+
   const specialists = yield* Effect.forEach(definition.specialists, (specialist) =>
     Effect.flatMap(Effect.serviceOption(specialist.Handler), (built) =>
       Option.isSome(built)
@@ -113,7 +128,7 @@ export const makeRegistration = Effect.fn(function* (
     yield* Specialists.toolkit(definition.specialists)
   )
 
-  const registration: Registration = { definition, model, open: options.open, specialists, builtins }
+  const registration: Registration = { definition, model, open: options.open, specialists, builtins, workflows }
 
   return registration
 })
@@ -189,7 +204,10 @@ const closeOpenCalls = Effect.fn(function* (chat: AssistantChat["Service"], star
     entries.flatMap(({ event }) => (Predicate.isTagged(event, "ToolStarted") ? [event.callId] : []))
   )
 
-  const open = History.unansweredCalls(History.fromEntries(entries, new Set()))
+  // Approved calls this turn started that have no result are cut off like any other; one not started yet waits.
+  const all = yield* chat.entries
+  const approved = Decisions.approvedCalls(all).filter((call) => started.has(call.id))
+  const open = [...History.unansweredCalls(History.fromEntries(entries, new Set())), ...approved]
 
   if (open.length === 0) return
 
@@ -300,16 +318,24 @@ const makeTurnApi = (
       const toolkit = Toolkits.merge(Toolkits.merge(builtins, Skill.toolkit(skills)), options.toolkit ?? Toolkits.empty)
       const twice = Toolkits.duplicateNames(toolkit)
 
+      const deciding = toolkit.definitions.filter(
+        (tool) => tool.needsApproval !== undefined && tool.needsApproval !== false
+      )
+
       const loop =
         twice.length > 0
           ? Stream.die(`Tool names used twice, like one named after a built-in: ${twice.join(", ")}`)
-          : AssistantLoop.stream({
-              instructions: mapText(instructions(options.instructions), (text) => Skill.withCatalog(text, skills)),
-              toolkit,
-              history: history(options.history),
-              maxSteps: options.maxSteps ?? 16,
-              toolChoice: "required"
-            })
+          : deciding.length > 0 && definition.blocks?.byKind.get(Decision.kind) === undefined
+            ? Stream.die(
+                `${deciding.map((tool) => tool.name).join(", ")} can wait for the user's decision: add Decision.block to the assistant's blocks.`
+              )
+            : AssistantLoop.stream({
+                instructions: mapText(instructions(options.instructions), (text) => Skill.withCatalog(text, skills)),
+                toolkit,
+                history: history(options.history),
+                maxSteps: options.maxSteps ?? 16,
+                toolChoice: "required"
+              })
 
       return Stream.concat(loop, replyIfOwed({ instructions: options.instructions, nudge: options.replyNudge }))
     }

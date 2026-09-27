@@ -13,6 +13,7 @@ import * as AssistantEvent from "../AssistantEvent.ts"
 import { AssistantChat } from "../AssistantChat.ts"
 import type * as AssistantLoop from "../AssistantLoop.ts"
 import type * as BlockKit from "../BlockKit.ts"
+import * as Decision from "../Decision.ts"
 import * as ToolFailure from "../ToolFailure.ts"
 import * as Toolkits from "./toolkit.ts"
 import * as Uuid from "./uuid.ts"
@@ -69,6 +70,21 @@ const plainTools = PlainTools.toHandlers({
     })
 }).pipe(Effect.flatMap((handlers) => Effect.provideContext(PlainTools, handlers)))
 
+const decodeDecisionProps = Schema.decodeUnknownOption(Decision.Props)
+
+/** A decision block asks only for decisions that wait for the user. */
+const checkDecisions = Effect.fn(function* (ids: ReadonlyArray<string>) {
+  const states = Decision.states(yield* AssistantChat.use((chat) => chat.entries))
+  const notWaiting = ids.filter((id) => states.get(id)?.outcome !== undefined || !states.has(id))
+
+  if (notWaiting.length > 0) {
+    return yield* ToolFailure.fail(
+      `Not waiting for the user's decision: ${notWaiting.join(", ")}. Use the ids of decisions that wait for one.`,
+      { kind: "not_waiting_for_decision" }
+    )
+  }
+})
+
 /** `send_user_message` with an optional block from the kit, and `wait`. */
 const blockTools = (kit: BlockKit.BlockKit) => {
   const catalog = kit.blocks.map((block) => `- ${block.kind}: ${block.description}`).join("\n")
@@ -118,6 +134,15 @@ ${catalog}`,
 
         if (props === undefined || Option.isNone(Schema.decodeUnknownOption(props)(block.props))) {
           return yield* ToolFailure.fail(`Those props don't fit a ${block.kind} block.`)
+        }
+
+        if (block.kind === Decision.kind) {
+          yield* checkDecisions(
+            Option.match(decodeDecisionProps(block.props), {
+              onNone: () => [],
+              onSome: (decoded) => decoded.decisionIds
+            })
+          )
         }
 
         yield* append(
