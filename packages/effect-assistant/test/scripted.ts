@@ -3,6 +3,7 @@
  * what the model answers to a request, and checks what the library does with
  * it. Tests of how a real model uses the library are in `contract.test.ts`.
  */
+import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -115,10 +116,66 @@ export const spawnedRunId = (request: Request): Option.Option<string> =>
       .at(-1)
   )
 
+/** Text in pieces of a few characters, as a provider streams it. */
+const pieces = (text: string): ReadonlyArray<string> => text.match(/[\s\S]{1,8}/g) ?? []
+
+/** A part as a provider streams it: text, reasoning, and a tool call's params in pieces, with the metadata at the end. */
+const streamedPart = (part: Response.PartEncoded, index: number): ReadonlyArray<Response.StreamPartEncoded> => {
+  const id = `${index}`
+
+  switch (part.type) {
+    case "text":
+      return [
+        { type: "text-start", id },
+        ...pieces(part.text).map((delta): Response.StreamPartEncoded => ({ type: "text-delta", id, delta })),
+        { type: "text-end", id, metadata: part.metadata }
+      ]
+    case "reasoning":
+      return [
+        { type: "reasoning-start", id },
+        ...pieces(part.text).map((delta): Response.StreamPartEncoded => ({ type: "reasoning-delta", id, delta })),
+        { type: "reasoning-end", id, metadata: part.metadata }
+      ]
+    case "tool-call":
+      return [
+        { type: "tool-params-start", id: part.id, name: part.name },
+        ...pieces(toJsonText(part.params)).map((delta): Response.StreamPartEncoded => ({
+          type: "tool-params-delta",
+          id: part.id,
+          delta
+        })),
+        { type: "tool-params-end", id: part.id },
+        part
+      ]
+    default:
+      return [part]
+  }
+}
+
+/** A stream whose elements each take `pace`. */
+export const paced = <A, E, R>(stream: Stream.Stream<A, E, R>, pace: Duration.Input | undefined) =>
+  pace === undefined
+    ? stream
+    : stream.pipe(
+        Stream.rechunk(1),
+        Stream.tap(() => Effect.sleep(pace))
+      )
+
+/** Parts as a provider streams them. */
+export const streamed = (parts: ReadonlyArray<Response.PartEncoded>): ReadonlyArray<Response.StreamPartEncoded> =>
+  parts.flatMap(streamedPart)
+
 /**
  * A `LanguageModel` that answers with the script, and records every request.
+ * It streams the answer as a provider would, in pieces.
  */
-export const make = Effect.fn(function* (script: Script) {
+export const make = Effect.fn(function* (
+  script: Script,
+  options?: {
+    /** How long each streamed part takes, for a test that watches the stream: live tests only. */
+    readonly pace?: Duration.Input | undefined
+  }
+) {
   const requests = yield* Ref.make<ReadonlyArray<Request>>([])
 
   const generate = Effect.fn(function* (options: LanguageModel.ProviderOptions) {
@@ -161,7 +218,10 @@ export const make = Effect.fn(function* (script: Script) {
 
   const service = yield* LanguageModel.make({
     generateText: generate,
-    streamText: () => Stream.die("The scripted model doesn't stream.")
+    streamText: (request) =>
+      Stream.unwrap(
+        Effect.map(generate(request), (parts) => paced(Stream.fromIterable(streamed(parts)), options?.pace))
+      )
   })
 
   return { layer: Layer.succeed(LanguageModel.LanguageModel, service), requests: Ref.get(requests) }

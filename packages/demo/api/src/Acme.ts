@@ -8,6 +8,7 @@ import * as AnthropicClient from "@effect/ai-anthropic/AnthropicClient"
 import * as AnthropicLanguageModel from "@effect/ai-anthropic/AnthropicLanguageModel"
 import * as AssistantLoop from "effect-assistant/AssistantLoop"
 import * as BlockKit from "effect-assistant/BlockKit"
+import * as EagerInput from "effect-assistant/EagerInput"
 import * as Skill from "effect-assistant/Skill"
 import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
@@ -88,7 +89,7 @@ export const layerModel = Layer.unwrap(
     yield* Effect.logInfo(`model: ${name}`)
 
     return AnthropicLanguageModel.model(name, { cache_control: { type: "ephemeral" }, strictJsonSchema: false }).pipe(
-      Layer.provide(AnthropicClient.layer({ apiKey })),
+      Layer.provide(AnthropicClient.layer({ apiKey, transformClient: EagerInput.anthropic() })),
       Layer.provide(FetchHttpClient.layer)
     )
   })

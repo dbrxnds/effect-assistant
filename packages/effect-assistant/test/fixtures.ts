@@ -25,6 +25,7 @@ import {
   ChatId,
   ChatLog,
   ChatView,
+  EagerInput,
   InputId
 } from "../src/index.ts"
 import { toJsonText } from "../src/internal/schema.ts"
@@ -32,9 +33,14 @@ import { toJsonText } from "../src/internal/schema.ts"
 /** A small, fast model: the contract tests check behaviour, not wording. */
 export const testModel = "claude-haiku-4-5"
 
-/** The Anthropic API, for the contract tests, with prompt caching as an app would set it. */
+/** The Anthropic API, for the contract tests, with prompt caching and eager input as an app would set them. */
 export const realModel = AnthropicLanguageModel.model(testModel, { cache_control: { type: "ephemeral" } }).pipe(
-  Layer.provide(AnthropicClient.layer({ apiKey: Redacted.make(process.env.ANTHROPIC_API_KEY ?? "") })),
+  Layer.provide(
+    AnthropicClient.layer({
+      apiKey: Redacted.make(process.env.ANTHROPIC_API_KEY ?? ""),
+      transformClient: EagerInput.anthropic()
+    })
+  ),
   Layer.provide(FetchHttpClient.layer)
 )
 

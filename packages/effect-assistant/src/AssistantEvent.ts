@@ -19,6 +19,8 @@
  * - Decisions the user is asked to make: {@link DecisionRequested}, when a
  *   tool call waits for one or work asks for one (that one is an input), and
  *   {@link DecisionResolved}, once the user answered its decision block.
+ * - Not stored: {@link Composing}, the message the assistant is writing to
+ *   the user right now, which only the chat's live subscribers get.
  * - The app's own events, like a workflow's progress or a summary for
  *   compaction: {@link StoredAppEvent}, as they're stored. The ones an
  *   assistant registers (see `AppEvent`) decode to their own types, and
@@ -414,6 +416,20 @@ export class SpecialistStarted extends Schema.TaggedClass<SpecialistStarted>()("
  */
 export class BlocksClosed extends Schema.TaggedClass<BlocksClosed>()("BlocksClosed", {
   messageIds: Schema.Array(Schema.String)
+}) {}
+
+/**
+ * The message the assistant is writing to the user, while the model writes
+ * its `send_user_message` call: its `text` so far, and no `text` once the
+ * model stopped writing it. It isn't stored and isn't an `AssistantEvent`:
+ * the chat sends it to its live subscribers only, where `ChatView` shows it
+ * as `activity.composing` until the message arrives.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export class Composing extends Schema.TaggedClass<Composing>()("Composing", {
+  text: Schema.optional(Schema.String)
 }) {}
 
 /**

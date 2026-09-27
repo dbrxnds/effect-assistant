@@ -436,8 +436,10 @@ const requestToolkit = (definitions: ReadonlyArray<Tool.Any>): Toolkit.WithHandl
 })
 
 /**
- * One model call. Tool call resolution stays on with a toolkit that runs nothing: with it off, a call whose params
- * don't fit its tool's schema fails the whole model call, and here the model reads why instead.
+ * One model call, streamed, so the chat sees the message the model is writing (see `Composing`); its response is
+ * read whole, as `generateText` would return it. Tool call resolution stays on with a toolkit that runs nothing: with
+ * it off, a call whose params don't fit its tool's schema fails the whole model call, and here the model reads why
+ * instead.
  */
 const generate = (
   prompt: Prompt.Prompt,
@@ -447,7 +449,12 @@ const generate = (
   LanguageModel.GenerateTextResponse<Record<string, Tool.Any>, "opaque">,
   AiError.AiError,
   LanguageModel.LanguageModel
-> => LanguageModel.generateText({ prompt, toolkit: requestToolkit(definitions), toolChoice })
+> => Responses.collect(LanguageModel.streamText({ prompt, toolkit: requestToolkit(definitions), toolChoice }))
+
+/** The chat hears that the assistant stopped composing: its message went out, or won't. */
+const composed = Effect.flatMap(Effect.service(Composing.Composer), (compose) =>
+  compose(AssistantEvent.Composing.make({}))
+)
 
 const decodePart = Schema.decodeUnknownOption(AssistantEvent.ModelPart)
 
@@ -725,7 +732,7 @@ export const step = <R, S, E2 = never, R2 = never>(
         )
       )
     })
-  )
+  ).pipe(Stream.ensuring(composed))
 }
 
 /**
@@ -757,17 +764,6 @@ export const stream = <R = never>(
     Stream.unwrap(
       Effect.map(options.history, (history) => (history.length > historyLength ? next(steps) : stop<number>()))
     )
-
-  return loop(0, (steps: number) =>
-    step(options, (result) => {
-      const taken = result.output === undefined ? steps : steps + 1
-
-      if (taken >= maxSteps) return stop<number>()
-
-      return result.done ? afterDone(taken, result.historyLength) : next(taken)
-    })
-  )
-}
 ```
 
 <small>Since 0.1.0</small>

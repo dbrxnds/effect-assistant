@@ -29,6 +29,7 @@ import * as Assistant from "effect-assistant/Assistant"
 - [ChatView](./ChatView)
 - [Decision](./Decision)
 - [DecisionId](./DecisionId)
+- [EagerInput](./EagerInput)
 - [InputId](./InputId)
 - [Instructions](./Instructions)
 - [RunId](./RunId)

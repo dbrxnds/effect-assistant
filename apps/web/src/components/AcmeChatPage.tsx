@@ -24,7 +24,7 @@ import { userMessage, useSend } from "~/lib/useSend.ts"
 import { Route } from "~/routes/chats/$chatId.tsx"
 import "../chat.css"
 import { BlockContext, type BlockContextValue } from "./Blocks.tsx"
-import { Message, Typing } from "./Message.tsx"
+import { Composing, Message, Typing } from "./Message.tsx"
 import { ThreadList } from "./ThreadList.tsx"
 
 const toThreadMessage = (message: ChatView.Message): ThreadMessageLike =>
@@ -167,7 +167,11 @@ export function AcmeChatPage() {
                   </div>
                 </ThreadPrimitive.Empty>
                 <ThreadPrimitive.Messages components={messageComponents} />
-                {state.working ? <Typing /> : null}
+                {state.activity.composing !== undefined && state.activity.composing.text.length > 0 ? (
+                  <Composing text={state.activity.composing.text} />
+                ) : state.working ? (
+                  <Typing />
+                ) : null}
               </ThreadPrimitive.Viewport>
               {state.failed ? <p className="notice">Something went wrong on my side. Try again.</p> : null}
               <div className="composer-wrap">

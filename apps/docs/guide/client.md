@@ -79,11 +79,32 @@ once; `ChatView.fromEntries(entries)` makes one from a log on the server.
   something that arrived; `specialists`, the ones working (which, since
   when). `ChatView.isIdle(view)` is neither. A workflow waiting on a timer or
   a decision isn't working.
+- **`activity.composing`**: the message the assistant is writing to the
+  user right now, while the model writes its `send_user_message` call:
+  `{ text }`, its text so far. It goes in the update that brings the message
+  (so the message takes its place), or when the model stops writing it
+  without sending it. Show typing dots while it's there, and its `text` as
+  a growing message if you like. Nothing else of the model's work streams:
+  not its other tool calls, not what it writes for itself.
 - **`failed`**: the last turn failed, and no message came after. Show
   something generic; the server's log says why.
 
 The demo's web app (`apps/web/src/lib/ChatState.ts`) keeps nothing else:
 the view, and the messages the tab sent that the server hasn't echoed yet.
+
+## Replies as they're written
+
+The loop streams every model call, and the chat sends what the assistant
+composes to its live subscribers only: it isn't stored, so it's in
+`subscribeView`, not in the log or in `ChatView.fromEntries`. How smoothly
+the text grows is the provider's: Anthropic sends a tool's input in a few
+big pieces unless the tool streams its input eagerly, which
+[`EagerInput.anthropic()`](/api/EagerInput#anthropic) turns on for
+`send_user_message`:
+
+```ts
+AnthropicClient.layer({ apiKey, transformClient: EagerInput.anthropic() })
+```
 
 ## Blocks
 

@@ -71,8 +71,12 @@ export class AssistantEngine extends Context.Service<
       chatId: ChatId,
       input: AssistantEvent.Input | AssistantEvent.StoredAppEvent
     ) => Effect.Effect<void>
-    /** Streams the chat's stored events after `after`, then live ones. */
-    readonly subscribe: (assistant: string, chatId: ChatId, after: number) => Stream.Stream<AssistantEvent.Entry>
+    /** Streams the chat's stored events after `after`, then live ones, and what the assistant composes (not stored). */
+    readonly subscribe: (
+      assistant: string,
+      chatId: ChatId,
+      after: number
+    ) => Stream.Stream<AssistantEvent.Entry | AssistantEvent.Composing>
     /** Deletes a chat of the assistant: its log, and what works in it. */
     readonly delete: (assistant: string, chatId: ChatId) => Effect.Effect<void>
   }
@@ -182,7 +186,7 @@ export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.e
 /** A registered assistant's chats, through their entities. */
 interface EntityClient {
   readonly submit: (chatId: ChatId, input: AssistantEvent.Input | AssistantEvent.StoredAppEvent) => Effect.Effect<void>
-  readonly subscribe: (chatId: ChatId, after: number) => Stream.Stream<AssistantEvent.Entry>
+  readonly subscribe: (chatId: ChatId, after: number) => Stream.Stream<AssistantEvent.Entry | AssistantEvent.Composing>
   readonly delete: (chatId: ChatId) => Effect.Effect<void>
 }
 
@@ -192,7 +196,7 @@ const Submit = Rpc.make("Submit", {
 
 const Subscribe = Rpc.make("Subscribe", {
   payload: { after: Schema.Int },
-  success: AssistantEvent.Entry,
+  success: Schema.Union([AssistantEvent.Entry, AssistantEvent.Composing]),
   stream: true
 })
 

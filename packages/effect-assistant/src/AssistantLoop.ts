@@ -59,8 +59,10 @@ import * as AssistantEvent from "./AssistantEvent.ts"
 import type { AssistantToolCall } from "./AssistantToolCall.ts"
 import * as DecisionId from "./DecisionId.ts"
 import type * as Instructions from "./Instructions.ts"
+import * as Composing from "./internal/composing.ts"
 import * as Decisions from "./internal/decisions.ts"
 import * as History from "./internal/history.ts"
+import * as Responses from "./internal/response.ts"
 import * as Telemetry from "./internal/telemetry.ts"
 import * as Toolkits from "./internal/toolkit.ts"
 import { endsTurn } from "./internal/tools.ts"
@@ -316,8 +318,10 @@ const requestToolkit = (definitions: ReadonlyArray<Tool.Any>): Toolkit.WithHandl
 })
 
 /**
- * One model call. Tool call resolution stays on with a toolkit that runs nothing: with it off, a call whose params
- * don't fit its tool's schema fails the whole model call, and here the model reads why instead.
+ * One model call, streamed, so the chat sees the message the model is writing (see `Composing`); its response is
+ * read whole, as `generateText` would return it. Tool call resolution stays on with a toolkit that runs nothing: with
+ * it off, a call whose params don't fit its tool's schema fails the whole model call, and here the model reads why
+ * instead.
  */
 const generate = (
   prompt: Prompt.Prompt,
@@ -327,7 +331,12 @@ const generate = (
   LanguageModel.GenerateTextResponse<Record<string, Tool.Any>, "opaque">,
   AiError.AiError,
   LanguageModel.LanguageModel
-> => LanguageModel.generateText({ prompt, toolkit: requestToolkit(definitions), toolChoice })
+> => Responses.collect(LanguageModel.streamText({ prompt, toolkit: requestToolkit(definitions), toolChoice }))
+
+/** The chat hears that the assistant stopped composing: its message went out, or won't. */
+const composed = Effect.flatMap(Effect.service(Composing.Composer), (compose) =>
+  compose(AssistantEvent.Composing.make({}))
+)
 
 const decodePart = Schema.decodeUnknownOption(AssistantEvent.ModelPart)
 
@@ -605,7 +614,7 @@ export const step = <R, S, E2 = never, R2 = never>(
         )
       )
     })
-  )
+  ).pipe(Stream.ensuring(composed))
 }
 
 /**

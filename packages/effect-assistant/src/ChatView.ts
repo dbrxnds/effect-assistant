@@ -8,7 +8,9 @@
  *   open, answered (with the answer), or closed, and, for a decision block,
  *   each decision's preview and outcome.
  * - **Activity**: whether the assistant is working (a turn, or one about to
- *   start) and which specialists are, for a typing indicator.
+ *   start) and which specialists are, for a working indicator, and the
+ *   message it's writing to the user right now, for typing dots (and its
+ *   text so far, for a client that shows it as it's written).
  * - Whether the last turn **failed**, until the next message.
  *
  * Nothing else: not the model's output, tool calls or results, what the
@@ -46,6 +48,7 @@
  */
 import * as Match from "effect/Match"
 import * as Option from "effect/Option"
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as AssistantActivity from "./AssistantActivity.ts"
@@ -200,16 +203,39 @@ export const SpecialistWorking = Schema.Struct({
 export type SpecialistWorking = typeof SpecialistWorking.Type
 
 /**
+ * Schema for the message the assistant is writing to the user: its text so
+ * far, which grows until the message arrives.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const Composing = Schema.Struct({
+  text: Schema.String
+})
+
+/**
+ * The message the assistant is writing to the user.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Composing = typeof Composing.Type
+
+/**
  * Schema for what works in the chat: the assistant (a turn, or one about to
  * start, for something that arrived), and its specialists. Nothing works
  * when the chat is idle, even if a workflow waits on a timer or a decision.
+ * `composing` is the message the assistant is writing to the user, while it
+ * writes it: it goes when the message arrives in `messages`, or when the
+ * assistant stops writing it without sending it. Only a live view has it.
  *
  * @category schemas
  * @since 0.1.0
  */
 export const Activity = Schema.Struct({
   working: Schema.Boolean,
-  specialists: Schema.Array(SpecialistWorking)
+  specialists: Schema.Array(SpecialistWorking),
+  composing: Schema.optional(Composing)
 })
 
 /**
@@ -333,10 +359,10 @@ export const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, opt
   return fold.view
 }
 
-/** A fold over one chat's log, one entry at a time. */
+/** A fold over one chat's log, one entry at a time, and what the assistant composes in between. */
 interface Folding {
-  /** Folds one more entry, and returns what changed for the user, if anything did. */
-  readonly step: (entry: AssistantEvent.AnyEntry) => Update | undefined
+  /** Folds one more entry, or what the assistant composes, and returns what changed for the user, if anything did. */
+  readonly step: (entry: AssistantEvent.AnyEntry | AssistantEvent.Composing) => Update | undefined
   /** The whole view so far. */
   readonly view: View
 }
@@ -345,13 +371,18 @@ const decodeProps = Schema.decodeUnknownOption(Decisions.Props)
 
 const decodeAnswer = Schema.decodeUnknownOption(Decisions.Answer)
 
-const activityOf = (activity: AssistantActivity.Activity): Activity => ({
-  working: activity.turnSince !== undefined || activity.queued,
-  specialists: [...activity.specialists.values()].map((run) => ({ specialist: run.specialist, since: run.since }))
-})
+const activityOf = (activity: AssistantActivity.Activity, composing: string | undefined): Activity => {
+  const working = {
+    working: activity.turnSince !== undefined || activity.queued,
+    specialists: [...activity.specialists.values()].map((run) => ({ specialist: run.specialist, since: run.since }))
+  }
+
+  return composing === undefined ? working : { ...working, composing: { text: composing } }
+}
 
 const sameActivity = (a: Activity, b: Activity) =>
   a.working === b.working &&
+  a.composing?.text === b.composing?.text &&
   a.specialists.length === b.specialists.length &&
   a.specialists.every(
     (run, i) => run.specialist === b.specialists[i]?.specialist && run.since === b.specialists[i]?.since
@@ -368,6 +399,8 @@ const folding = (wakes: ReadonlySet<string>): Folding => {
   let seq = 0
   let failed = false
   let activity = AssistantActivity.empty
+  // The message the assistant is writing: live only, and gone once a message arrives or the turn ends.
+  let composing: string | undefined
   let blocks: ReadonlyMap<string, BlockKit.BlockState> = new Map()
   let decisions: ReadonlyMap<string, Decisions.State> = new Map()
   // The messages in order, and the assistant's as stored: their blocks change as the chat goes on.
@@ -421,6 +454,7 @@ const folding = (wakes: ReadonlySet<string>): Folding => {
         },
         AssistantMessage: (message) => {
           sent.set(message.id, message)
+          composing = undefined
           messages.set(message.id, viewOf(message, at))
           failed = false
 
@@ -447,6 +481,7 @@ const folding = (wakes: ReadonlySet<string>): Folding => {
         DecisionResolved: (resolved) => asking.get(resolved.id) ?? [],
         TurnFailed: () => {
           failed = true
+          composing = undefined
 
           return []
         },
@@ -454,22 +489,35 @@ const folding = (wakes: ReadonlySet<string>): Folding => {
         ToolStarted: () => [],
         ToolResult: () => [],
         TurnStarted: () => [],
-        TurnCompleted: () => [],
+        TurnCompleted: () => {
+          composing = undefined
+
+          return []
+        },
         SpecialistStarted: () => [],
         SpecialistFinished: () => [],
         DecisionRequested: () => []
       })
     )
 
-  const step = (entry: AssistantEvent.AnyEntry): Update | undefined => {
-    const before = { activity: activityOf(activity), failed }
+  const step = (entry: AssistantEvent.AnyEntry | AssistantEvent.Composing): Update | undefined => {
+    const before = { activity: activityOf(activity, composing), failed }
+
+    if (Predicate.isTagged(entry, "Composing")) {
+      composing = entry.text
+
+      const now = activityOf(activity, composing)
+
+      return sameActivity(before.activity, now) ? undefined : { seq, messages: [], activity: now, failed }
+    }
+
     const { event } = entry
 
     seq = entry.seq
     activity = AssistantActivity.apply(activity, entry, { wakes })
 
     if (!AssistantEvent.isLibraryEvent(event)) {
-      const now = activityOf(activity)
+      const now = activityOf(activity, composing)
 
       return sameActivity(before.activity, now) ? undefined : { seq, messages: [], activity: now, failed }
     }
@@ -489,7 +537,7 @@ const folding = (wakes: ReadonlySet<string>): Folding => {
       return [next]
     })
 
-    const now = activityOf(activity)
+    const now = activityOf(activity, composing)
 
     return changed.length === 0 && failed === before.failed && sameActivity(before.activity, now)
       ? undefined
@@ -499,7 +547,7 @@ const folding = (wakes: ReadonlySet<string>): Folding => {
   return {
     step,
     get view() {
-      return { seq, messages: [...messages.values()], activity: activityOf(activity), failed }
+      return { seq, messages: [...messages.values()], activity: activityOf(activity, composing), failed }
     }
   }
 }
@@ -519,15 +567,16 @@ const merge = (updates: ReadonlyArray<Update>): Update | undefined => {
 
 /**
  * Returns the updates a chat's entries make, streamed from the start of its
- * log (as `MyAssistant.subscribe` streams them): the ones after `after`, each
- * chunk of entries (like the stored ones, which come at once) as one update.
- * `MyAssistant.subscribeView` is this over the assistant's log.
+ * log: the ones after `after`, each chunk of entries (like the stored ones,
+ * which come at once) as one update. What the assistant composes, in
+ * between, is in `activity.composing`. `MyAssistant.subscribeView` is this
+ * over the assistant's engine, which streams both.
  *
  * @category combinators
  * @since 0.1.0
  */
 export const updates = <E, R>(
-  entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
+  entries: Stream.Stream<AssistantEvent.AnyEntry | AssistantEvent.Composing, E, R>,
   options?: Options & { readonly after?: number | undefined }
 ): Stream.Stream<Update, E, R> => {
   const after = options?.after ?? 0
@@ -539,7 +588,7 @@ export const updates = <E, R>(
         const changed = chunk.flatMap((entry) => {
           const update = fold.step(entry)
 
-          return update === undefined || entry.seq <= after ? [] : [update]
+          return update === undefined || (!Predicate.isTagged(entry, "Composing") && entry.seq <= after) ? [] : [update]
         })
 
         const merged = merge(changed)

@@ -8,8 +8,10 @@ assertions about what the user was shown. Test two things separately.
 What your tools and handlers do with what the model answers doesn't depend
 on the model: a tool's side effects, a workflow's events, a custom loop.
 Script the model's answers and assert on the log: `LanguageModel.make` from
-`effect/unstable/ai` takes a `generateText` that returns the response parts
-you want (tool calls, text), and sees each request's prompt and tools. These
+`effect/unstable/ai` takes a `streamText` that streams the response parts
+you want (tool calls, text), and sees each request's prompt and tools. The
+loop streams every model call, so it's `streamText` it calls; a tool call
+can come whole, as one `tool-call` part. These
 tests are fast, free, and deterministic, so they run on every change.
 
 **Example** (A model that always replies)
@@ -23,18 +25,22 @@ import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 const Replies = Layer.effect(
   LanguageModel.LanguageModel,
   LanguageModel.make({
-    generateText: () =>
-      Effect.succeed([
+    generateText: () => Effect.die("The loop streams."),
+    streamText: () =>
+      Stream.make(
         { type: "tool-call", id: "call_1", name: "send_user_message", params: { text: "Hi.", wait: true } },
         { type: "finish", reason: "tool-calls", usage: { inputTokens: {}, outputTokens: {} } }
-      ]),
-    streamText: () => Stream.die("not streamed")
+      )
   })
 )
 ```
 
 effect-assistant's own tests do this for its mechanics: messages that
-arrive mid-turn, specialist runs, blocks, crash recovery, both engines.
+arrive mid-turn, specialist runs, blocks, crash recovery, both engines. To
+test what the user sees while a message is written (`activity.composing`),
+stream the call's params in pieces: a `tool-params-start` with the tool's
+name, `tool-params-delta`s of its JSON, a `tool-params-end`, then the
+`tool-call`.
 
 ## The behaviour, on the real model
 

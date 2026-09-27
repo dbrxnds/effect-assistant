@@ -77,6 +77,34 @@ describe("with a real model", () => {
     }).pipe(Effect.provide(memoryAssistant(simple({ instructions }), realModel)))
   )
 
+  it.live("streams the reply as it's written: the view shows its text growing, then the message", () =>
+    Effect.gen(function* () {
+      const chat = yield* newChat
+
+      // The model takes a while to start writing, so the view is streaming by then.
+      yield* TestAssistant.submit(chat, say("Tell me, in three or four sentences, why the sky is blue."))
+
+      const updates = yield* TestAssistant.subscribeView(chat).pipe(
+        Stream.takeUntil((update) =>
+          update.messages.some((message) => Predicate.isTagged(message, "AssistantMessage"))
+        ),
+        Stream.runCollect,
+        Effect.timeout("90 seconds")
+      )
+
+      const written = updates.flatMap((update) =>
+        update.activity.composing === undefined ? [] : [update.activity.composing.text]
+      )
+
+      const message = updates.at(-1)?.messages.find((shown) => Predicate.isTagged(shown, "AssistantMessage"))
+
+      // Eager input streams it a few words at a time; a provider that buffers the input sends a few big pieces.
+      expect(new Set(written).size).toBeGreaterThan(10)
+      expect(written.every((text) => message?.text.startsWith(text))).toBe(true)
+      expect(updates.at(-1)?.activity.composing).toBeUndefined()
+    }).pipe(Effect.provide(memoryAssistant(simple({ instructions }), realModel)))
+  )
+
   it.live("uses a tool, and tells the user what it found", () =>
     Effect.gen(function* () {
       const chat = yield* newChat

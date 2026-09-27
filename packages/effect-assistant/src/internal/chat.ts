@@ -27,6 +27,7 @@ import { ChatLog } from "../ChatLog.ts"
 import * as Decision from "../Decision.ts"
 import type { InputId } from "../InputId.ts"
 import * as SpecialistService from "../Specialist.ts"
+import { Composer } from "./composing.ts"
 import * as Decisions from "./decisions.ts"
 import * as AppEvents from "./events.ts"
 import * as History from "./history.ts"
@@ -53,8 +54,11 @@ const needsWorkflows = (input: AssistantEvent.Input | AssistantEvent.StoredAppEv
 const noWorkflows = (request: { readonly _tag: string }) =>
   `A workflow's ${request._tag} needs the WorkflowEngine to pass the answer on: provide it to the assistant's layer.`
 
-/** The chat's live entries, for its subscribers; shut down with the chat. */
-const makeChannelPubSub = Effect.acquireRelease(PubSub.unbounded<AssistantEvent.Entry>(), PubSub.shutdown)
+/** The chat's live entries, and what the assistant composes, for its subscribers; shut down with the chat. */
+const makeChannelPubSub = Effect.acquireRelease(
+  PubSub.unbounded<AssistantEvent.Entry | AssistantEvent.Composing>(),
+  PubSub.shutdown
+)
 
 /**
  * Returns `holding`: runs an effect while holding the chat's keep-alive. The
@@ -93,8 +97,11 @@ export interface Chat {
   readonly submitInBackground: (input: AssistantEvent.Input | AssistantEvent.StoredAppEvent) => Effect.Effect<void>
   /** Runs turns in the background for inputs no turn has read, like a report stored during a shutdown. */
   readonly resume: Effect.Effect<void>
-  /** The chat's entries after `after` (all of them by default), then new ones as they're appended. */
-  readonly stream: (after: number) => Stream.Stream<AssistantEvent.Entry>
+  /**
+   * The chat's entries after `after` (all of them by default), then new ones as they're appended, with what the
+   * assistant composes in between.
+   */
+  readonly stream: (after: number) => Stream.Stream<AssistantEvent.Entry | AssistantEvent.Composing>
   /** Deletes the chat: its log, what works in it, and what it holds. */
   readonly delete: Effect.Effect<void>
 }
@@ -179,6 +186,15 @@ export const makeChat = Effect.fn(function* (options: {
       Effect.tap((stored) => Ref.update(entries, (all) => [...all, ...stored])),
       Effect.tap((stored) => PubSub.publishAll(channel, stored)),
       Effect.uninterruptible
+    )
+
+  // What the assistant composes now, so subscribers hear only a change.
+  const composing = yield* Ref.make<string | undefined>(undefined)
+
+  const compose = (next: AssistantEvent.Composing) =>
+    Ref.getAndSet(composing, next.text).pipe(
+      Effect.flatMap((last) => (last === next.text ? Effect.void : PubSub.publish(channel, next))),
+      Effect.asVoid
     )
 
   const chat = AssistantChat.of({
@@ -304,6 +320,7 @@ export const makeChat = Effect.fn(function* (options: {
   const services = Context.make(AssistantChat, chat).pipe(
     Context.add(SpecialistService.Runner, runner),
     Context.add(Decisions.TurnDecisions, Option.some({ approved: Effect.map(chat.entries, Decisions.approvedCalls) })),
+    Context.add(Composer, compose),
     Context.merge(registration.model)
   )
 
@@ -362,7 +379,9 @@ export const makeChat = Effect.fn(function* (options: {
 
           return Stream.concat(
             Stream.fromIterable(stored),
-            Stream.fromSubscription(subscription).pipe(Stream.filter((entry) => entry.seq > last))
+            Stream.fromSubscription(subscription).pipe(
+              Stream.filter((live) => Predicate.isTagged(live, "Composing") || live.seq > last)
+            )
           ).pipe(Stream.interruptWhen(Deferred.await(deleted)))
         })
       ),

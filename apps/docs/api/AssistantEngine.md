@@ -95,8 +95,12 @@ class AssistantEngine extends Context.Service<
       chatId: ChatId,
       input: AssistantEvent.Input | AssistantEvent.StoredAppEvent
     ) => Effect.Effect<void>
-    /** Streams the chat's stored events after `after`, then live ones. */
-    readonly subscribe: (assistant: string, chatId: ChatId, after: number) => Stream.Stream<AssistantEvent.Entry>
+    /** Streams the chat's stored events after `after`, then live ones, and what the assistant composes (not stored). */
+    readonly subscribe: (
+      assistant: string,
+      chatId: ChatId,
+      after: number
+    ) => Stream.Stream<AssistantEvent.Entry | AssistantEvent.Composing>
     /** Deletes a chat of the assistant: its log, and what works in it. */
     readonly delete: (assistant: string, chatId: ChatId) => Effect.Effect<void>
   }

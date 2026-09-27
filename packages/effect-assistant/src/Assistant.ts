@@ -71,6 +71,7 @@
 import * as Effect from "effect/Effect"
 import * as Filter from "effect/Filter"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
@@ -310,7 +311,8 @@ export interface Assistant<Name extends string = string, Specs extends Specialis
    *
    * The log is the assistant's own record: its model output, tool calls and
    * results, and what the model read. It's for server-side code, tests, and
-   * debugging. Don't send it to a chat client.
+   * debugging. Don't send it to a chat client. What the assistant composes
+   * isn't stored, so it isn't in here: `subscribeView` has it.
    */
   readonly subscribe: (
     chatId: ChatId,
@@ -319,8 +321,9 @@ export interface Assistant<Name extends string = string, Specs extends Specialis
   /**
    * Streams the chat as its user sees it, for a chat client: what changed in
    * its messages, blocks, and activity (see `ChatView`), from the start, then
-   * live. A client that has the view up to a `seq` passes it as `after`, and
-   * gets only what changed since.
+   * live, with the message the assistant is writing as it writes it. A
+   * client that has the view up to a `seq` passes it as `after`, and gets
+   * only what changed since.
    */
   readonly subscribeView: (
     chatId: ChatId,
@@ -474,7 +477,9 @@ export const make = <
     subscribe: (chatId, options) =>
       Stream.unwrap(AssistantEngine.useSync((engine) => engine.subscribe(name, chatId, options?.after ?? 0))).pipe(
         Stream.filterMap(
-          Filter.fromPredicateOption((entry: AssistantEvent.Entry) => AppEvents.decodeEntry(definition.app, entry))
+          Filter.fromPredicateOption((live: AssistantEvent.Entry | AssistantEvent.Composing) =>
+            Predicate.isTagged(live, "Composing") ? Option.none() : AppEvents.decodeEntry(definition.app, live)
+          )
         )
       ),
     delete: (chatId) => AssistantEngine.use((engine) => engine.delete(name, chatId)),

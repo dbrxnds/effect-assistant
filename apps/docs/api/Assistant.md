@@ -339,7 +339,8 @@ interface Assistant<Name extends string = string, Specs extends Specialist.Any =
    *
    * The log is the assistant's own record: its model output, tool calls and
    * results, and what the model read. It's for server-side code, tests, and
-   * debugging. Don't send it to a chat client.
+   * debugging. Don't send it to a chat client. What the assistant composes
+   * isn't stored, so it isn't in here: `subscribeView` has it.
    */
   readonly subscribe: (
     chatId: ChatId,
@@ -348,8 +349,9 @@ interface Assistant<Name extends string = string, Specs extends Specialist.Any =
   /**
    * Streams the chat as its user sees it, for a chat client: what changed in
    * its messages, blocks, and activity (see `ChatView`), from the start, then
-   * live. A client that has the view up to a `seq` passes it as `after`, and
-   * gets only what changed since.
+   * live, with the message the assistant is writing as it writes it. A
+   * client that has the view up to a `seq` passes it as `after`, and gets
+   * only what changed since.
    */
   readonly subscribeView: (
     chatId: ChatId,

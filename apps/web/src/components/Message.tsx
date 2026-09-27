@@ -30,7 +30,21 @@ export function Message() {
   )
 }
 
-/** Shown while Acme works on something the user sent. */
+/** The message Acme is writing, as it writes it. */
+export function Composing({ text }: { readonly text: string }) {
+  return (
+    <div className="row assistant">
+      <Avatar />
+      <div className="stack">
+        <div className="bubble streaming" aria-live="polite">
+          {text}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** Shown while Acme works on something the user sent, and writes a message before its text arrives. */
 export function Typing() {
   return (
     <div className="row assistant">

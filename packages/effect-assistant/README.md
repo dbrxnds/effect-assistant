@@ -96,9 +96,10 @@ bookkeeping. See [your own events](../../apps/docs/guide/app-events.md).
 
 A chat client gets the chat as its user sees it, `MyAssistant.subscribeView(chatId)`
 (a `ChatView`): the messages, their blocks (with a decision's preview and
-outcome), and whether the assistant or a specialist is working. Never the
-model's output, tool calls, or results; `subscribe` streams the whole log,
-for the server. See [the chat client](../../apps/docs/guide/client.md).
+outcome), whether the assistant or a specialist is working, and the message
+it's writing, as it writes it (`activity.composing`; `EagerInput.anthropic()`
+has Anthropic stream it a few words at a time). Never the model's output,
+tool calls, or results; `subscribe` streams the whole log, for the server. See [the chat client](../../apps/docs/guide/client.md).
 `MyAssistant.delete(chatId)` deletes a chat: its log, and what works in it.
 
 Docs: [`apps/docs`](../../apps/docs) (`pnpm docs:dev`). Start with the

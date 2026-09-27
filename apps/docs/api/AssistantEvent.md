@@ -26,6 +26,8 @@ history is rebuilt from it before every model call.
 - Decisions the user is asked to make: `DecisionRequested`, when a
   tool call waits for one or work asks for one (that one is an input), and
   `DecisionResolved`, once the user answered its decision block.
+- Not stored: `Composing`, the message the assistant is writing to
+  the user right now, which only the chat's live subscribers get.
 - The app's own events, like a workflow's progress or a summary for
   compaction: `StoredAppEvent`, as they're stored. The ones an
   assistant registers (see `AppEvent`) decode to their own types, and
@@ -199,6 +201,22 @@ Blocks closed without an answer, like the ones `turn.loop`'s
 ```ts
 class BlocksClosed extends Schema.TaggedClass<BlocksClosed>()("BlocksClosed", {
   messageIds: Schema.Array(Schema.String)
+})
+```
+
+<small>Since 0.1.0</small>
+
+### Composing
+
+The message the assistant is writing to the user, while the model writes
+its `send_user_message` call: its `text` so far, and no `text` once the
+model stopped writing it. It isn't stored and isn't an `AssistantEvent`:
+the chat sends it to its live subscribers only, where `ChatView` shows it
+as `activity.composing` until the message arrives.
+
+```ts
+class Composing extends Schema.TaggedClass<Composing>()("Composing", {
+  text: Schema.optional(Schema.String)
 })
 ```
 

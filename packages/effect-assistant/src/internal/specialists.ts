@@ -31,6 +31,7 @@ import * as RunId from "../RunId.ts"
 import * as Skill from "../Skill.ts"
 import * as Specialist from "../Specialist.ts"
 import * as ToolFailure from "../ToolFailure.ts"
+import { Composer } from "./composing.ts"
 import * as Decisions from "./decisions.ts"
 import { toolMessage, userText } from "./history.ts"
 import { mapText } from "./instructions.ts"
@@ -318,8 +319,10 @@ export const makeRunner = Effect.fn(function* (options: {
       chatId: chat.chatId
     }).pipe(
       Effect.provideContext(Context.merge(options.model, services)),
-      // Spawned from a turn, a run would inherit the turn's decisions: it can't park a call or run an approved one.
+      // Spawned from a turn, a run would inherit the turn's decisions and composer: it can't park a call or run an
+      // approved one, and nothing it writes is the user's.
       Effect.provideService(Decisions.TurnDecisions, Option.none()),
+      Effect.provideService(Composer, () => Effect.void),
       Effect.matchCause({
         onSuccess: (answer): Outcome => ({ status: "answered", report: answer }),
         onFailure: unanswered

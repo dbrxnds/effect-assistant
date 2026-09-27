@@ -20,7 +20,7 @@ pnpm add effect-assistant effect@4.0.0-rc.117 @effect/ai-anthropic@4.0.0-rc.117
 ```ts
 import * as AnthropicClient from "@effect/ai-anthropic/AnthropicClient"
 import * as AnthropicLanguageModel from "@effect/ai-anthropic/AnthropicLanguageModel"
-import { Assistant, AssistantEngine, ChatLog } from "effect-assistant"
+import { Assistant, AssistantEngine, ChatLog, EagerInput } from "effect-assistant"
 import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -34,13 +34,14 @@ const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
   turn.loop({ instructions: "You help a small marketing team. Be brief." })
 )
 
-// The model: a `LanguageModel`, here Anthropic's. The loop calls whichever one the layer is given.
+// The model: a `LanguageModel`, here Anthropic's, streaming replies as they're written. The loop calls whichever one
+// the layer is given.
 const ModelLive = Layer.unwrap(
   Effect.gen(function* () {
     const apiKey = yield* Config.Redacted("ANTHROPIC_API_KEY")
 
     return AnthropicLanguageModel.model("claude-sonnet-5").pipe(
-      Layer.provide(AnthropicClient.layer({ apiKey })),
+      Layer.provide(AnthropicClient.layer({ apiKey, transformClient: EagerInput.anthropic() })),
       Layer.provide(FetchHttpClient.layer)
     )
   })
