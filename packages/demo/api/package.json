@@ -13,8 +13,7 @@
   },
   "dependencies": {
     "@acme/demo-shared": "workspace:*",
-    "@effect-uai/anthropic": "0.17.0",
-    "@effect-uai/core": "0.17.0",
+    "@effect/ai-anthropic": "4.0.0-rc.117",
     "@effect/opentelemetry": "4.0.0-rc.117",
     "@effect/platform-node": "4.0.0-rc.117",
     "@effect/sql-pg": "4.0.0-rc.117",

@@ -84,9 +84,9 @@ const trace = (entries: Entries) =>
         Predicate.isTagged(event, "UserMessage") || Predicate.isTagged(event, "AssistantMessage")
           ? event.text.slice(0, 120)
           : Predicate.isTagged(event, "ModelOutput")
-            ? event.items.flatMap((item) => (item.type === "function_call" ? [item.name] : [])).join(",")
+            ? event.parts.flatMap((part) => (part.type === "tool-call" ? [part.name] : [])).join(",")
             : Predicate.isTagged(event, "ToolResult")
-              ? `${event.tool}: ${event.output.slice(0, 100)}`
+              ? `${event.tool} (${event.outcome}): ${JSON.stringify(event.result).slice(0, 100)}`
               : Predicate.isTagged(event, "Fact")
                 ? JSON.stringify(event.payload).slice(0, 120)
                 : ""

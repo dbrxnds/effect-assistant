@@ -4,13 +4,15 @@
  *
  * @since 0.1.0
  */
-import * as Anthropic from "@effect-uai/anthropic/Anthropic"
-import * as Toolkit from "@effect-uai/core/Toolkit"
+import * as AnthropicClient from "@effect/ai-anthropic/AnthropicClient"
+import * as AnthropicLanguageModel from "@effect/ai-anthropic/AnthropicLanguageModel"
+import * as AssistantLoop from "effect-assistant/AssistantLoop"
 import * as BlockKit from "effect-assistant/BlockKit"
 import * as Skill from "effect-assistant/Skill"
 import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Toolkit from "effect/unstable/ai/Toolkit"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import { AcmeAssistant } from "./AcmeAssistant.ts"
 import * as Campaign from "./Campaign.ts"
@@ -30,19 +32,11 @@ const orderingProducts = Skill.make({
   instructions: Prompts.instructions("acme-skill-products")
 })
 
-const toolkit = {
-  ...Toolkit.make(
-    Campaign.listCampaignProducts,
-    Campaign.startCampaign,
-    Campaign.decideCampaign,
-    PrintOrders.productCatalog,
-    PrintOrders.orderProducts,
-    Tools.orderHistory,
-    Tools.orderStatus,
-    Tools.offices,
-    Tools.officeBudget
-  )
-}
+/** Acme's tools: campaigns, product orders, and lookups. */
+const AcmeTools = Toolkit.merge(Campaign.CampaignTools, PrintOrders.PrintTools, Tools.LookupTools)
+
+/** Their handlers, and the lookups' for the research specialist too. */
+const layerTools = Layer.mergeAll(Campaign.layerTools, PrintOrders.layerTools, Tools.layerLookups)
 
 /** The model Acme and its specialists use: `ACME_MODEL`, default `claude-sonnet-5`. */
 export const model = Config.String("ACME_MODEL").pipe(Config.withDefault("claude-sonnet-5"))
@@ -58,7 +52,7 @@ export const model = Config.String("ACME_MODEL").pipe(Config.withDefault("claude
 export const layer = AcmeAssistant.toLayer(
   Effect.gen(function* () {
     const prompts = yield* Prompts.Prompts
-    const name = yield* model
+    const toolkit = AssistantLoop.tools(yield* AcmeTools)
 
     return Effect.fn(function* (turn) {
       const prompt = yield* prompts.get("acme")
@@ -67,19 +61,21 @@ export const layer = AcmeAssistant.toLayer(
       yield* BlockKit.closeStale({ messages: 3 })
 
       return turn.loop({
-        model: name,
         instructions: { ...prompt, text: `${prompt.text}\n\nToday is ${new Date().toDateString()}.` },
         toolkit,
         skills: [orderingCampaigns, orderingProducts]
       })
     })
   })
-).pipe(Layer.provide(Tools.layerResearch(model)))
+).pipe(Layer.provide(Tools.layerResearch), Layer.provide(layerTools))
 
 /**
- * Layer for the model API: Anthropic with `ANTHROPIC_API_KEY`, and prompt
- * caching. The prompt, tools, and chat history only grow, so caching reuses
- * the prefix on every step.
+ * Layer for the model: Anthropic's `ACME_MODEL` with `ANTHROPIC_API_KEY`, and
+ * prompt caching. The prompt, tools, and chat history only grow, so one
+ * request-level cache breakpoint (Anthropic puts it on the last block) reuses
+ * the prefix on every step. Tools aren't strict: Anthropic refuses the grammar
+ * for this many strict tools, and the loop gives the model params that don't
+ * fit back as a failure it reads.
  *
  * @category layers
  * @since 0.1.0
@@ -87,8 +83,12 @@ export const layer = AcmeAssistant.toLayer(
 export const layerModel = Layer.unwrap(
   Effect.gen(function* () {
     const apiKey = yield* Config.Redacted("ANTHROPIC_API_KEY")
-    yield* Effect.logInfo(`model: ${yield* model}`)
+    const name = yield* model
+    yield* Effect.logInfo(`model: ${name}`)
 
-    return Anthropic.layer({ apiKey, promptCaching: true }).pipe(Layer.provide(FetchHttpClient.layer))
+    return AnthropicLanguageModel.model(name, { cache_control: { type: "ephemeral" }, strictJsonSchema: false }).pipe(
+      Layer.provide(AnthropicClient.layer({ apiKey })),
+      Layer.provide(FetchHttpClient.layer)
+    )
   })
 )
