@@ -12,9 +12,9 @@ the summary, and what goes in it are the app's choices, and the
 
 - [`Compaction.inputTokens(entries)`](/api/Compaction): how big the last
   model call's prompt was, from the usage every `ModelOutput` stores.
-- `ChatLog`'s `read(chatId)`: the chat's entries, straight from the log.
-  Not `turn.entries`: that counts as reading the chat, so an input that
-  arrives while you summarize would count as handled.
+- `turn.entries`: the chat's entries. Reading them doesn't count as
+  handling them, so an input that arrives while you summarize gets the next
+  turn.
 - Your own model call over your own rendering of those entries, like a
   transcript of what was said and done, with `LanguageModel.generateText`.
 - `turn.append(summary)`: stores the summary as one of your own
@@ -45,44 +45,37 @@ summary is written gets a later `seq`, so the model still reads it.
 
 ## Compacting after a turn
 
-The handler gets the log in its build Effect, runs its loop, then checks how
-big the prompt got, and summarizes past a threshold:
+The handler runs its loop, then checks how big the prompt got, and
+summarizes past a threshold:
 
 ```ts
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import * as LanguageModel from "effect/unstable/ai/LanguageModel"
-import { ChatLog } from "effect-assistant"
 
-const MyAssistantLive = MyAssistant.toLayer(
-  Effect.gen(function* () {
-    const log = yield* ChatLog.ChatLog
+const MyAssistantLive = MyAssistant.toLayer((turn) => {
+  const options = { instructions: "You help a small team.", history }
 
-    return (turn) => {
-      const options = { instructions: "You help a small team.", history }
+  const compact = Effect.gen(function* () {
+    const entries = yield* turn.entries
+    if (Compaction.inputTokens(entries) < 100_000) return
 
-      const compact = Effect.gen(function* () {
-        const entries = yield* log.read(turn.chatId)
-        if (Compaction.inputTokens(entries) < 100_000) return
+    const { text } = yield* LanguageModel.generateText({
+      prompt: [
+        {
+          role: "system",
+          content:
+            "Summarize this chat for yourself: what the user wants, what was decided and why, the ids and references that matter, and what is in progress."
+        },
+        { role: "user", content: transcript(entries) }
+      ]
+    })
 
-        const { text } = yield* LanguageModel.generateText({
-          prompt: [
-            {
-              role: "system",
-              content:
-                "Summarize this chat for yourself: what the user wants, what was decided and why, the ids and references that matter, and what is in progress."
-            },
-            { role: "user", content: transcript(entries) }
-          ]
-        })
-
-        yield* turn.append(Summary.make({ text, throughSeq: entries.at(-1)?.seq ?? 0 }))
-      })
-
-      return Stream.concat(turn.loop(options), Stream.drain(Stream.fromEffect(compact)))
-    }
+    yield* turn.append(Summary.make({ text, throughSeq: entries.at(-1)?.seq ?? 0 }))
   })
-)
+
+  return Stream.concat(turn.loop(options), Stream.drain(Stream.fromEffect(compact)))
+})
 ```
 
 `transcript` is yours: what the user and the assistant said, what it did and

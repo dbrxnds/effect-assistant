@@ -2,10 +2,8 @@
  * The `Compaction` module holds what a long chat needs so the model can read
  * a summary instead of everything before it. When to compact, which model
  * writes the summary, and what the summary says are the app's: its handler
- * reads the chat's log, has a model write the summary, stores it as one of
- * its own events, and its loop reads the chat with {@link since}. Read the
- * log from `ChatLog` (in the handler's build Effect): `turn.entries` counts as
- * reading the chat, so an input that arrives meanwhile would count as handled.
+ * reads the chat's entries, has a model write the summary, stores it as one
+ * of its own events, and its loop reads the chat with {@link since}.
  *
  * The chat's log keeps everything; only what the model reads gets shorter.
  * What is still open (decisions waiting for the user, blocks not answered
@@ -18,7 +16,7 @@
  * import * as Effect from "effect/Effect"
  * import * as Schema from "effect/Schema"
  * import * as Stream from "effect/Stream"
- * import { AppEvent, Assistant, ChatLog, Compaction } from "effect-assistant"
+ * import { AppEvent, Assistant, Compaction } from "effect-assistant"
  *
  * class Summary extends Schema.TaggedClass<Summary>()("Summary", {
  *   text: Schema.String,
@@ -28,26 +26,20 @@
  * const MyAssistant = Assistant.make("my-assistant", { events: [AppEvent.make(Summary)] })
  * const history = Compaction.since(Schema.is(Summary))
  *
- * const MyAssistantLive = MyAssistant.toLayer(
- *   Effect.gen(function*() {
- *     const log = yield* ChatLog.ChatLog
+ * const MyAssistantLive = MyAssistant.toLayer((turn) => {
+ *   const options = { instructions: "You help a small team.", history }
  *
- *     return (turn) => {
- *       const options = { instructions: "You help a small team.", history }
+ *   const compact = Effect.gen(function*() {
+ *     const entries = yield* turn.entries
+ *     if (Compaction.inputTokens(entries) < 100_000) return
  *
- *       const compact = Effect.gen(function*() {
- *         const entries = yield* log.read(turn.chatId)
- *         if (Compaction.inputTokens(entries) < 100_000) return
- *
- *         // Your own model call, over your own rendering of the entries.
- *         const text = yield* summarize(entries)
- *         yield* turn.append(Summary.make({ text, throughSeq: entries.at(-1)?.seq ?? 0 }))
- *       })
- *
- *       return Stream.concat(turn.loop(options), Stream.drain(Stream.fromEffect(compact)))
- *     }
+ *     // Your own model call, over your own rendering of the entries.
+ *     const text = yield* summarize(entries)
+ *     yield* turn.append(Summary.make({ text, throughSeq: entries.at(-1)?.seq ?? 0 }))
  *   })
- * )
+ *
+ *   return Stream.concat(turn.loop(options), Stream.drain(Stream.fromEffect(compact)))
+ * })
  * ```
  *
  * @since 0.1.0

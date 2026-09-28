@@ -103,8 +103,8 @@ for the server. See [the chat client](../../apps/docs/guide/client.md).
 
 A long chat can be compacted: the model then reads a summary instead of
 everything before it, while the log keeps it all. The app decides when and
-how. Its handler reads the chat's log, has a model write the summary, stores it
-as one of
+how. Its handler reads the chat's entries, has a model write the summary,
+stores it as one of
 its own events, and reads the chat with `Compaction.since`: the summary, what
 is still open (decisions waiting, unanswered blocks, running specialists,
 read from the log), then the entries after it. See

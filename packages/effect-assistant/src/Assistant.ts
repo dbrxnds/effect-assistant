@@ -197,10 +197,16 @@ export interface Turn<Events = never> {
   readonly chatId: ChatId
   /**
    * The model's history, from the chat's entries: all of them, or what a
-   * view keeps. Read it before every model call; the loop does.
+   * view keeps. Read it before every model call; the loop does. Reading it
+   * counts as handling what it covers: the turn ends having handled the
+   * inputs the model saw.
    */
   readonly history: (view?: HistoryView<Events>) => Effect.Effect<ReadonlyArray<Prompt.Message>>
-  /** The chat's entries, with the assistant's own events decoded. */
+  /**
+   * The chat's entries, with the assistant's own events decoded. Reading them
+   * doesn't count as handling them: only the history the model reads does,
+   * so an input the model never saw gets the next turn.
+   */
   readonly entries: Effect.Effect<ReadonlyArray<Entry<Events>>>
   /** Writes the assistant's own events to the chat, like a summary. One that wakes a turn gets the next turn. */
   readonly append: (...events: ReadonlyArray<Events>) => Effect.Effect<void>

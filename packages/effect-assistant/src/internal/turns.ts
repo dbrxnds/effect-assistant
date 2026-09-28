@@ -251,14 +251,14 @@ const makeTurnApi = (
   const { definition, builtins } = registration
   const { app } = definition
 
-  // Reading the chat, for the history or the entries, moves how far the turn read.
-  const entries = Effect.map(
-    Effect.tap(chat.entries, (all) => Ref.update(read, (seq) => lastSeq(all, seq))),
-    (all) => AppEvents.decodeEntries(app, all)
-  )
+  const entries = Effect.map(chat.entries, (all) => AppEvents.decodeEntries(app, all))
 
+  // Only the history moves how far the turn read: it's what the model sees, read right before each call.
   const history = (view: Assistant.HistoryView<any> = identity) =>
-    Effect.map(entries, (all) => toHistory(view(all), app))
+    Effect.map(
+      Effect.tap(chat.entries, (all) => Ref.update(read, (seq) => lastSeq(all, seq))),
+      (all) => toHistory(view(AppEvents.decodeEntries(app, all)), app)
+    )
 
   const instructions = (given: string | Instructions.Resolved) =>
     mapText(given, (text) => `${Instructions.protocol}\n\n${text}`)

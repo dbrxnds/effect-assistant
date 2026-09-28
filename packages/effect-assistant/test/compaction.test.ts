@@ -1,12 +1,11 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
-import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 import * as Response from "effect/unstable/ai/Response"
-import { AppEvent, Assistant, AssistantEvent, ChatId, ChatLog, Compaction, DecisionId } from "../src/index.ts"
+import { AppEvent, Assistant, AssistantEvent, ChatId, Compaction, DecisionId } from "../src/index.ts"
 import { collectUntil, newChat, runMemory, say, turnsDone } from "./fixtures.ts"
 import * as Scripted from "./scripted.ts"
 
@@ -22,25 +21,20 @@ const history = Compaction.since(Schema.is(Summary))
 const summarizePrompt = "Summarize this chat so far. Answer in text, without calling a tool."
 
 /** A handler that summarizes after every turn without a summary yet, like one past its threshold. */
-const compacting = Effect.gen(function* () {
-  const log = yield* ChatLog.ChatLog
+const compacting = (turn: Assistant.Turn<Summary>) => {
+  const options = { instructions: "Be brief.", history }
 
-  return (turn: Assistant.Turn<Summary>) => {
-    const options = { instructions: "Be brief.", history }
+  const compact = Effect.gen(function* () {
+    const entries = yield* turn.entries
 
-    // The log, not `turn.entries`: a summary doesn't count as reading the chat.
-    const compact = Effect.gen(function* () {
-      const entries = yield* log.read(turn.chatId)
+    if (entries.some(({ event }) => event instanceof Summary)) return
 
-      if (entries.some(({ event }) => Predicate.isTagged(event, "Summary"))) return
+    const { text } = yield* LanguageModel.generateText({ prompt: summarizePrompt })
+    yield* turn.append(Summary.make({ text, throughSeq: entries.at(-1)?.seq ?? 0 }))
+  })
 
-      const { text } = yield* LanguageModel.generateText({ prompt: summarizePrompt })
-      yield* turn.append(Summary.make({ text, throughSeq: entries.at(-1)?.seq ?? 0 }))
-    })
-
-    return Stream.concat(turn.loop(options), Stream.drain(Stream.fromEffect(compact)))
-  }
-})
+  return Stream.concat(turn.loop(options), Stream.drain(Stream.fromEffect(compact)))
+}
 
 describe("Compaction", () => {
   it.live("reads the summary instead of what it covers", () =>

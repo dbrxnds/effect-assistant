@@ -211,6 +211,42 @@ describe("turn completion", () => {
     }).pipe(Effect.provide(updatingAssistant(lateUpdate(), Scripted.unused)))
   )
 
+  it.live("leaves an input the handler only read in the entries to the next turn", () =>
+    Effect.gen(function* () {
+      let turns = 0
+
+      // The first turn reads the history, then an update lands, and it reads the entries (like a summary would).
+      const handler = Effect.fn(function* (turn: Assistant.Turn<Update>) {
+        turns += 1
+        yield* turn.history()
+
+        if (turns === 1) {
+          yield* AssistantChat.AssistantChat.use((chat) =>
+            chat.append([storedUpdate("specialist:research", { answer: "Ontario" })])
+          )
+          yield* turn.entries
+
+          return waitOnly()
+        }
+
+        yield* AssistantChat.AssistantChat.use((chat) =>
+          chat.append([AssistantEvent.AssistantMessage.make({ id: "answer", text: "It's in Ontario." })])
+        )
+
+        return Stream.empty
+      })
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* Updating.submit(chat, say("which province is Ottawa in?"))
+
+        return yield* collectUntil(Updating, chat, (es) => turnsDone(es) >= 2)
+      }).pipe(Effect.provide(updatingAssistant(handler, Scripted.unused)))
+
+      expect(AssistantEvent.assistantTexts(entries)).toEqual(["It's in Ontario."])
+    })
+  )
+
   it.live("replyIfOwed runs one pass that can only reply, with the nudge last", () =>
     Effect.gen(function* () {
       const model = yield* Scripted.make(() => [
