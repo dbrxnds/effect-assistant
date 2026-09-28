@@ -321,16 +321,15 @@ const makeTurnApi = (
     tools: builtins,
     instructions,
     replyIfOwed,
-    summarize: (options) => {
+    request: (options) => {
       const { system, toolkit, view } = prepare(options)
 
-      return AssistantLoop.summarize({
+      return {
         instructions: system,
         toolkit,
-        // Not `history`: a summary doesn't count as reading the chat.
-        history: Effect.map(chat.entries, (all) => toHistory(view(AppEvents.decodeEntries(app, all)), app)),
-        prompt: options.prompt
-      })
+        // Not `history`: an extra call doesn't count as reading the chat.
+        history: Effect.map(chat.entries, (all) => toHistory(view(AppEvents.decodeEntries(app, all)), app))
+      }
     },
     loop: (options) => {
       const { system, toolkit, view } = prepare(options)

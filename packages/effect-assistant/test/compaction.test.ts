@@ -4,7 +4,7 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as Response from "effect/unstable/ai/Response"
-import { AppEvent, Assistant, AssistantEvent, ChatId, Compaction, DecisionId } from "../src/index.ts"
+import { AppEvent, Assistant, AssistantEvent, AssistantLoop, ChatId, Compaction, DecisionId } from "../src/index.ts"
 import { collectUntil, newChat, runMemory, say, turnsDone } from "./fixtures.ts"
 import * as Scripted from "./scripted.ts"
 
@@ -28,7 +28,11 @@ const compacting = (turn: Assistant.Turn<Summary>) => {
 
     if (entries.some(({ event }) => event instanceof Summary)) return
 
-    const text = yield* turn.summarize({ ...options, prompt: summarizePrompt })
+    const text = yield* AssistantLoop.summarize({
+      ...turn.request(options),
+      prompt: summarizePrompt
+    })
+
     yield* turn.append(Summary.make({ text, throughSeq: entries.at(-1)?.seq ?? 0 }))
   })
 

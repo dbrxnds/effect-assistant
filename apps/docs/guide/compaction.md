@@ -12,10 +12,12 @@ the summary, and what goes in it are the app's choices, and the
 
 - [`Compaction.inputTokens(entries)`](/api/Compaction): how big the last
   model call's prompt was, from the usage every `ModelOutput` stores.
-- `turn.summarize({ ...loopOptions, prompt })`: one model call with the
-  loop's own system prompt, tools and history, then your prompt. Nothing
-  runs and nothing is stored. It is the loop's request plus one message, so
-  it reads the loop's cached prompt.
+- `turn.request(loopOptions)`: what the loop sends the model, its system
+  prompt, tools and history, read without counting as reading the chat.
+- `AssistantLoop.summarize({ ...turn.request(loopOptions), prompt })`: one
+  model call with that request, then your prompt. Nothing runs and nothing
+  is stored. It is the loop's request plus one message, so it reads the
+  loop's cached prompt.
 - `turn.append(summary)`: stores the summary as one of your own
   [events](./app-events), one that doesn't wake a turn.
 - `Compaction.since(isSummary)`: a history view that starts at the last
@@ -27,7 +29,7 @@ The summary is your own event, with its text and the last `seq` it covers:
 
 ```ts
 import * as Schema from "effect/Schema"
-import { AppEvent, Assistant, Compaction } from "effect-assistant"
+import { AppEvent, Assistant, AssistantLoop, Compaction } from "effect-assistant"
 
 class Summary extends Schema.TaggedClass<Summary>()("Summary", {
   text: Schema.String,
@@ -58,8 +60,8 @@ const MyAssistantLive = MyAssistant.toLayer((turn) => {
     const entries = yield* turn.entries
     if (Compaction.inputTokens(entries) < 100_000) return
 
-    const text = yield* turn.summarize({
-      ...options,
+    const text = yield* AssistantLoop.summarize({
+      ...turn.request(options),
       prompt:
         "Summarize this chat so far, for yourself: what the user wants, what was decided and why, the ids and references that matter, and what is in progress. Answer in text, without calling a tool."
     })

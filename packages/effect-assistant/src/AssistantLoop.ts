@@ -291,8 +291,9 @@ export interface SummarizeOptions<R = never> extends Omit<StepOptions<R>, "toolC
 /**
  * One model call for text about the chat, like a summary to compact it with:
  * the step's system prompt, tools and history, then `prompt`. No tool runs
- * and nothing is stored; the text the model writes is the result. Only
- * `prompt` is added to what a step sends, so the call reads its cached prompt.
+ * and nothing is stored; the text the model writes is the result. Given a
+ * turn's `turn.request(options)`, only `prompt` is added to what the loop
+ * sends, so the call reads the loop's cached prompt.
  *
  * @category constructors
  * @since 0.1.0

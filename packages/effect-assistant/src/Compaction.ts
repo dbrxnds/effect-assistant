@@ -2,8 +2,9 @@
  * The `Compaction` module holds what a long chat needs so the model can read
  * a summary instead of everything before it. When to compact, which model
  * writes the summary, and what the summary says are the app's: its handler
- * asks for a summary with `turn.summarize` and stores it as one of its own
- * events, and its loop reads the chat with {@link since}.
+ * asks the model for a summary with `AssistantLoop.summarize` over the
+ * loop's own request (`turn.request`), stores it as one of its own events,
+ * and its loop reads the chat with {@link since}.
  *
  * The chat's log keeps everything; only what the model reads gets shorter.
  * What is still open (decisions waiting for the user, blocks not answered
@@ -16,7 +17,7 @@
  * import * as Effect from "effect/Effect"
  * import * as Schema from "effect/Schema"
  * import * as Stream from "effect/Stream"
- * import { AppEvent, Assistant, Compaction } from "effect-assistant"
+ * import { AppEvent, Assistant, AssistantLoop, Compaction } from "effect-assistant"
  *
  * class Summary extends Schema.TaggedClass<Summary>()("Summary", {
  *   text: Schema.String,
@@ -33,7 +34,10 @@
  *     const entries = yield* turn.entries
  *     if (Compaction.inputTokens(entries) < 100_000) return
  *
- *     const text = yield* turn.summarize({ ...options, prompt: "Summarize this chat so far: …" })
+ *     const text = yield* AssistantLoop.summarize({
+ *       ...turn.request(options),
+ *       prompt: "Summarize this chat so far: …"
+ *     })
  *     yield* turn.append(Summary.make({ text, throughSeq: entries.at(-1)?.seq ?? 0 }))
  *   })
  *

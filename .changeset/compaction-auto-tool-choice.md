@@ -2,7 +2,7 @@
 "effect-assistant": minor
 ---
 
-Compaction helpers for apps that compact long chats themselves: `turn.summarize` (one model call over the loop's own prompt, tools and history, plus a prompt; nothing runs or is stored), `Compaction.since` (a history view from the app's last summary event: the summary, what is still open, then the entries after it), `Compaction.openItems` and `Compaction.inputTokens`. A re-run `send_user_message` is sent once, decision blocks never go stale, and `AssistantEngine.layerCluster` reaches chats from nodes that don't host them.
+Compaction helpers for apps that compact long chats themselves: `turn.request` (what the loop sends: its system prompt, tools and history, read without counting as reading the chat) and `AssistantLoop.summarize` (one model call over such a request, plus a prompt; nothing runs or is stored), `Compaction.since` (a history view from the app's last summary event: the summary, what is still open, then the entries after it), `Compaction.openItems` and `Compaction.inputTokens`. A re-run `send_user_message` is sent once, decision blocks never go stale, and `AssistantEngine.layerCluster` reaches chats from nodes that don't host them.
 
 Breaking changes, and how to migrate:
 
