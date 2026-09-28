@@ -101,6 +101,15 @@ model's output, tool calls, or results; `subscribe` streams the whole log,
 for the server. See [the chat client](../../apps/docs/guide/client.md).
 `MyAssistant.delete(chatId)` deletes a chat: its log, and what works in it.
 
+A long chat can be compacted: the model then reads a summary instead of
+everything before it, while the log keeps it all. The app decides when and
+how. Its handler asks for the summary with `turn.summarize` (the loop's own
+prompt plus one question, so it reads the cached prompt), stores it as one of
+its own events, and reads the chat with `Compaction.since`: the summary, what
+is still open (decisions waiting, unanswered blocks, running specialists,
+read from the log), then the entries after it. See
+[compaction](../../apps/docs/guide/compaction.md).
+
 Docs: [`apps/docs`](../../apps/docs) (`pnpm docs:dev`). Start with the
 [introduction](../../apps/docs/guide/introduction.md), or go straight to the
 [API reference](../../apps/docs/api/index.md), generated from this package's

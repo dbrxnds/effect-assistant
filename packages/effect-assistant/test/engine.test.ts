@@ -10,6 +10,7 @@ import * as Stream from "effect/Stream"
 import * as Response from "effect/unstable/ai/Response"
 import * as Tool from "effect/unstable/ai/Tool"
 import * as Toolkit from "effect/unstable/ai/Toolkit"
+import * as TestRunner from "effect/unstable/cluster/TestRunner"
 import {
   Assistant,
   AssistantChat,
@@ -54,6 +55,37 @@ describe("AssistantEngine.layerMemory", () => {
 
       expect(resumed).toBe(cutOff)
     }).pipe(Effect.provide(ChatLog.layerMemory))
+  )
+})
+
+describe("AssistantEngine.layerCluster", () => {
+  it.live("reaches a chat from a process that doesn't register the assistant", () =>
+    Effect.gen(function* () {
+      const chat = yield* ChatId.make
+      const Greeter = Assistant.make("greeter")
+
+      // The runner hosts the chats; the client, like a web server, only reaches them.
+      const runner = Greeter.toLayer(simple({ instructions: "Greet." })).pipe(
+        Layer.provide(AssistantEngine.layerCluster),
+        Layer.provide(Scripted.layer(() => Scripted.reply("Hi!")))
+      )
+
+      const client = Layer.fresh(AssistantEngine.layerCluster)
+
+      const entries = yield* Effect.scoped(
+        Layer.build(runner).pipe(
+          Effect.andThen(
+            Effect.gen(function* () {
+              yield* Greeter.submit(chat, say("hello"))
+
+              return yield* collectUntil(Greeter, chat, (es) => turnsDone(es) >= 1)
+            }).pipe(Effect.provide(client))
+          )
+        )
+      )
+
+      expect(AssistantEvent.assistantTexts(entries)).toEqual(["Hi!"])
+    }).pipe(Effect.provide(Layer.mergeAll(ChatLog.layerMemory, TestRunner.layer)))
   )
 })
 

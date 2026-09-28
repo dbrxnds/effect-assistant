@@ -392,8 +392,8 @@ export class TurnFailed extends Schema.TaggedClass<TurnFailed>()("TurnFailed", {
 
 /**
  * A specialist run started working: spawned, or continued by a follow-up
- * message. The model doesn't see it; it sees the run in "Running now", and
- * its report arrives as a {@link SpecialistFinished}.
+ * message. The model doesn't see it: the call that started the run says
+ * so, and its report arrives as a {@link SpecialistFinished}.
  *
  * @category specialists
  * @since 0.1.0

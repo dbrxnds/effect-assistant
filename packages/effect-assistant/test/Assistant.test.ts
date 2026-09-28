@@ -71,7 +71,7 @@ describe("a turn", () => {
       const [request] = yield* model.requests
 
       expect(request?.system).toBe(`${Instructions.protocol}\n\n${instructions}`)
-      expect(request?.toolChoice).toBe("required")
+      expect(request?.toolChoice).toBe("auto")
       expect(request?.tools).toEqual(["send_user_message", "wait"])
     })
   )
@@ -535,7 +535,7 @@ describe("UI blocks", () => {
       expect(toJsonText(results[0]?.result)).toMatch(/Expected/)
       expect(shown(entries)).toBeUndefined()
       // The failed message's `wait` doesn't end the turn: the loop's next step reads the failure.
-      expect((yield* model.requests).map((request) => request.toolChoice)).toEqual(["required", "required"])
+      expect((yield* model.requests).map((request) => request.toolChoice)).toEqual(["auto", "auto"])
     })
   )
 })

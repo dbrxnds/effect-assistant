@@ -6,7 +6,6 @@
  * @internal
  */
 import * as Cause from "effect/Cause"
-import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -21,7 +20,6 @@ import type * as LanguageModel from "effect/unstable/ai/LanguageModel"
 import type * as Prompt from "effect/unstable/ai/Prompt"
 import * as WorkflowEngine from "effect/unstable/workflow/WorkflowEngine"
 import type * as Assistant from "../Assistant.ts"
-import * as AssistantActivity from "../AssistantActivity.ts"
 import type { AssistantChat } from "../AssistantChat.ts"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import * as AssistantLoop from "../AssistantLoop.ts"
@@ -44,8 +42,8 @@ import * as Tools from "./tools.ts"
 export const silentTurnMessage = "I finished without sending a reply."
 
 /**
- * Added to the instructions for one more short pass when a turn would end
- * without replying, unless the handler gives its own.
+ * The last message of one more short pass when a turn would end without
+ * replying, unless the handler gives its own.
  *
  * @internal
  */
@@ -141,21 +139,6 @@ const failureMessage = (cause: Cause.Cause<unknown>): string =>
     onNone: () => Cause.pretty(cause),
     onSome: ({ _tag, raw }) => `${_tag ?? "Error"}: ${Predicate.isString(raw) ? raw : toJsonText(raw)}`
   })
-
-/** The specialist runs working now, for the prompt: what's in flight, without reading back through the chat. */
-const runningNow = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, now: number): string => {
-  const runs = [...AssistantActivity.fromEntries(entries).specialists.values()]
-
-  if (runs.length === 0) return ""
-
-  const minutes = (since: number) => Math.max(0, Math.round((now - since) / 60_000))
-
-  const lines = runs.map(
-    (run) => `- ${run.specialist} (${run.runId}), started ${minutes(run.since)} min ago: ${run.goal}`
-  )
-
-  return `\n\nRunning now:\n${lines.join("\n")}`
-}
 
 const lastSeq = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, otherwise: number) => entries.at(-1)?.seq ?? otherwise
 
@@ -254,8 +237,7 @@ const failTurn = Effect.fn(function* (chat: AssistantChat["Service"], cause: Cau
 const makeTurnApi = (
   registration: Registration,
   chat: AssistantChat["Service"],
-  read: Ref.Ref<number>,
-  running: string
+  read: Ref.Ref<number>
 ): Assistant.Turn<any> => {
   const { definition, builtins } = registration
   const { app } = definition
@@ -270,12 +252,19 @@ const makeTurnApi = (
     Effect.map(entries, (all) => toHistory(view(all), app))
 
   const instructions = (given: string | Instructions.Resolved) =>
-    mapText(given, (text) => `${Instructions.protocol}\n\n${text}${running}`)
+    mapText(given, (text) => `${Instructions.protocol}\n\n${text}`)
 
-  // Only send_user_message, and the call is forced: the reply pass can only reply.
-  const replyOnly = Toolkits.only(builtins, [Tools.sendUserMessageName])
-
-  const replyIfOwed = (options: Assistant.ReplyOptions) =>
+  /**
+   * One more pass when the turn would end without the reply it owes: the
+   * loop's own prompt and tools, so the prompt stays cached, with the nudge
+   * at the end. Only send_user_message runs; any other call is refused.
+   */
+  const replyPass = <R>(options: {
+    readonly instructions: Instructions.Resolved
+    readonly toolkit: AssistantLoop.Tools<R>
+    readonly view: Assistant.HistoryView<any>
+    readonly nudge: string | undefined
+  }) =>
     Stream.unwrap(
       Effect.gen(function* () {
         const all = yield* chat.entries
@@ -285,22 +274,44 @@ const makeTurnApi = (
         if (History.unreadAfter(all, through, app.wakes) || !History.owesReply(all, through)) return Stream.empty
 
         return AssistantLoop.stream({
-          instructions: mapText(
-            instructions(options.instructions),
-            (text) => `${text}\n\n${options.nudge ?? defaultReplyNudge}`
+          instructions: options.instructions,
+          toolkit: Toolkits.runOnly(
+            options.toolkit,
+            [Tools.sendUserMessageName],
+            "Not now: reply to the user with send_user_message."
           ),
-          toolkit: replyOnly,
           // Not `history`: what the reply pass reads, it can only reply to, so it doesn't move how far the turn read.
-          history: Effect.map(chat.entries, (all) => toHistory(AppEvents.decodeEntries(app, all), app)),
-          maxSteps: 1,
-          // Named, not just required: a model used to calling wait would otherwise call a tool that isn't there.
-          toolChoice: { tool: Tools.sendUserMessageName }
+          history: Effect.map(chat.entries, (entries) => [
+            ...toHistory(options.view(AppEvents.decodeEntries(app, entries)), app),
+            History.userText(options.nudge ?? defaultReplyNudge)
+          ]),
+          // A second step, for a reply after a call it was refused.
+          maxSteps: 2
         })
       })
     )
 
+  const replyIfOwed = (options: Assistant.ReplyOptions) =>
+    replyPass({
+      instructions: instructions(options.instructions),
+      toolkit: builtins,
+      view: identity,
+      nudge: options.nudge
+    })
+
   const append = (...events: ReadonlyArray<{ readonly _tag: string }>) =>
     Effect.forEach(events, (event) => AppEvents.encode(app, event)).pipe(Effect.flatMap(chat.append), Effect.asVoid)
+
+  // What the loop sends for these options: its system prompt, its tools, and which entries it reads.
+  const prepare = <RT, RS>(options: Assistant.LoopOptions<RT, RS, any>) => {
+    const skills = options.skills ?? []
+
+    return {
+      system: mapText(instructions(options.instructions), (text) => Skill.withCatalog(text, skills)),
+      toolkit: Toolkits.merge(Toolkits.merge(builtins, Skill.toolkit(skills)), options.toolkit ?? Toolkits.empty),
+      view: options.history ?? identity
+    }
+  }
 
   return {
     chatId: chat.chatId,
@@ -310,9 +321,19 @@ const makeTurnApi = (
     tools: builtins,
     instructions,
     replyIfOwed,
+    summarize: (options) => {
+      const { system, toolkit, view } = prepare(options)
+
+      return AssistantLoop.summarize({
+        instructions: system,
+        toolkit,
+        // Not `history`: a summary doesn't count as reading the chat.
+        history: Effect.map(chat.entries, (all) => toHistory(view(AppEvents.decodeEntries(app, all)), app)),
+        prompt: options.prompt
+      })
+    },
     loop: (options) => {
-      const skills = options.skills ?? []
-      const toolkit = Toolkits.merge(Toolkits.merge(builtins, Skill.toolkit(skills)), options.toolkit ?? Toolkits.empty)
+      const { system, toolkit, view } = prepare(options)
       const twice = Toolkits.duplicateNames(toolkit)
 
       const deciding = toolkit.definitions.filter(
@@ -327,14 +348,13 @@ const makeTurnApi = (
                 `${deciding.map((tool) => tool.name).join(", ")} can wait for the user's decision: add Decision.block to the assistant's blocks.`
               )
             : AssistantLoop.stream({
-                instructions: mapText(instructions(options.instructions), (text) => Skill.withCatalog(text, skills)),
+                instructions: system,
                 toolkit,
-                history: history(options.history),
-                maxSteps: options.maxSteps ?? 16,
-                toolChoice: "required"
+                history: history(view),
+                maxSteps: options.maxSteps ?? 16
               })
 
-      return Stream.concat(loop, replyIfOwed({ instructions: options.instructions, nudge: options.replyNudge }))
+      return Stream.concat(loop, replyPass({ instructions: system, toolkit, view, nudge: options.replyNudge }))
     }
   }
 }
@@ -370,8 +390,7 @@ export const runTurn = Effect.fn(
     const startSeq = lastSeq(started, 0)
     // The inputs that woke the turn count as handled when it ends, even if the handler never reads the chat.
     const read = yield* Ref.make(startSeq)
-    const running = runningNow(before, yield* Clock.currentTimeMillis)
-    const turn = makeTurnApi(options.registration, chat, read, running)
+    const turn = makeTurnApi(options.registration, chat, read)
 
     const record = (event: AssistantLoop.Event) =>
       Effect.flatMap(Ref.get(read), (seenThroughSeq) =>

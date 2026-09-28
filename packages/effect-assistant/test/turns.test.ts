@@ -1,17 +1,21 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import * as Stream from "effect/Stream"
 import * as Tracer from "effect/Tracer"
 import * as Response from "effect/unstable/ai/Response"
-import { type Assistant, AssistantChat, AssistantEvent, BlockKit, ChatLog } from "../src/index.ts"
+import { type Assistant, AssistantChat, AssistantEngine, AssistantEvent, BlockKit, ChatLog } from "../src/index.ts"
 import { mayHaveRunOutput, notRunOutput } from "../src/internal/history.ts"
 import { silentTurnMessage } from "../src/internal/turns.ts"
+import * as Uuid from "../src/internal/uuid.ts"
 import {
   collectUntil,
+  layerStorage,
   memoryAssistant,
   newChat,
   say,
+  simple,
   storedUpdate,
   TestAssistant,
   turnsDone,
@@ -126,6 +130,47 @@ describe("turn completion", () => {
     }).pipe(Effect.provide(stopsEarlyLayer))
   )
 
+  it.live("sends a message once when a crash cut off its call after the message was stored", () =>
+    Effect.gen(function* () {
+      const log = yield* ChatLog.ChatLog
+      const chat = yield* newChat
+      const callId = "toolu_send_1"
+
+      yield* log.append(chat, [
+        say("hi"),
+        AssistantEvent.TurnStarted.make({ assistant: TestAssistant.name }),
+        AssistantEvent.ModelOutput.make({
+          parts: [
+            Response.makePart("tool-call", {
+              id: callId,
+              name: "send_user_message",
+              params: { text: "Hello!", wait: true },
+              providerExecuted: false
+            })
+          ],
+          seenThroughSeq: 1
+        }),
+        AssistantEvent.ToolStarted.make({ callId, tool: "send_user_message" }),
+        AssistantEvent.AssistantMessage.make({
+          id: Uuid.fromKey(`message:${callId}`),
+          text: "Hello!"
+        })
+      ])
+
+      // The restart: the engine resumes the chat, and the cut-off call runs again.
+      const restarted = TestAssistant.toLayer(simple({ instructions: "Be brief." })).pipe(
+        Layer.provideMerge(AssistantEngine.layerMemory),
+        Layer.provide(Scripted.unused)
+      )
+
+      const entries = yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1).pipe(
+        Effect.provide(restarted)
+      )
+
+      expect(AssistantEvent.assistantTexts(entries)).toEqual(["Hello!"])
+    }).pipe(Effect.provide(layerStorage))
+  )
+
   it.live("tells the model a call whose stream stopped while it ran may have done its work", () =>
     Effect.gen(function* () {
       // The call started, then the handler's stream ended before its result.
@@ -166,7 +211,7 @@ describe("turn completion", () => {
     }).pipe(Effect.provide(updatingAssistant(lateUpdate(), Scripted.unused)))
   )
 
-  it.live("replyIfOwed runs one pass that can only reply, with the nudge", () =>
+  it.live("replyIfOwed runs one pass that can only reply, with the nudge last", () =>
     Effect.gen(function* () {
       const model = yield* Scripted.make(() => [
         Scripted.call("send_user_message", { text: "You're welcome.", wait: true })
@@ -187,9 +232,38 @@ describe("turn completion", () => {
 
       expect(Predicate.isTagged(lastTurnEnd(entries)!, "TurnCompleted")).toBe(true)
       expect(AssistantEvent.assistantTexts(entries)).toEqual(["You're welcome."])
-      expect(request?.tools).toEqual(["send_user_message"])
-      expect(request?.toolChoice).toEqual({ tool: "send_user_message" })
-      expect(request?.system.endsWith("Be brief.\n\nReply now.")).toBe(true)
+      // The loop's prompt and tools, so the cache holds; the nudge comes after the history.
+      expect(request?.tools).toEqual(["send_user_message", "wait"])
+      expect(request?.toolChoice).toBe("auto")
+      expect(request?.system.endsWith("Be brief.")).toBe(true)
+      expect(Scripted.lastInput(request!)).toBe("Reply now.")
+    })
+  )
+})
+
+describe("the reply pass", () => {
+  it.live("refuses any call but a reply, and the model replies next", () =>
+    Effect.gen(function* () {
+      let step = 0
+
+      const model = yield* Scripted.make(() =>
+        ++step === 1 ? Scripted.wait() : step === 2 ? Scripted.wait() : Scripted.reply("Anytime.")
+      )
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* TestAssistant.submit(chat, say("Thanks!"))
+
+        return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
+      }).pipe(Effect.provide(memoryAssistant(simple({ instructions: "Be brief." }), model.layer)))
+
+      const refused = entries.flatMap(({ event }) =>
+        Predicate.isTagged(event, "ToolResult") && event.outcome === "failure" ? [event.tool] : []
+      )
+
+      expect(refused).toEqual(["wait"])
+      expect(AssistantEvent.assistantTexts(entries)).toEqual(["Anytime."])
+      expect(Predicate.isTagged(lastTurnEnd(entries)!, "TurnCompleted")).toBe(true)
     })
   )
 })

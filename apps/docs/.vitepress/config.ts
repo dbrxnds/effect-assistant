@@ -65,6 +65,7 @@ export default defineConfig({
             { text: "UI blocks", link: "/guide/blocks" },
             { text: "Decisions", link: "/guide/decisions" },
             { text: "The chat client", link: "/guide/client" },
+            { text: "Compaction", link: "/guide/compaction" },
             { text: "Instructions and prompts", link: "/guide/instructions" }
           ]
         },

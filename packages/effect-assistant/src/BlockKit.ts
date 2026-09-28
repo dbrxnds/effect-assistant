@@ -20,6 +20,7 @@ import * as AssistantEvent from "./AssistantEvent.ts"
 import { AssistantChat } from "./AssistantChat.ts"
 import type * as Block from "./Block.ts"
 import type * as ChatView from "./ChatView.ts"
+import * as Decision from "./Decision.ts"
 import * as InputId from "./InputId.ts"
 
 /**
@@ -131,7 +132,8 @@ export const blockStates = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): Re
 
 /**
  * Returns the blocks still open after the user typed this many messages
- * without using them: the ones {@link closeStale} closes.
+ * without using them: the ones {@link closeStale} closes. Decision blocks
+ * never go stale: work waits on them, and closing one would leave it waiting.
  *
  * @category folding
  * @since 0.1.0
@@ -148,9 +150,19 @@ export const staleBlocks = (
         AssistantEvent.isLibraryEvent(event) && Predicate.isTagged(event, "AssistantMessage") && event.id === id
     )
 
+    const message = entries[shown]?.event
+
+    if (
+      message === undefined ||
+      (AssistantEvent.isLibraryEvent(message) &&
+        Predicate.isTagged(message, "AssistantMessage") &&
+        message.block?.kind === Decision.kind)
+    )
+      return false
+
     const typed = entries.slice(shown + 1).filter(({ event }) => Predicate.isTagged(event, "UserMessage")).length
 
-    return shown !== -1 && typed >= options.messages
+    return typed >= options.messages
   })
 }
 

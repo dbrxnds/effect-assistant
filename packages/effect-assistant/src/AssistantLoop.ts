@@ -33,8 +33,7 @@
  *     AssistantLoop.stream({
  *       instructions: turn.instructions("You help a small team."),
  *       toolkit: AssistantLoop.merge(turn.tools, tools),
- *       history: turn.history(),
- *       toolChoice: "required"
+ *       history: turn.history()
  *     })
  * }))
  * ```
@@ -270,9 +269,50 @@ export interface StepOptions<R = never> {
   readonly toolkit?: Tools<R> | undefined
   /** The current history, read at the start of the step. */
   readonly history: Effect.Effect<ReadonlyArray<Prompt.Message>>
-  /** `"required"` makes every step a tool call: assistants talk only through tools. */
+  /**
+   * Default `"auto"`: a step without a tool call ends the loop. Forcing a
+   * call (`"required"`, or a tool by name) is refused by newer models, and
+   * with extended thinking.
+   */
   readonly toolChoice?: LanguageModel.ToolChoice<string> | undefined
 }
+
+/**
+ * Options for {@link summarize}: a step's, and what to ask after the history.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface SummarizeOptions<R = never> extends Omit<StepOptions<R>, "toolChoice"> {
+  /** What the model is asked, after the history. */
+  readonly prompt: string
+}
+
+/**
+ * One model call for text about the chat, like a summary to compact it with:
+ * the step's system prompt, tools and history, then `prompt`. No tool runs
+ * and nothing is stored; the text the model writes is the result. Only
+ * `prompt` is added to what a step sends, so the call reads its cached prompt.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const summarize = Effect.fn("AssistantLoop.summarize")(function* <R = never>(options: SummarizeOptions<R>) {
+  const instructions = Predicate.isString(options.instructions) ? { text: options.instructions } : options.instructions
+
+  const prompt = Prompt.fromMessages([
+    Prompt.systemMessage({ content: instructions.text }),
+    ...(yield* options.history),
+    History.userText(options.prompt)
+  ])
+
+  // "auto", like a step: another tool choice would change the request, and miss the cache.
+  const response = yield* generate(prompt, (options.toolkit ?? empty).definitions, "auto").pipe(
+    Telemetry.chatSpan(prompt, instructions.attributes)
+  )
+
+  return response.text
+})
 
 /**
  * Options for {@link stream}.
@@ -521,7 +561,7 @@ export const loop = <S, A, E, R>(
  * const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
  *   AssistantLoop.loop({ steps: 0 }, (state) =>
  *     AssistantLoop.step(
- *       { instructions: turn.instructions("You help a small team."), toolkit: turn.tools, history: turn.history(), toolChoice: "required" },
+ *       { instructions: turn.instructions("You help a small team."), toolkit: turn.tools, history: turn.history() },
  *       (result) => result.done || state.steps >= 12 ? AssistantLoop.stop() : AssistantLoop.next({ steps: state.steps + 1 })
  *     )
  *   )

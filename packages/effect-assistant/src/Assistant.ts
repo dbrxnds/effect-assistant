@@ -173,9 +173,9 @@ export interface Entry<Events = never> {
  * @since 0.1.0
  */
 export interface ReplyOptions {
-  /** The assistant's instructions, as for `turn.loop`: `Instructions.protocol` and the nudge are added. */
+  /** The assistant's instructions, as for `turn.loop`: `Instructions.protocol` is added. */
   readonly instructions: string | Instructions.Resolved
-  /** What to tell the model. Default: that it hasn't replied yet, and should now. */
+  /** What to tell the model, after the history. Default: that it hasn't replied yet, and should now. */
   readonly nudge?: string | undefined
 }
 
@@ -220,9 +220,20 @@ export interface Turn<Events = never> {
     options: LoopOptions<RT, RS, Events>
   ) => Stream.Stream<AssistantLoop.Event, AiError.AiError, LanguageModel.LanguageModel | TurnServices | RT | RS>
   /**
+   * One model call for text about the chat, like a summary to compact it
+   * with (see `Compaction`): the loop's own system prompt, tools and history
+   * for these options, then `prompt`. No tool runs, nothing is stored, and it
+   * doesn't count as reading the chat. Its request is the loop's plus one
+   * message, so it reads the loop's cached prompt.
+   */
+  readonly summarize: <RT = never, RS = never>(
+    options: LoopOptions<RT, RS, Events> & { readonly prompt: string }
+  ) => Effect.Effect<string, AiError.AiError, LanguageModel.LanguageModel | TurnServices | RT | RS>
+  /**
    * One more pass, when the turn would end without replying to the user's
    * latest message: the model can then only reply. Empty when no reply is
-   * owed, or when an input arrived that the next turn reads.
+   * owed, or when an input arrived that the next turn reads. `loop` runs
+   * it with its own prompt and tools, so the pass reads the cached prompt.
    */
   readonly replyIfOwed: (
     options: ReplyOptions
