@@ -168,7 +168,8 @@ const blockStates: (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => Readonly
 ### staleBlocks
 
 Returns the blocks still open after the user typed this many messages
-without using them: the ones `closeStale` closes.
+without using them: the ones `closeStale` closes. Decision blocks
+never go stale: work waits on them, and closing one would leave it waiting.
 
 ```ts
 const staleBlocks: (

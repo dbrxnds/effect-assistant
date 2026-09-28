@@ -257,6 +257,24 @@ export const merge: <A, B>(self: Tools<A>, that: Tools<B>) => Tools<A | B> = Too
 export const empty: Tools = Toolkits.empty
 
 /**
+ * A chat's history as the model reads it: its messages, and the last `seq`
+ * of the chat they cover.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface ChatHistory {
+  readonly messages: ReadonlyArray<Prompt.Message>
+  readonly throughSeq: number
+}
+
+/** The messages of a history, and how far into the chat they go, if they're a chat's. */
+const readHistory = (read: ReadonlyArray<Prompt.Message> | ChatHistory) =>
+  "messages" in read
+    ? { messages: read.messages, throughSeq: read.throughSeq }
+    : { messages: read, throughSeq: undefined }
+
+/**
  * Options for {@link step}.
  *
  * @category models
@@ -267,8 +285,12 @@ export interface StepOptions<R = never> {
   readonly instructions: string | Instructions.Resolved
   /** The tools the model can call. Default: none. */
   readonly toolkit?: Tools<R> | undefined
-  /** The current history, read at the start of the step. */
-  readonly history: Effect.Effect<ReadonlyArray<Prompt.Message>>
+  /**
+   * The current history, read at the start of the step: messages, or a
+   * chat's history (`turn.history()`), whose `throughSeq` the step's
+   * `ModelOutput` records as how far the model had read.
+   */
+  readonly history: Effect.Effect<ReadonlyArray<Prompt.Message> | ChatHistory>
   /**
    * Default `"auto"`: a step without a tool call ends the loop. Forcing a
    * call (`"required"`, or a tool by name) is refused by newer models, and
@@ -545,7 +567,7 @@ export const step = <R, S, E2 = never, R2 = never>(
 
   return Stream.unwrap(
     Effect.gen(function* () {
-      const history = yield* options.history
+      const { messages: history, throughSeq } = readHistory(yield* options.history)
       // Calls a crash cut off, with no result: they run again, with the same ids, before the model goes on.
       const cutOff = History.unansweredCalls(history)
 
@@ -581,6 +603,7 @@ export const step = <R, S, E2 = never, R2 = never>(
 
       const output = AssistantEvent.ModelOutput.make({
         parts: modelParts(response.content),
+        seenThroughSeq: throughSeq,
         model: metadata?.modelId ?? Option.getOrUndefined(name),
         responseId: metadata?.id,
         usage: response.usage,
@@ -638,7 +661,9 @@ export const stream = <R = never>(
   // Done: stop, unless something arrived while the model was working; then it reads that first.
   const afterDone = (steps: number, historyLength: number) =>
     Stream.unwrap(
-      Effect.map(options.history, (history) => (history.length > historyLength ? next(steps) : stop<number>()))
+      Effect.map(options.history, (read) =>
+        readHistory(read).messages.length > historyLength ? next(steps) : stop<number>()
+      )
     )
 
   return loop(0, (steps: number) =>

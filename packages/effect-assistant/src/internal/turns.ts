@@ -12,7 +12,6 @@ import * as Exit from "effect/Exit"
 import { identity } from "effect/Function"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
-import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
@@ -218,8 +217,25 @@ const closeOpenCalls = Effect.fn(function* (chat: AssistantChat["Service"], star
 })
 
 /**
+ * How far this turn handled the chat: the inputs that woke it (before its
+ * `TurnStarted`, at `startSeq`), and everything the model read in it, as its
+ * outputs record.
+ */
+const handledThrough = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, startSeq: number) =>
+  entries.reduce(
+    (through, { seq, event }) =>
+      seq > startSeq &&
+      AssistantEvent.isLibraryEvent(event) &&
+      Predicate.isTagged(event, "ModelOutput") &&
+      event.seenThroughSeq !== undefined
+        ? Math.max(through, event.seenThroughSeq)
+        : through,
+    startSeq
+  )
+
+/**
  * Ends a turn that ran to the end. It fails, visibly, when the user's latest
- * input got no reply; an input that arrived after the turn's last read gets
+ * input got no reply; an input that arrived after what its model read gets
  * the next turn, which replies.
  */
 const finishTurn = Effect.fn(function* (chat: AssistantChat["Service"], read: number, wakes: ReadonlySet<string>) {
@@ -242,23 +258,23 @@ const failTurn = Effect.fn(function* (chat: AssistantChat["Service"], cause: Cau
   yield* chat.append([AssistantEvent.TurnFailed.make({ throughSeq: last, message: failureMessage(cause) })])
 })
 
-/** The turn as its handler sees it. `read` is how far the turn has read the chat. */
+/** The turn as its handler sees it. `startSeq` is its `TurnStarted`: the inputs before it woke the turn. */
 const makeTurnApi = (
   registration: Registration,
   chat: AssistantChat["Service"],
-  read: Ref.Ref<number>
+  startSeq: number
 ): Assistant.Turn<any> => {
   const { definition, builtins } = registration
   const { app } = definition
 
   const entries = Effect.map(chat.entries, (all) => AppEvents.decodeEntries(app, all))
 
-  // Only the history moves how far the turn read: it's what the model sees, read right before each call.
+  // With how far into the chat it goes: the step records it on the model's output.
   const history = (view: Assistant.HistoryView<any> = identity) =>
-    Effect.map(
-      Effect.tap(chat.entries, (all) => Ref.update(read, (seq) => lastSeq(all, seq))),
-      (all) => toHistory(view(AppEvents.decodeEntries(app, all)), app)
-    )
+    Effect.map(chat.entries, (all): AssistantLoop.ChatHistory => ({
+      messages: toHistory(view(AppEvents.decodeEntries(app, all)), app),
+      throughSeq: lastSeq(all, startSeq)
+    }))
 
   const instructions = (given: string | Instructions.Resolved) =>
     mapText(given, (text) => `${Instructions.protocol}\n\n${text}`)
@@ -277,9 +293,9 @@ const makeTurnApi = (
     Stream.unwrap(
       Effect.gen(function* () {
         const all = yield* chat.entries
-        const through = yield* Ref.get(read)
+        const through = handledThrough(all, startSeq)
 
-        // Something arrived after the loop's last read: the next turn reads it with the full loop, and replies.
+        // Something arrived after what the loop's model read: the next turn reads it with the full loop, and replies.
         if (History.unreadAfter(all, through, app.wakes)) return Stream.empty
 
         const unsent = History.unsentText(all)
@@ -296,11 +312,10 @@ const makeTurnApi = (
             unsent === undefined ? [Tools.sendUserMessageName] : [Tools.sendUserMessageName, Tools.waitToolName],
             "Not now: reply to the user with send_user_message."
           ),
-          // Not `history`: what the reply pass reads, it can only reply to, so it doesn't move how far the turn read.
-          history: Effect.map(chat.entries, (entries) => [
-            ...toHistory(options.view(AppEvents.decodeEntries(app, entries)), app),
-            History.userText(nudge)
-          ]),
+          history: Effect.map(chat.entries, (entries) => ({
+            messages: [...toHistory(options.view(AppEvents.decodeEntries(app, entries)), app), History.userText(nudge)],
+            throughSeq: lastSeq(entries, startSeq)
+          })),
           // A second step, for a reply after a call it was refused.
           maxSteps: 2
         })
@@ -393,25 +408,9 @@ export const runTurn = Effect.fn(
     ])
 
     const startSeq = lastSeq(started, 0)
-    // The inputs that woke the turn count as handled when it ends, even if the handler never reads the chat.
-    const read = yield* Ref.make(startSeq)
-    const turn = makeTurnApi(options.registration, chat, read)
+    const turn = makeTurnApi(options.registration, chat, startSeq)
 
-    const record = (event: AssistantLoop.Event) =>
-      Effect.flatMap(Ref.get(read), (seenThroughSeq) =>
-        chat.append([
-          Predicate.isTagged(event, "ModelOutput")
-            ? AssistantEvent.ModelOutput.make({
-                parts: event.parts,
-                seenThroughSeq,
-                model: event.model,
-                responseId: event.responseId,
-                usage: event.usage,
-                durationMillis: event.durationMillis
-              })
-            : event
-        ])
-      )
+    const record = (event: AssistantLoop.Event) => chat.append([event])
 
     yield* options.handler(turn).pipe(
       Stream.runForEach(record),
@@ -419,8 +418,8 @@ export const runTurn = Effect.fn(
       Effect.provideContext(options.services),
       Effect.matchCauseEffect({
         onSuccess: () =>
-          Effect.flatMap(Ref.get(read), (through) =>
-            finishTurn(chat, through, options.registration.definition.app.wakes)
+          Effect.flatMap(chat.entries, (all) =>
+            finishTurn(chat, handledThrough(all, startSeq), options.registration.definition.app.wakes)
           ),
         onFailure: (cause) => failTurn(chat, cause)
       })

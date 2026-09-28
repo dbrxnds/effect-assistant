@@ -177,7 +177,10 @@ describe("types", () => {
       AssistantLoop.stream({
         instructions: turn.instructions("Help."),
         toolkit: turn.tools,
-        history: Effect.map(turn.history(), (items) => recent(items, 50)),
+        history: Effect.map(turn.history(), (history) => ({
+          ...history,
+          messages: recent(history.messages, 50)
+        })),
         toolChoice: "required"
       })
     )

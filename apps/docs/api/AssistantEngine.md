@@ -59,10 +59,14 @@ const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog>
 ### layerCluster
 
 Layer that runs chats as cluster entities, one per chat, keyed by chat id.
-Needs `Sharding`: a `SingleRunner` for one process with SQL storage, or
-`TestRunner` in tests.
+Needs `Sharding`: a `SingleRunner` for one process with SQL storage, a
+runner of the app's cluster, or `TestRunner` in tests.
 
 **Details**
+
+Only the runners that register an assistant (with its `toLayer`) host its
+chats. Anywhere else, like a web server that is a cluster client, `submit`
+and `subscribe` reach the chat's entity wherever it runs.
 
 A chat's specialist runs live in its entity, which keeps itself alive
 while they (or turns for their answers) work. A run cut off by a shutdown

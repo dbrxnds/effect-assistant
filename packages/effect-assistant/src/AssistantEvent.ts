@@ -295,7 +295,8 @@ export class ModelOutput extends Schema.TaggedClass<ModelOutput>()("ModelOutput"
   parts: Schema.Array(ModelPart),
   /**
    * The last entry the model had read when it wrote this. Inputs after it
-   * arrived while the model was working.
+   * arrived while the model was working. A turn has handled what its
+   * outputs had read.
    */
   seenThroughSeq: Schema.optional(Schema.Int),
   /** The model that wrote it: the provider's id for it, or the name the context gave it. */
