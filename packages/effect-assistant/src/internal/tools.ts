@@ -20,7 +20,8 @@ import * as ToolFailure from "../ToolFailure.ts"
 import * as Toolkits from "./toolkit.ts"
 import * as Uuid from "./uuid.ts"
 
-const waitToolName = "wait"
+/** @internal */
+export const waitToolName = "wait"
 
 /** @internal */
 export const sendUserMessageName = "send_user_message"

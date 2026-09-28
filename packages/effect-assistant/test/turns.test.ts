@@ -7,7 +7,7 @@ import * as Tracer from "effect/Tracer"
 import * as Response from "effect/unstable/ai/Response"
 import { type Assistant, AssistantChat, AssistantEngine, AssistantEvent, BlockKit, ChatLog } from "../src/index.ts"
 import { mayHaveRunOutput, notRunOutput } from "../src/internal/history.ts"
-import { silentTurnMessage } from "../src/internal/turns.ts"
+import { silentTurnMessage, unsentTextNudge } from "../src/internal/turns.ts"
 import * as Uuid from "../src/internal/uuid.ts"
 import {
   collectUntil,
@@ -264,6 +264,34 @@ describe("the reply pass", () => {
       expect(refused).toEqual(["wait"])
       expect(AssistantEvent.assistantTexts(entries)).toEqual(["Anytime."])
       expect(Predicate.isTagged(lastTurnEnd(entries)!, "TurnCompleted")).toBe(true)
+    })
+  )
+})
+
+describe("unsent text", () => {
+  it.live("sends what the model wrote without sending, after it acknowledged the request", () =>
+    Effect.gen(function* () {
+      let step = 0
+
+      const model = yield* Scripted.make((request) => {
+        step += 1
+
+        if (Scripted.lastInput(request).startsWith(unsentTextNudge))
+          return Scripted.reply("October: stock up on the Autumn Blend.")
+
+        if (step === 1) return [Scripted.call("send_user_message", { text: "On it.", wait: false })]
+
+        return [Scripted.text("October: stock up on the Autumn Blend.")]
+      })
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* TestAssistant.submit(chat, say("What should we prepare for October?"))
+
+        return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
+      }).pipe(Effect.provide(memoryAssistant(simple({ instructions: "Be brief." }), model.layer)))
+
+      expect(AssistantEvent.assistantTexts(entries)).toEqual(["On it.", "October: stock up on the Autumn Blend."])
     })
   )
 })

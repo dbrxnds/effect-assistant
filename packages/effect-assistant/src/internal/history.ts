@@ -408,6 +408,33 @@ export const owesReply = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, throu
 }
 
 /**
+ * Returns the text the model wrote at the end of this turn without sending
+ * it: its last output has text and no tool call. The user sees only what
+ * `send_user_message` sends, so that text reached nobody.
+ *
+ * @internal
+ */
+export const unsentText = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): string | undefined => {
+  const turnStart = entries.findLastIndex(({ event }) => Predicate.isTagged(event, "TurnStarted"))
+  const last = entries.slice(turnStart + 1).findLast(({ event }) => Predicate.isTagged(event, "ModelOutput"))?.event
+
+  if (
+    last === undefined ||
+    !AssistantEvent.isLibraryEvent(last) ||
+    !Predicate.isTagged(last, "ModelOutput") ||
+    last.parts.some((part) => part.type === "tool-call")
+  )
+    return undefined
+
+  const text = last.parts
+    .flatMap((part) => (part.type === "text" ? [part.text] : []))
+    .join("")
+    .trim()
+
+  return text.length > 0 ? text : undefined
+}
+
+/**
  * Returns whether an input arrived after `throughSeq`: another turn will read it.
  *
  * @internal

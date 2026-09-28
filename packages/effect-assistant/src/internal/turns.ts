@@ -51,6 +51,15 @@ export const defaultReplyNudge =
   "You haven't replied to the user's latest message yet. Reply now with send_user_message."
 
 /**
+ * The last message of the reply pass when the turn ended with text it didn't
+ * send, followed by that text.
+ *
+ * @internal
+ */
+export const unsentTextNudge =
+  "The user didn't see what you just wrote: they only see what you send with send_user_message. Send them what they should see, or call wait if nothing is for them. What you wrote:"
+
+/**
  * What `Assistant.make` defines: the name, blocks, specialists, and events.
  *
  * @internal
@@ -271,19 +280,26 @@ const makeTurnApi = (
         const through = yield* Ref.get(read)
 
         // Something arrived after the loop's last read: the next turn reads it with the full loop, and replies.
-        if (History.unreadAfter(all, through, app.wakes) || !History.owesReply(all, through)) return Stream.empty
+        if (History.unreadAfter(all, through, app.wakes)) return Stream.empty
+
+        const unsent = History.unsentText(all)
+
+        if (!History.owesReply(all, through) && unsent === undefined) return Stream.empty
+
+        const nudge = unsent === undefined ? (options.nudge ?? defaultReplyNudge) : `${unsentTextNudge}\n\n${unsent}`
 
         return AssistantLoop.stream({
           instructions: options.instructions,
+          // A reply that's owed can only be sent; text that wasn't sent may also be for nobody.
           toolkit: Toolkits.runOnly(
             options.toolkit,
-            [Tools.sendUserMessageName],
+            unsent === undefined ? [Tools.sendUserMessageName] : [Tools.sendUserMessageName, Tools.waitToolName],
             "Not now: reply to the user with send_user_message."
           ),
           // Not `history`: what the reply pass reads, it can only reply to, so it doesn't move how far the turn read.
           history: Effect.map(chat.entries, (entries) => [
             ...toHistory(options.view(AppEvents.decodeEntries(app, entries)), app),
-            History.userText(options.nudge ?? defaultReplyNudge)
+            History.userText(nudge)
           ]),
           // A second step, for a reply after a call it was refused.
           maxSteps: 2
