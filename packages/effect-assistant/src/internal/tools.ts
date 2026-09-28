@@ -6,19 +6,22 @@
  */
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Tool from "effect/unstable/ai/Tool"
 import * as Toolkit from "effect/unstable/ai/Toolkit"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import { AssistantChat } from "../AssistantChat.ts"
 import type * as AssistantLoop from "../AssistantLoop.ts"
+import { AssistantToolCall } from "../AssistantToolCall.ts"
 import type * as BlockKit from "../BlockKit.ts"
 import * as Decision from "../Decision.ts"
 import * as ToolFailure from "../ToolFailure.ts"
 import * as Toolkits from "./toolkit.ts"
 import * as Uuid from "./uuid.ts"
 
-const waitToolName = "wait"
+/** @internal */
+export const waitToolName = "wait"
 
 /** @internal */
 export const sendUserMessageName = "send_user_message"
@@ -48,14 +51,32 @@ const endsWithMessage = Schema.decodeUnknownOption(Schema.Struct({ wait: Schema.
 export const endsTurn = (call: AssistantEvent.ToolCallPart): boolean =>
   call.name === waitToolName || (call.name === sendUserMessageName && Option.isSome(endsWithMessage(call.params)))
 
-const append = (message: AssistantEvent.AssistantMessage) => AssistantChat.use((chat) => chat.append([message]))
+/**
+ * The message's id, from the call: a call cut off by a crash runs again with
+ * the same id, and finds its message already sent.
+ */
+const messageId = AssistantToolCall.useSync((call) => Uuid.fromKey(`message:${call.callId}`))
+
+const append = (message: AssistantEvent.AssistantMessage) =>
+  AssistantChat.use((chat) =>
+    Effect.flatMap(chat.entries, (entries) =>
+      entries.some(
+        ({ event }) =>
+          AssistantEvent.isLibraryEvent(event) &&
+          Predicate.isTagged(event, "AssistantMessage") &&
+          event.id === message.id
+      )
+        ? Effect.void
+        : chat.append([message])
+    )
+  )
 
 const PlainMessage = Tool.make(sendUserMessageName, {
   description,
   parameters: Schema.Struct({ text: Schema.String, wait: WaitFlag }),
   success: Schema.String,
   failure: ToolFailure.ToolFailure,
-  dependencies: [AssistantChat]
+  dependencies: [AssistantChat, AssistantToolCall]
 })
 
 const PlainTools = Toolkit.make(PlainMessage, Wait)
@@ -64,7 +85,7 @@ const plainTools = PlainTools.toHandlers({
   wait: () => Effect.succeed("waiting"),
   send_user_message: ({ text }) =>
     Effect.gen(function* () {
-      yield* append(AssistantEvent.AssistantMessage.make({ id: yield* Uuid.random, text }))
+      yield* append(AssistantEvent.AssistantMessage.make({ id: yield* messageId, text }))
 
       return "sent"
     })
@@ -112,7 +133,7 @@ ${catalog}`,
     }),
     success: Schema.String,
     failure: ToolFailure.ToolFailure,
-    dependencies: [AssistantChat]
+    dependencies: [AssistantChat, AssistantToolCall]
   })
 
   const BlockTools = Toolkit.make(BlockMessage, Wait)
@@ -121,7 +142,7 @@ ${catalog}`,
     wait: () => Effect.succeed("waiting"),
     send_user_message: ({ text, block, closes }) =>
       Effect.gen(function* () {
-        const id = yield* Uuid.random
+        const id = yield* messageId
         const closed = closes === undefined || closes.length === 0 ? {} : { closes }
 
         if (block === undefined) {

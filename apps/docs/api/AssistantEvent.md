@@ -121,7 +121,8 @@ class ModelOutput extends Schema.TaggedClass<ModelOutput>()("ModelOutput", {
   parts: Schema.Array(ModelPart),
   /**
    * The last entry the model had read when it wrote this. Inputs after it
-   * arrived while the model was working.
+   * arrived while the model was working. A turn has handled what its
+   * outputs had read.
    */
   seenThroughSeq: Schema.optional(Schema.Int),
   /** The model that wrote it: the provider's id for it, or the name the context gave it. */
@@ -624,8 +625,8 @@ class SpecialistFinished extends Schema.TaggedClass<SpecialistFinished>()("Speci
 ### SpecialistStarted
 
 A specialist run started working: spawned, or continued by a follow-up
-message. The model doesn't see it; it sees the run in "Running now", and
-its report arrives as a `SpecialistFinished`.
+message. The model doesn't see it: the call that started the run says
+so, and its report arrives as a `SpecialistFinished`.
 
 ```ts
 class SpecialistStarted extends Schema.TaggedClass<SpecialistStarted>()("SpecialistStarted", {

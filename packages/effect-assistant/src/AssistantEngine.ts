@@ -198,12 +198,18 @@ const Subscribe = Rpc.make("Subscribe", {
 
 const Delete = Rpc.make("Delete")
 
+const chatEntity = (assistant: string) => Entity.make(`Assistant/${assistant}`, [Submit, Subscribe, Delete])
+
 /**
  * Layer that runs chats as cluster entities, one per chat, keyed by chat id.
- * Needs `Sharding`: a `SingleRunner` for one process with SQL storage, or
- * `TestRunner` in tests.
+ * Needs `Sharding`: a `SingleRunner` for one process with SQL storage, a
+ * runner of the app's cluster, or `TestRunner` in tests.
  *
  * **Details**
+ *
+ * Only the runners that register an assistant (with its `toLayer`) host its
+ * chats. Anywhere else, like a web server that is a cluster client, `submit`
+ * and `subscribe` reach the chat's entity wherever it runs.
  *
  * A chat's specialist runs live in its entity, which keeps itself alive
  * while they (or turns for their answers) work. A run cut off by a shutdown
@@ -222,7 +228,7 @@ export const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Shardin
     const clients = new Map<string, EntityClient>()
 
     const register = Effect.fn(function* (registration: Turns.Registration) {
-      const ChatEntity = Entity.make(`Assistant/${registration.definition.name}`, [Submit, Subscribe, Delete])
+      const ChatEntity = chatEntity(registration.definition.name)
 
       const handlers = Effect.gen(function* () {
         const address = yield* Entity.CurrentAddress
@@ -254,21 +260,26 @@ export const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Shardin
         maxIdleTime: "5 minutes",
         concurrency: "unbounded"
       })
+    })
 
-      const makeClient = yield* ChatEntity.client
+    // Made on first use, so a process that registers no assistant can still reach its chats.
+    const clientOf = Effect.fnUntraced(function* (assistant: string) {
+      const known = clients.get(assistant)
 
-      clients.set(registration.definition.name, {
+      if (known !== undefined) return known
+
+      const makeClient = yield* chatEntity(assistant).client.pipe(Effect.provide(context))
+
+      const client: EntityClient = {
         submit: (chatId, input) => makeClient(chatId).Submit({ input }, { discard: true }).pipe(Effect.orDie),
         subscribe: (chatId, after) => makeClient(chatId).Subscribe({ after }).pipe(Stream.orDie),
         delete: (chatId) => makeClient(chatId).Delete().pipe(Effect.orDie)
-      })
+      }
+
+      clients.set(assistant, client)
+
+      return client
     })
-
-    const clientOf = (assistant: string) => {
-      const client = clients.get(assistant)
-
-      return client === undefined ? notRegistered(assistant) : Effect.succeed(client)
-    }
 
     return AssistantEngine.of({
       register: (registration) => register(registration).pipe(Effect.provide(context)),

@@ -313,13 +313,18 @@ export const duplicateNames = (tools: AssistantLoop.Tools<unknown>): ReadonlyArr
 }
 
 /**
- * Only the named tools.
+ * The same tools offered, so the prompt doesn't change, but only the named
+ * ones run: a call to any other fails with this message.
  *
  * @internal
  */
-export const only = <R>(tools: AssistantLoop.Tools<R>, names: ReadonlyArray<string>): AssistantLoop.Tools<R> => ({
-  definitions: tools.definitions.filter((tool) => names.includes(tool.name)),
-  run: (call) => (names.includes(call.name) ? tools.run(call) : empty.run(call)),
+export const runOnly = <R>(
+  tools: AssistantLoop.Tools<R>,
+  names: ReadonlyArray<string>,
+  message: string
+): AssistantLoop.Tools<R> => ({
+  definitions: tools.definitions,
+  run: (call) => (names.includes(call.name) ? tools.run(call) : Effect.succeed(failed(message, "not_now"))),
   needsDecision: (call, history) =>
     names.includes(call.name) ? needsDecisionOf(tools, call, history) : Effect.succeed(false),
   preview: (call) => previewOf(tools, call)

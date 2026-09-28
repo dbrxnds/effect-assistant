@@ -213,9 +213,9 @@ Options for `turn.replyIfOwed`.
 
 ```ts
 interface ReplyOptions {
-  /** The assistant's instructions, as for `turn.loop`: `Instructions.protocol` and the nudge are added. */
+  /** The assistant's instructions, as for `turn.loop`: `Instructions.protocol` is added. */
   readonly instructions: string | Instructions.Resolved
-  /** What to tell the model. Default: that it hasn't replied yet, and should now. */
+  /** What to tell the model, after the history. Default: that it hasn't replied yet, and should now. */
   readonly nudge?: string | undefined
 }
 ```
@@ -238,11 +238,14 @@ ends with `replyIfOwed` so a user who asked something gets an answer.
 interface Turn<Events = never> {
   readonly chatId: ChatId
   /**
-   * The model's history, from the chat's entries: all of them, or what a
-   * view keeps. Read it before every model call; the loop does.
+   * The model's history, from the chat's entries (all of them, or what a
+   * view keeps), with how far into the chat it goes. Read it before every
+   * model call; the loop does. A step records how far its model read, and
+   * the turn ends having handled what its model saw: an input that arrived
+   * after gets the next turn.
    */
-  readonly history: (view?: HistoryView<Events>) => Effect.Effect<ReadonlyArray<Prompt.Message>>
-  /** The chat's entries, with the assistant's own events decoded. */
+  readonly history: (view?: HistoryView<Events>) => Effect.Effect<AssistantLoop.ChatHistory>
+  /** The chat's entries, with the assistant's own events decoded. Reading them has no effect on the turn. */
   readonly entries: Effect.Effect<ReadonlyArray<Entry<Events>>>
   /** Writes the assistant's own events to the chat, like a summary. One that wakes a turn gets the next turn. */
   readonly append: (...events: ReadonlyArray<Events>) => Effect.Effect<void>
@@ -264,7 +267,8 @@ interface Turn<Events = never> {
   /**
    * One more pass, when the turn would end without replying to the user's
    * latest message: the model can then only reply. Empty when no reply is
-   * owed, or when an input arrived that the next turn reads.
+   * owed, or when an input arrived that the next turn reads. `loop` runs
+   * it with its own prompt and tools, so the pass reads the cached prompt.
    */
   readonly replyIfOwed: (
     options: ReplyOptions

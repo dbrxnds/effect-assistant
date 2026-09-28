@@ -7,15 +7,15 @@ stream.
 
 `turn.loop` is built from pieces you can use yourself:
 
-| Piece                                               | What it is                                                                                       |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `turn.instructions(text)`                           | The full system prompt: `Instructions.protocol`, your text, and the specialist runs working now. |
-| `turn.tools`                                        | The assistant's own tools: `send_user_message`, `wait`, and the specialist tools.                |
-| `turn.history(view?)`                               | The model's history from the chat's entries: all of them, or what a view keeps.                  |
-| `turn.entries`                                      | The chat's entries, with the assistant's own events decoded.                                     |
-| [`AssistantLoop.step`](/api/AssistantLoop#step)     | One step: call the model, run its tool calls.                                                    |
-| [`AssistantLoop.stream`](/api/AssistantLoop#stream) | The whole loop, steps until the model is done.                                                   |
-| `turn.replyIfOwed(...)`                             | One more pass, reply-only, when the user's latest message has no reply.                          |
+| Piece                                               | What it is                                                                                                                                                                              |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `turn.instructions(text)`                           | The full system prompt: `Instructions.protocol`, then your text.                                                                                                                        |
+| `turn.tools`                                        | The assistant's own tools: `send_user_message`, `wait`, and the specialist tools.                                                                                                       |
+| `turn.history(view?)`                               | The model's history (`messages`) from the chat's entries, all or what a view keeps, and the `throughSeq` they cover: the step records it, and the turn has handled what its model read. |
+| `turn.entries`                                      | The chat's entries, with the assistant's own events decoded. Reading them has no effect on the turn.                                                                                    |
+| [`AssistantLoop.step`](/api/AssistantLoop#step)     | One step: call the model, run its tool calls.                                                                                                                                           |
+| [`AssistantLoop.stream`](/api/AssistantLoop#stream) | The whole loop, steps until the model is done.                                                                                                                                          |
+| `turn.replyIfOwed(...)`                             | One more pass, reply-only, when the user's latest message has no reply.                                                                                                                 |
 
 `turn.loop` is `AssistantLoop.stream` with these wired in, the skill catalog,
 and a tool call required at every step, followed by `turn.replyIfOwed`.
@@ -149,9 +149,9 @@ const MyAssistantHandlers = MyAssistant.toLayer(
     const summarizer = yield* Summarizer // your service: summarizes a history
 
     return Effect.fn(function* (turn: Assistant.Turn<Summary>) {
-      const history = yield* turn.history(sinceSummary)
+      const { messages } = yield* turn.history(sinceSummary)
 
-      if (history.length > 200) yield* turn.append(Summary.make({ text: yield* summarizer.summarize(history) }))
+      if (messages.length > 200) yield* turn.append(Summary.make({ text: yield* summarizer.summarize(messages) }))
 
       return turn.loop({ instructions, history: sinceSummary })
     })

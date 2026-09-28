@@ -6,14 +6,12 @@
  * @internal
  */
 import * as Cause from "effect/Cause"
-import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import { identity } from "effect/Function"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
-import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
@@ -21,7 +19,6 @@ import type * as LanguageModel from "effect/unstable/ai/LanguageModel"
 import type * as Prompt from "effect/unstable/ai/Prompt"
 import * as WorkflowEngine from "effect/unstable/workflow/WorkflowEngine"
 import type * as Assistant from "../Assistant.ts"
-import * as AssistantActivity from "../AssistantActivity.ts"
 import type { AssistantChat } from "../AssistantChat.ts"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import * as AssistantLoop from "../AssistantLoop.ts"
@@ -44,13 +41,22 @@ import * as Tools from "./tools.ts"
 export const silentTurnMessage = "I finished without sending a reply."
 
 /**
- * Added to the instructions for one more short pass when a turn would end
- * without replying, unless the handler gives its own.
+ * The last message of one more short pass when a turn would end without
+ * replying, unless the handler gives its own.
  *
  * @internal
  */
 export const defaultReplyNudge =
   "You haven't replied to the user's latest message yet. Reply now with send_user_message."
+
+/**
+ * The last message of the reply pass when the turn ended with text it didn't
+ * send, followed by that text.
+ *
+ * @internal
+ */
+export const unsentTextNudge =
+  "The user didn't see what you just wrote: they only see what you send with send_user_message. Send them what they should see, or call wait if nothing is for them. What you wrote:"
 
 /**
  * What `Assistant.make` defines: the name, blocks, specialists, and events.
@@ -142,21 +148,6 @@ const failureMessage = (cause: Cause.Cause<unknown>): string =>
     onSome: ({ _tag, raw }) => `${_tag ?? "Error"}: ${Predicate.isString(raw) ? raw : toJsonText(raw)}`
   })
 
-/** The specialist runs working now, for the prompt: what's in flight, without reading back through the chat. */
-const runningNow = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, now: number): string => {
-  const runs = [...AssistantActivity.fromEntries(entries).specialists.values()]
-
-  if (runs.length === 0) return ""
-
-  const minutes = (since: number) => Math.max(0, Math.round((now - since) / 60_000))
-
-  const lines = runs.map(
-    (run) => `- ${run.specialist} (${run.runId}), started ${minutes(run.since)} min ago: ${run.goal}`
-  )
-
-  return `\n\nRunning now:\n${lines.join("\n")}`
-}
-
 const lastSeq = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, otherwise: number) => entries.at(-1)?.seq ?? otherwise
 
 /**
@@ -226,8 +217,25 @@ const closeOpenCalls = Effect.fn(function* (chat: AssistantChat["Service"], star
 })
 
 /**
+ * How far this turn handled the chat: the inputs that woke it (before its
+ * `TurnStarted`, at `startSeq`), and everything the model read in it, as its
+ * outputs record.
+ */
+const handledThrough = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, startSeq: number) =>
+  entries.reduce(
+    (through, { seq, event }) =>
+      seq > startSeq &&
+      AssistantEvent.isLibraryEvent(event) &&
+      Predicate.isTagged(event, "ModelOutput") &&
+      event.seenThroughSeq !== undefined
+        ? Math.max(through, event.seenThroughSeq)
+        : through,
+    startSeq
+  )
+
+/**
  * Ends a turn that ran to the end. It fails, visibly, when the user's latest
- * input got no reply; an input that arrived after the turn's last read gets
+ * input got no reply; an input that arrived after what its model read gets
  * the next turn, which replies.
  */
 const finishTurn = Effect.fn(function* (chat: AssistantChat["Service"], read: number, wakes: ReadonlySet<string>) {
@@ -250,57 +258,91 @@ const failTurn = Effect.fn(function* (chat: AssistantChat["Service"], cause: Cau
   yield* chat.append([AssistantEvent.TurnFailed.make({ throughSeq: last, message: failureMessage(cause) })])
 })
 
-/** The turn as its handler sees it. `read` is how far the turn has read the chat. */
+/** The turn as its handler sees it. `startSeq` is its `TurnStarted`: the inputs before it woke the turn. */
 const makeTurnApi = (
   registration: Registration,
   chat: AssistantChat["Service"],
-  read: Ref.Ref<number>,
-  running: string
+  startSeq: number
 ): Assistant.Turn<any> => {
   const { definition, builtins } = registration
   const { app } = definition
 
-  // Reading the chat, for the history or the entries, moves how far the turn read.
-  const entries = Effect.map(
-    Effect.tap(chat.entries, (all) => Ref.update(read, (seq) => lastSeq(all, seq))),
-    (all) => AppEvents.decodeEntries(app, all)
-  )
+  const entries = Effect.map(chat.entries, (all) => AppEvents.decodeEntries(app, all))
 
+  // With how far into the chat it goes: the step records it on the model's output.
   const history = (view: Assistant.HistoryView<any> = identity) =>
-    Effect.map(entries, (all) => toHistory(view(all), app))
+    Effect.map(chat.entries, (all): AssistantLoop.ChatHistory => ({
+      messages: toHistory(view(AppEvents.decodeEntries(app, all)), app),
+      throughSeq: lastSeq(all, startSeq)
+    }))
 
   const instructions = (given: string | Instructions.Resolved) =>
-    mapText(given, (text) => `${Instructions.protocol}\n\n${text}${running}`)
+    mapText(given, (text) => `${Instructions.protocol}\n\n${text}`)
 
-  // Only send_user_message, and the call is forced: the reply pass can only reply.
-  const replyOnly = Toolkits.only(builtins, [Tools.sendUserMessageName])
-
-  const replyIfOwed = (options: Assistant.ReplyOptions) =>
+  /**
+   * One more pass when the turn would end without the reply it owes: the
+   * loop's own prompt and tools, so the prompt stays cached, with the nudge
+   * at the end. Only send_user_message runs; any other call is refused.
+   */
+  const replyPass = <R>(options: {
+    readonly instructions: Instructions.Resolved
+    readonly toolkit: AssistantLoop.Tools<R>
+    readonly view: Assistant.HistoryView<any>
+    readonly nudge: string | undefined
+  }) =>
     Stream.unwrap(
       Effect.gen(function* () {
         const all = yield* chat.entries
-        const through = yield* Ref.get(read)
+        const through = handledThrough(all, startSeq)
 
-        // Something arrived after the loop's last read: the next turn reads it with the full loop, and replies.
-        if (History.unreadAfter(all, through, app.wakes) || !History.owesReply(all, through)) return Stream.empty
+        // Something arrived after what the loop's model read: the next turn reads it with the full loop, and replies.
+        if (History.unreadAfter(all, through, app.wakes)) return Stream.empty
+
+        const unsent = History.unsentText(all)
+
+        if (!History.owesReply(all, through) && unsent === undefined) return Stream.empty
+
+        const nudge = unsent === undefined ? (options.nudge ?? defaultReplyNudge) : `${unsentTextNudge}\n\n${unsent}`
 
         return AssistantLoop.stream({
-          instructions: mapText(
-            instructions(options.instructions),
-            (text) => `${text}\n\n${options.nudge ?? defaultReplyNudge}`
+          instructions: options.instructions,
+          // A reply that's owed can only be sent; text that wasn't sent may also be for nobody.
+          toolkit: Toolkits.runOnly(
+            options.toolkit,
+            unsent === undefined ? [Tools.sendUserMessageName] : [Tools.sendUserMessageName, Tools.waitToolName],
+            "Not now: reply to the user with send_user_message."
           ),
-          toolkit: replyOnly,
-          // Not `history`: what the reply pass reads, it can only reply to, so it doesn't move how far the turn read.
-          history: Effect.map(chat.entries, (all) => toHistory(AppEvents.decodeEntries(app, all), app)),
-          maxSteps: 1,
-          // Named, not just required: a model used to calling wait would otherwise call a tool that isn't there.
-          toolChoice: { tool: Tools.sendUserMessageName }
+          history: Effect.map(chat.entries, (entries) => ({
+            messages: [...toHistory(options.view(AppEvents.decodeEntries(app, entries)), app), History.userText(nudge)],
+            throughSeq: lastSeq(entries, startSeq)
+          })),
+          // A second step, for a reply after a call it was refused.
+          maxSteps: 2
         })
       })
     )
 
+  const replyIfOwed = (options: Assistant.ReplyOptions) =>
+    replyPass({
+      instructions: instructions(options.instructions),
+      toolkit: builtins,
+      view: identity,
+      nudge: options.nudge
+    })
+
   const append = (...events: ReadonlyArray<{ readonly _tag: string }>) =>
     Effect.forEach(events, (event) => AppEvents.encode(app, event)).pipe(Effect.flatMap(chat.append), Effect.asVoid)
+
+  // What the loop sends for these options: its system prompt, its tools, and which entries it reads.
+  const prepare = <RT, RS>(options: Assistant.LoopOptions<RT, RS, any>) => {
+    const skills = options.skills ?? []
+
+    return {
+      system: mapText(instructions(options.instructions), (text) => Skill.withCatalog(text, skills)),
+      toolkit: Toolkits.merge(Toolkits.merge(builtins, Skill.toolkit(skills)), options.toolkit ?? Toolkits.empty),
+      view: options.history ?? identity
+    }
+  }
 
   return {
     chatId: chat.chatId,
@@ -311,8 +353,7 @@ const makeTurnApi = (
     instructions,
     replyIfOwed,
     loop: (options) => {
-      const skills = options.skills ?? []
-      const toolkit = Toolkits.merge(Toolkits.merge(builtins, Skill.toolkit(skills)), options.toolkit ?? Toolkits.empty)
+      const { system, toolkit, view } = prepare(options)
       const twice = Toolkits.duplicateNames(toolkit)
 
       const deciding = toolkit.definitions.filter(
@@ -327,14 +368,13 @@ const makeTurnApi = (
                 `${deciding.map((tool) => tool.name).join(", ")} can wait for the user's decision: add Decision.block to the assistant's blocks.`
               )
             : AssistantLoop.stream({
-                instructions: mapText(instructions(options.instructions), (text) => Skill.withCatalog(text, skills)),
+                instructions: system,
                 toolkit,
-                history: history(options.history),
-                maxSteps: options.maxSteps ?? 16,
-                toolChoice: "required"
+                history: history(view),
+                maxSteps: options.maxSteps ?? 16
               })
 
-      return Stream.concat(loop, replyIfOwed({ instructions: options.instructions, nudge: options.replyNudge }))
+      return Stream.concat(loop, replyPass({ instructions: system, toolkit, view, nudge: options.replyNudge }))
     }
   }
 }
@@ -368,26 +408,9 @@ export const runTurn = Effect.fn(
     ])
 
     const startSeq = lastSeq(started, 0)
-    // The inputs that woke the turn count as handled when it ends, even if the handler never reads the chat.
-    const read = yield* Ref.make(startSeq)
-    const running = runningNow(before, yield* Clock.currentTimeMillis)
-    const turn = makeTurnApi(options.registration, chat, read, running)
+    const turn = makeTurnApi(options.registration, chat, startSeq)
 
-    const record = (event: AssistantLoop.Event) =>
-      Effect.flatMap(Ref.get(read), (seenThroughSeq) =>
-        chat.append([
-          Predicate.isTagged(event, "ModelOutput")
-            ? AssistantEvent.ModelOutput.make({
-                parts: event.parts,
-                seenThroughSeq,
-                model: event.model,
-                responseId: event.responseId,
-                usage: event.usage,
-                durationMillis: event.durationMillis
-              })
-            : event
-        ])
-      )
+    const record = (event: AssistantLoop.Event) => chat.append([event])
 
     yield* options.handler(turn).pipe(
       Stream.runForEach(record),
@@ -395,8 +418,8 @@ export const runTurn = Effect.fn(
       Effect.provideContext(options.services),
       Effect.matchCauseEffect({
         onSuccess: () =>
-          Effect.flatMap(Ref.get(read), (through) =>
-            finishTurn(chat, through, options.registration.definition.app.wakes)
+          Effect.flatMap(chat.entries, (all) =>
+            finishTurn(chat, handledThrough(all, startSeq), options.registration.definition.app.wakes)
           ),
         onFailure: (cause) => failTurn(chat, cause)
       })
