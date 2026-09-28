@@ -1,10 +1,12 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 import * as Response from "effect/unstable/ai/Response"
-import { AppEvent, Assistant, AssistantEvent, AssistantLoop, ChatId, Compaction, DecisionId } from "../src/index.ts"
+import { AppEvent, Assistant, AssistantEvent, ChatId, ChatLog, Compaction, DecisionId } from "../src/index.ts"
 import { collectUntil, newChat, runMemory, say, turnsDone } from "./fixtures.ts"
 import * as Scripted from "./scripted.ts"
 
@@ -20,27 +22,28 @@ const history = Compaction.since(Schema.is(Summary))
 const summarizePrompt = "Summarize this chat so far. Answer in text, without calling a tool."
 
 /** A handler that summarizes after every turn without a summary yet, like one past its threshold. */
-const compacting = (turn: Assistant.Turn<Summary>) => {
-  const options = { instructions: "Be brief.", history }
+const compacting = Effect.gen(function* () {
+  const log = yield* ChatLog.ChatLog
 
-  const compact = Effect.gen(function* () {
-    const entries = yield* turn.entries
+  return (turn: Assistant.Turn<Summary>) => {
+    const options = { instructions: "Be brief.", history }
 
-    if (entries.some(({ event }) => event instanceof Summary)) return
+    // The log, not `turn.entries`: a summary doesn't count as reading the chat.
+    const compact = Effect.gen(function* () {
+      const entries = yield* log.read(turn.chatId)
 
-    const text = yield* AssistantLoop.summarize({
-      ...turn.request(options),
-      prompt: summarizePrompt
+      if (entries.some(({ event }) => Predicate.isTagged(event, "Summary"))) return
+
+      const { text } = yield* LanguageModel.generateText({ prompt: summarizePrompt })
+      yield* turn.append(Summary.make({ text, throughSeq: entries.at(-1)?.seq ?? 0 }))
     })
 
-    yield* turn.append(Summary.make({ text, throughSeq: entries.at(-1)?.seq ?? 0 }))
-  })
-
-  return Stream.concat(turn.loop(options), Stream.drain(Stream.fromEffect(compact)))
-}
+    return Stream.concat(turn.loop(options), Stream.drain(Stream.fromEffect(compact)))
+  }
+})
 
 describe("Compaction", () => {
-  it.live("reads the summary instead of what it covers, with the loop's own prompt", () =>
+  it.live("reads the summary instead of what it covers", () =>
     Effect.gen(function* () {
       const model = yield* Scripted.make((request) => {
         const last = Scripted.lastInput(request)
@@ -61,12 +64,7 @@ describe("Compaction", () => {
         return yield* collectUntil(Compacting, chat, (es) => turnsDone(es) >= 2)
       }).pipe(Effect.provide(runMemory(Compacting.toLayer(compacting), model.layer)))
 
-      const [first, summarize, second] = yield* model.requests
-
-      // The summary call is the loop's request plus the prompt, so it reads the loop's cached prompt.
-      expect(summarize?.system).toBe(first?.system)
-      expect(summarize?.tools).toEqual(first?.tools)
-      expect(summarize?.toolChoice).toBe("auto")
+      const [, , second] = yield* model.requests
 
       // The next turn reads the summary, not the messages it covers.
       expect(Scripted.inputs(second!)).toEqual([

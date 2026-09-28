@@ -220,16 +220,6 @@ export interface Turn<Events = never> {
     options: LoopOptions<RT, RS, Events>
   ) => Stream.Stream<AssistantLoop.Event, AiError.AiError, LanguageModel.LanguageModel | TurnServices | RT | RS>
   /**
-   * What `loop` sends the model for these options: its system prompt, its
-   * tools, and the history through its view. The history is read without
-   * counting as reading the chat. For a model call of your own that should
-   * read the loop's cached prompt, like a summary to compact the chat with:
-   * `AssistantLoop.summarize({ ...turn.request(options), prompt })`.
-   */
-  readonly request: <RT = never, RS = never>(
-    options: LoopOptions<RT, RS, Events>
-  ) => AssistantLoop.StepOptions<TurnServices | RT | RS>
-  /**
    * One more pass, when the turn would end without replying to the user's
    * latest message: the model can then only reply. Empty when no reply is
    * owed, or when an input arrived that the next turn reads. `loop` runs

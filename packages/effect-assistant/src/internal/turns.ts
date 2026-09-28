@@ -337,16 +337,6 @@ const makeTurnApi = (
     tools: builtins,
     instructions,
     replyIfOwed,
-    request: (options) => {
-      const { system, toolkit, view } = prepare(options)
-
-      return {
-        instructions: system,
-        toolkit,
-        // Not `history`: an extra call doesn't count as reading the chat.
-        history: Effect.map(chat.entries, (all) => toHistory(view(AppEvents.decodeEntries(app, all)), app))
-      }
-    },
     loop: (options) => {
       const { system, toolkit, view } = prepare(options)
       const twice = Toolkits.duplicateNames(toolkit)
