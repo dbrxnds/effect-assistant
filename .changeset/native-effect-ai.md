@@ -1,5 +1,5 @@
 ---
-"effect-assistant": major
+"effect-assistant": minor
 ---
 
 The library runs on Effect's AI modules (`effect/unstable/ai`) instead of effect-uai: any `LanguageModel` provider, native `Tool`s and toolkits, and `Prompt`/`Response` parts in history and in the log. `@effect-uai/core` isn't a peer dependency any more. The loop still makes one model call per step and runs the calls itself, each stored as started before it runs; the agent's model output, tool calls, and results stay its own work, and the user sees only `send_user_message`.
