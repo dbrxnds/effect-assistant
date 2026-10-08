@@ -37,6 +37,7 @@ On the definition:
 | ------------------ | ------------------------------------------------------------------------------------------------------------- |
 | `toLayer(handler)` | The handler's layer. It registers the assistant with the [engine](./engines) and provides its service.        |
 | `layerClient`      | The service only, for a process that reaches chats another one runs, like a web server in front of a cluster. |
+| `Chat`             | The key of the chat its turns run in, typed with its events: `yield* MyAssistant.Chat`.                       |
 | `Entry`            | The schema of the chat's entries, the assistant's own events included, in JSON.                               |
 
 On the service, `yield* MyAssistant`:
@@ -48,9 +49,11 @@ On the service, `yield* MyAssistant`:
 | `subscribe(chatId)`     | Streams the chat's whole [log](./events), for the server: stored entries first (or those after `after`), then live ones. |
 | `delete(chatId)`        | [Deletes the chat](./chats#deleting-a-chat): stops what works in it, and keeps its log.                                  |
 
-Code that runs in a chat (a handler, a tool, a specialist's run) uses the
-chat itself instead: `yield* AssistantChat` has the chat's id, its
-`entries`, and `append`.
+Code that runs in a chat uses the chat itself instead. `yield* MyAssistant.Chat`
+(in the handler, its build, or a tool its turns run) has the chat's id, its
+`entries` typed with the assistant's events, and `append`. Code that doesn't
+know the assistant, like a shared tool or a specialist's run, uses
+`yield* AssistantChat`: the same chat, untyped.
 
 The name is also the assistant's name in [traces](./observability)
 (`invoke_agent my-assistant`) and, with the cluster engine, in its entity type.
