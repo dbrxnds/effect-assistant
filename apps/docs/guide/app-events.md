@@ -149,20 +149,3 @@ schema:
 - An event that doesn't decode, like one whose tag is no longer registered,
   is left out: the model doesn't read it, `turn.entries` and `subscribe` skip
   it, and it wakes nothing.
-
-## Migrating from facts
-
-`AssistantEvent.Fact` is gone. A fact is a registered event with
-`wakes: true`: give it a schema of its own, with the fields its `payload`
-had, and a `render` that says what its `<fact>` text said.
-
-```ts
-// Before
-MyAssistant.submit(chatId, AssistantEvent.Fact.make({ id, source: "webhook:Shipping", payload: { orderId } }))
-
-// After
-MyAssistant.submit(chatId, OrderShipped.make({ id, orderId, carrier: "DHL" }))
-```
-
-`Assistant.make`'s `inputs` option is gone too: an input is an event with
-`wakes: true`, and `events: [Summary]` is `events: [AppEvent.make(Summary)]`.

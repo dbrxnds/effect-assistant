@@ -9,7 +9,9 @@ import { AssistantEngine } from "effect-assistant"
 The `AssistantEngine` module runs assistants' chats. An assistant's
 `toLayer` registers it with the engine, and its `submit` and
 `subscribe` go through it. Pick one engine for the app, like a workflow
-engine:
+engine: `layerMemory` runs chats in the process, for tests and one
+process; `layerCluster` runs each chat as a cluster entity, so a turn
+cut off by a crash resumes.
 
 ## Other
 

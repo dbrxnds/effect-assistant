@@ -1,6 +1,8 @@
 /**
  * The `Memory` module is what an assistant remembers across chats, in three
- * kinds:
+ * kinds: lasting facts about the user (`profile`), short-lived ones that
+ * expire (`note`), and one line per chat about what happened in it (`log`).
+ * Facts live in scopes the app picks: the user's own, and their team's.
  */
 import * as Tool from "effect/ai/Tool"
 import * as Toolkit from "effect/ai/Toolkit"

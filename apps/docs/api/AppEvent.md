@@ -9,6 +9,7 @@ import { AppEvent } from "effect-assistant"
 The `AppEvent` module registers the app's own events with an assistant: a
 workflow's progress, a webhook, a summary for compaction, the draft the
 user opened. Each is a tagged schema, registered with two choices:
+whether storing it wakes a turn, and how the model reads it (`render`).
 
 ## Other
 

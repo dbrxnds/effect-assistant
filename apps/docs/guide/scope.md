@@ -30,20 +30,21 @@ your app, built from services, tools, instructions, and [loops](./loops).
   cut off by a restart.
 - **Specialists, skills, and blocks.** They change what a turn can do and what
   the log records.
-- **Compaction, if it's added.** It changes how history is rebuilt from the
-  log, so it can't be done well outside it. It isn't built yet.
+- **Compaction.** It changes how history is rebuilt from the log, so it
+  can't be done well outside it. See [memory and long chats](./memory).
+- **Memory across chats.** Facts per user and team, with tools to keep them,
+  read into the turn. See [memory and long chats](./memory).
 
 ## Not in the library
 
-| Feature                | Where it goes                                                                                  |
-| ---------------------- | ---------------------------------------------------------------------------------------------- |
-| Working memory         | A store keyed by chat or user, a tool that updates it, and instructions that read it each turn |
-| Long-term memory, RAG  | A search tool over a store you choose, scoped to the chat's user                               |
-| Evals                  | Tests that drive the client from outside, like a user would                                    |
-| Vector stores          | Your app                                                                                       |
-| Model providers        | `effect/ai` providers, like `@effect/ai-anthropic`                                             |
-| Cost caps, rate limits | A custom loop, or your RPC handler before `submit`                                             |
-| A studio or dashboard  | Your tracing backend                                                                           |
+| Feature                | Where it goes                                                    |
+| ---------------------- | ---------------------------------------------------------------- |
+| RAG, document search   | A search tool over a store you choose, scoped to the chat's user |
+| Evals                  | Tests that drive the client from outside, like a user would      |
+| Vector stores          | Your app                                                         |
+| Model providers        | `effect/ai` providers, like `@effect/ai-anthropic`               |
+| Cost caps, rate limits | A custom loop, or your RPC handler before `submit`               |
+| A studio or dashboard  | Your tracing backend                                             |
 
 When a new feature comes up, check it against the rule first. If it can be
 built from the parts above, write it up as a recipe, not an option.
