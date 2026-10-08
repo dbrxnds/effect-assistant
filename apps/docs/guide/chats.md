@@ -51,7 +51,7 @@ const send = (userId: string, chatId: ChatId.ChatId, input: AssistantEvent.UserI
 ```
 
 Answer "not found" for another user's chat, so it looks like one that
-doesn't exist. Do the same before `subscribeView`.
+doesn't exist. Do the same before `subscribe`.
 
 ## Look up the user in the handler
 

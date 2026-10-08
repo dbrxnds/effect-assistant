@@ -6,9 +6,12 @@ assistant (or one of its specialists) is working. Never the model's output,
 tool calls or results, what the model read, the app's own events, or why a
 turn failed. That's [`ChatView`](/api/ChatView).
 
-The assistant's `subscribeView(chatId)` (`yield* MyAssistant`) streams it as
-[`ChatView.Update`](/api/ChatView#update)s: each one has the messages that
-are new or changed since the last (whole), and the activity now. The client
+The assistant's `subscribe(chatId)` (`yield* MyAssistant`) streams the chat's
+log; pipe it through
+[`ChatView.updates(MyAssistant)`](/api/ChatView#updates) to stream the view
+as [`ChatView.Update`](/api/ChatView#update)s: each one has the messages
+that are new or changed since the last (whole), and the activity now. The
+definition tells the fold which of the app's events wake a turn. The client
 folds them with [`ChatView.apply`](/api/ChatView#apply), from `ChatView.empty`.
 
 ## Over RPC
@@ -44,7 +47,7 @@ const ChatRpcsLive = ChatRpcs.toLayer(
     const assistant = yield* MyAssistant
 
     return ChatRpcs.of({
-      Subscribe: ({ chatId }) => assistant.subscribeView(chatId),
+      Subscribe: ({ chatId }) => assistant.subscribe(chatId).pipe(ChatView.updates(MyAssistant)),
       Submit: ({ chatId, input }) => assistant.submit(chatId, input)
     })
   })
@@ -59,9 +62,19 @@ const view = client("Subscribe", { chatId }).pipe(Stream.scan(() => ChatView.emp
 
 An update that's applied twice changes nothing, so a client that
 resubscribes from the start (after a dropped socket, say) folds again and
-gets the same view. One that keeps its view can pass how far it is,
-`subscribeView(chatId, { after: view.seq })`, and gets only what changed
-since.
+gets the same view. One that keeps its view can pass how far it is, and
+gets only what changed since:
+
+```ts
+const since = (chatId: ChatId.ChatId, after: number) =>
+  MyAssistant.useSync((assistant) => assistant.subscribe(chatId).pipe(ChatView.updates(MyAssistant, { after })))
+```
+
+`after` goes to `ChatView.updates`, not to `subscribe`. A message's view
+depends on what came before it (a block answered later, a decision made
+later), so the fold reads the whole log from the start and only skips
+emitting the updates up to `after`. A `subscribe(chatId, { after })` would
+give it half a log, and the view would be wrong.
 
 `ChatView.View` is a schema too, for an RPC that returns a whole chat at
 once; `ChatView.fromEntries(entries)` makes one from a log on the server.
@@ -98,4 +111,5 @@ whether it's `open`, the user's `answer`, and, for the decision block, its
 The assistant's `subscribe(chatId)` streams the whole log: every event, the
 assistant's own work included. It's for server-side code, tests, and
 debugging. Don't send it to a chat client, and don't filter it for one:
-`subscribeView` is that filter, and it knows the assistant's events.
+`ChatView.updates` is that filter, and the definition tells it the
+assistant's events.

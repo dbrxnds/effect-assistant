@@ -209,7 +209,7 @@ describe("ChatView.apply", () => {
   })
 })
 
-describe("subscribeView", () => {
+describe("updates", () => {
   it.live("folds to the log's view, in JSON over the wire, and after a seq streams only what came since", () =>
     Effect.gen(function* () {
       const model = yield* Scripted.make((request) =>
@@ -225,7 +225,8 @@ describe("subscribeView", () => {
 
         const wire = Schema.toCodecJson(ChatView.Update)
 
-        const folded = yield* (yield* Updating).subscribeView(chat).pipe(
+        const folded = yield* (yield* Updating).subscribe(chat).pipe(
+          ChatView.updates(Updating),
           Stream.map((update) =>
             Schema.decodeUnknownSync(wire)(JSON.parse(JSON.stringify(Schema.encodeSync(wire)(update))))
           ),
@@ -235,7 +236,10 @@ describe("subscribeView", () => {
           Effect.map(Option.getOrThrow)
         )
 
-        const since = yield* (yield* Updating).subscribeView(chat, { after: first.at(-1)!.seq }).pipe(
+        // Data-first, to cover both forms.
+        const since = yield* ChatView.updates((yield* Updating).subscribe(chat), Updating, {
+          after: first.at(-1)!.seq
+        }).pipe(
           Stream.takeUntil((changes) => changes.seq >= log.at(-1)!.seq),
           Stream.runCollect
         )

@@ -12,8 +12,8 @@ and nothing else.
 A `View` holds the chat's messages with their blocks and decisions, the chat's
 `Activity`, and whether the last turn failed or the chat was deleted. It never contains
 the model's output, tool calls or results, what the model read, the app's own events, or why a
-turn failed. The server streams `Update`s with `MyAssistant.subscribeView`, which is built
-on `updates`, and the client folds them with `apply`, starting from `empty`.
+turn failed. The server streams `Update`s by piping the assistant's `subscribe` through
+`updates`, and the client folds them with `apply`, starting from `empty`.
 On the server, `fromEntries` builds a whole view from a chat's log.
 
 ## Constructors
@@ -36,7 +36,7 @@ Returns a chat's view, built from the entries of its log.
 **When to use**
 
 Use it in server-side code, for example to return a whole chat at once. A client gets the view
-from `MyAssistant.subscribeView` instead, which knows the assistant's events.
+as a stream from `updates` instead.
 
 **Example** (Building a chat's view from its log)
 
@@ -196,7 +196,7 @@ interface Options {
  * **When to use**
  *
  * Use it in server-side code, for example to return a whole chat at once. A client gets the view
- * from `MyAssistant.subscribeView` instead, which knows the assistant's events.
+ * as a stream from {@link updates} instead.
  *
  * **Example** (Building a chat's view from its log)
  *
@@ -215,6 +215,355 @@ interface Options {
  * @category constructors
  * @since 0.1.0
  */
+export const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, options?: Options): View => {
+  const fold = folding(options?.wakes ?? new Set())
+
+  for (const entry of entries) fold.step(entry)
+
+  return fold.view
+}
+
+interface Folding {
+  readonly step: (entry: AssistantEvent.AnyEntry) => Update | undefined
+  readonly view: View
+}
+
+const decodeProps = Schema.decodeUnknownOption(Decisions.Props)
+
+const decodeAnswer = Schema.decodeUnknownOption(Decisions.Answer)
+
+const activityOf = (activity: AssistantActivity.State): Activity => ({
+  working: activity.turnSince !== undefined || activity.queued,
+  specialists: [...activity.specialists.values()].map((run) => ({
+    specialist: run.specialist,
+    since: run.since
+  }))
+})
+
+const sameActivity = (a: Activity, b: Activity) =>
+  a.working === b.working &&
+  a.specialists.length === b.specialists.length &&
+  a.specialists.every((run, i) => {
+    const other = b.specialists[i]
+
+    return other !== undefined && run.specialist === other.specialist && run.since === other.since
+  })
+
+const decisionIds = (block: AssistantEvent.MessageBlock): ReadonlyArray<string> =>
+  block.kind === Decisions.kind
+    ? Option.match(decodeProps(block.props), {
+        onNone: () => [],
+        onSome: (props) => props.decisionIds
+      })
+    : []
+
+const folding = (wakes: ReadonlySet<string>): Folding => {
+  let seq = 0
+  let failed = false
+  let deleted = false
+  let activity = AssistantActivity.empty
+  let blocks: ReadonlyMap<string, BlockKit.State> = new Map()
+  let decisions: ReadonlyMap<string, Decisions.State> = new Map()
+  // The messages in order, and the assistant's as stored: their blocks change as the chat goes on.
+  const messages = new Map<string, Message>()
+  const sent = new Map<string, AssistantEvent.AssistantMessage>()
+  // Which messages ask for a decision, so a decision's outcome updates the block that asked for it.
+  const asking = new Map<string, Array<string>>()
+
+  const blockOf = (message: AssistantEvent.AssistantMessage): Block | undefined => {
+    if (message.block === undefined) return undefined
+
+    const state = blocks.get(message.id)
+    const status = state === undefined || state.open ? "open" : state.answer === undefined ? "closed" : "answered"
+    const ids = decisionIds(message.block)
+
+    const shown = ids.flatMap((id) => {
+      const decision = decisions.get(id)
+
+      if (decision === undefined) return []
+
+      const { tool, params } = decision.request.origin
+      const shown = { id: decision.request.id, tool, params }
+
+      return [decision.outcome === undefined ? shown : { ...shown, outcome: decision.outcome }]
+    })
+
+    const block: Block = { kind: message.block.kind, props: toJson(message.block.props), status }
+    const answered = state?.answer === undefined ? block : { ...block, answer: toJson(state.answer.value) }
+
+    return message.block.kind === Decisions.kind ? { ...answered, decisions: shown } : answered
+  }
+
+  const viewOf = (message: AssistantEvent.AssistantMessage, at: number): AssistantMessage => {
+    const block = blockOf(message)
+
+    return block === undefined
+      ? AssistantMessage.make({ id: message.id, text: message.text, at })
+      : AssistantMessage.make({ id: message.id, text: message.text, at, block })
+  }
+
+  const touched = (event: AssistantEvent.AssistantEvent, at: number): ReadonlyArray<string> =>
+    Match.value(event).pipe(
+      Match.tagsExhaustive({
+        UserMessage: (message) => {
+          messages.set(
+            message.id,
+            message.attachments === undefined
+              ? UserMessage.make({ id: message.id, text: message.text, at })
+              : UserMessage.make({
+                  id: message.id,
+                  text: message.text,
+                  attachments: message.attachments,
+                  at
+                })
+          )
+          failed = false
+
+          return [message.id]
+        },
+        AssistantMessage: (message) => {
+          sent.set(message.id, message)
+          messages.set(message.id, viewOf(message, at))
+          failed = false
+
+          if (message.block !== undefined) {
+            for (const id of decisionIds(message.block)) asking.set(id, [...(asking.get(id) ?? []), message.id])
+          }
+
+          return [message.id, ...(message.closes ?? [])]
+        },
+        BlockAnswer: (answer) => {
+          failed = false
+
+          const decided =
+            answer.kind === Decisions.kind
+              ? Option.match(decodeAnswer(answer.value), {
+                  onNone: () => [],
+                  onSome: ({ decisions }) => Object.keys(decisions).flatMap((id) => asking.get(id) ?? [])
+                })
+              : []
+
+          return [answer.messageId, ...decided]
+        },
+        BlocksClosed: (closed) => closed.messageIds,
+        DecisionResolved: (resolved) => asking.get(resolved.id) ?? [],
+        TurnFailed: () => {
+          failed = true
+
+          return []
+        },
+        ModelOutput: () => [],
+        ToolStarted: () => [],
+        ToolResult: () => [],
+        TurnStarted: () => [],
+        TurnCompleted: () => [],
+        SpecialistStarted: () => [],
+        SpecialistFinished: () => [],
+        DecisionRequested: () => [],
+        ChatDeleted: () => {
+          deleted = true
+
+          return []
+        }
+      })
+    )
+
+  const step = (entry: AssistantEvent.AnyEntry): Update | undefined => {
+    const before = { activity: activityOf(activity), failed, deleted }
+    const { event } = entry
+
+    seq = entry.seq
+    activity = AssistantActivity.apply(activity, entry, { wakes })
+
+    if (!AssistantEvent.isLibraryEvent(event)) {
+      const now = activityOf(activity)
+
+      return sameActivity(before.activity, now) ? undefined : { seq, messages: [], activity: now, failed, deleted }
+    }
+
+    blocks = BlockKit.apply(blocks, event)
+    decisions = Decisions.apply(decisions, event)
+
+    const changed = [...new Set(touched(event, entry.at))].flatMap((id) => {
+      const message = sent.get(id)
+      const current = messages.get(id)
+
+      if (message === undefined || current === undefined) return current === undefined ? [] : [current]
+
+      const next = viewOf(message, current.at)
+      messages.set(id, next)
+
+      return [next]
+    })
+
+    const now = activityOf(activity)
+
+    return changed.length === 0 &&
+      failed === before.failed &&
+      deleted === before.deleted &&
+      sameActivity(before.activity, now)
+      ? undefined
+      : { seq, messages: changed, activity: now, failed, deleted }
+  }
+
+  return {
+    step,
+    get view() {
+      return { seq, messages: [...messages.values()], activity: activityOf(activity), failed, deleted }
+    }
+  }
+}
+
+const merge = (updates: ReadonlyArray<Update>): Update | undefined => {
+  const last = updates.at(-1)
+
+  if (last === undefined) return undefined
+
+  const messages = new Map<string, Message>()
+
+  for (const update of updates) for (const message of update.messages) messages.set(message.id, message)
+
+  return {
+    seq: last.seq,
+    messages: [...messages.values()],
+    activity: last.activity,
+    failed: last.failed,
+    deleted: last.deleted
+  }
+}
+
+/**
+ * Represents an assistant's definition as {@link updates} reads it: the app's events it
+ * registered, and whether each one wakes a turn. An assistant made with `Assistant.make` fits it.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface Definition {
+  readonly events: ReadonlyArray<{ readonly tag: string; readonly wakes: boolean }>
+}
+
+/**
+ * Represents the options accepted by {@link updates}.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface UpdatesOptions {
+  /**
+   * The `seq` up to which the client already has the view. The result contains only the updates
+   * after it. Defaults to `0`, every update.
+   */
+  readonly after?: number | undefined
+}
+
+const wakesOf = (definition: Definition): ReadonlySet<string> =>
+  new Set(definition.events.flatMap((event) => (event.wakes ? [event.tag] : [])))
+
+/**
+ * Returns the stream of view updates that a chat's entries produce, for a chat client.
+ *
+ * **Details**
+ *
+ * The entries must stream from the start of the chat's log, as `assistant.subscribe(chatId)` does
+ * without `after`. The fold reads every entry, because a message's view depends on earlier
+ * entries: a block is answered or closed later, and a decision is made later. `after` only skips
+ * emitting the updates up to that `seq`, so a client that has the view up to a `seq` receives only
+ * what changed since. Pass `after` here, not to `subscribe`: a subscription that starts after a
+ * `seq` gives the fold an incomplete log, and the updates it produces are wrong.
+ *
+ * The definition tells the fold which of the app's events wake a turn, so the view shows a turn as
+ * about to start after one. Each chunk of entries becomes one update; the stored entries, for
+ * example, arrive as one chunk.
+ *
+ * **Example** (Streaming a chat's view to a client)
+ *
+ * ```ts
+ * import { Assistant, type ChatId, ChatView } from "effect-assistant"
+ * import * as Stream from "effect/Stream"
+ *
+ * const MyAssistant = Assistant.make("my-assistant")
+ *
+ * const watch = (chatId: ChatId.ChatId, after: number) =>
+ *   Stream.unwrap(
+ *     MyAssistant.useSync((assistant) =>
+ *       assistant.subscribe(chatId).pipe(ChatView.updates(MyAssistant, { after }))
+ *     )
+ *   )
+ * ```
+ *
+ * @see {@link apply} for folding the updates into a view on the client
+ *
+ * @category utils
+ * @since 0.1.0
+ */
+export const updates: {
+  (
+    definition: Definition,
+    options?: UpdatesOptions
+  ): <E, R>(entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>) => Stream.Stream<Update, E, R>
+  <E, R>(
+    entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
+    definition: Definition,
+    options?: UpdatesOptions
+  ): Stream.Stream<Update, E, R>
+} = dual(
+  (args) => Stream.isStream(args[0]),
+  <E, R>(
+    entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
+    definition: Definition,
+    options?: UpdatesOptions
+  ): Stream.Stream<Update, E, R> => {
+    const after = options?.after ?? 0
+    const wakes = wakesOf(definition)
+
+    return entries.pipe(
+      Stream.mapAccumArray(
+        () => folding(wakes),
+        (fold, chunk) => {
+          const changed = chunk.flatMap((entry) => {
+            const update = fold.step(entry)
+
+            return update === undefined || entry.seq <= after ? [] : [update]
+          })
+
+          const merged = merge(changed)
+
+          return [fold, merged === undefined ? [] : [merged]]
+        }
+      )
+    )
+  }
+)
+```
+
+<small>Since 0.1.0</small>
+
+### Definition
+
+Represents an assistant's definition as `updates` reads it: the app's events it
+registered, and whether each one wakes a turn. An assistant made with `Assistant.make` fits it.
+
+```ts
+interface Definition {
+  readonly events: ReadonlyArray<{ readonly tag: string; readonly wakes: boolean }>
+}
+```
+
+<small>Since 0.1.0</small>
+
+### UpdatesOptions
+
+Represents the options accepted by `updates`.
+
+```ts
+interface UpdatesOptions {
+  /**
+   * The `seq` up to which the client already has the view. The result contains only the updates
+   * after it. Defaults to `0`, every update.
+   */
+  readonly after?: number | undefined
+}
 ```
 
 <small>Since 0.1.0</small>
@@ -357,16 +706,22 @@ const isIdle: (view: View) => boolean
 
 ### updates
 
-Returns the stream of updates that a chat's entries produce.
+Returns the stream of view updates that a chat's entries produce, for a chat client.
 
 **Details**
 
-`entries` must stream from the start of the chat's log, as `MyAssistant.subscribe` does. The
-result contains only the updates after `after`, and each chunk of entries becomes one update;
-the stored entries, for example, arrive as one chunk. `MyAssistant.subscribeView` is this
-function applied to the assistant's log.
+The entries must stream from the start of the chat's log, as `assistant.subscribe(chatId)` does
+without `after`. The fold reads every entry, because a message's view depends on earlier
+entries: a block is answered or closed later, and a decision is made later. `after` only skips
+emitting the updates up to that `seq`, so a client that has the view up to a `seq` receives only
+what changed since. Pass `after` here, not to `subscribe`: a subscription that starts after a
+`seq` gives the fold an incomplete log, and the updates it produces are wrong.
 
-**Example** (Folding a chat's log into its view)
+The definition tells the fold which of the app's events wake a turn, so the view shows a turn as
+about to start after one. Each chunk of entries becomes one update; the stored entries, for
+example, arrive as one chunk.
+
+**Example** (Streaming a chat's view to a client)
 
 ```ts
 import { Assistant, type ChatId, ChatView } from "effect-assistant"
@@ -374,21 +729,26 @@ import * as Stream from "effect/Stream"
 
 const MyAssistant = Assistant.make("my-assistant")
 
-const watch = (chatId: ChatId.ChatId) =>
+const watch = (chatId: ChatId.ChatId, after: number) =>
   Stream.unwrap(
     MyAssistant.useSync((assistant) =>
-      ChatView.updates(assistant.subscribe(chatId)).pipe(
-        Stream.scan(() => ChatView.empty, ChatView.apply)
-      )
+      assistant.subscribe(chatId).pipe(ChatView.updates(MyAssistant, { after }))
     )
   )
 ```
 
 ```ts
-const updates: <E, R>(
-  entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
-  options?: Options & { readonly after?: number | undefined }
-) => Stream.Stream<Update, E, R>
+const updates: {
+  (
+    definition: Definition,
+    options?: UpdatesOptions
+  ): <E, R>(entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>) => Stream.Stream<Update, E, R>
+  <E, R>(
+    entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
+    definition: Definition,
+    options?: UpdatesOptions
+  ): Stream.Stream<Update, E, R>
+}
 ```
 
 <small>Since 0.1.0</small>
