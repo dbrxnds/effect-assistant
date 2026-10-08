@@ -6,6 +6,7 @@ import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Predicate from "effect/Predicate"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as SqlClient from "effect/sql/SqlClient"
@@ -24,15 +25,9 @@ export class ChatLog extends Context.Service<
     /** Reads a chat's stored entries, in order: all of them, or those after a `seq`. */
     readonly read: (chatId: ChatId, options?: ReadOptions) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
     /**
-     * Chats whose last entry doesn't end a turn: the ones that may still owe one, after a restart.
+     * Chats whose last entry doesn't end a turn or the chat: the ones that may still owe a turn, after a restart.
      */
     readonly unfinished: Effect.Effect<ReadonlyArray<ChatId>>
-    /** Removes a chat's entries, and remembers it was deleted. Deleting it again does nothing. */
-    readonly delete: (chatId: ChatId) => Effect.Effect<void>
-    /**
-     * Whether the chat was deleted. A chat the engine opens reads this first: a deleted one takes nothing.
-     */
-    readonly isDeleted: (chatId: ChatId) => Effect.Effect<boolean>
   }
 >()("effect-assistant/ChatLog") {}
 
@@ -44,7 +39,8 @@ export interface ReadOptions {
 
 /**
  * The storage a `ChatLog` is built on: read a chat, find its last `seq`,
- * write new entries, find every chat's last entry, and delete a chat.
+ * write new entries, and find every chat's last entry. Entries are never
+ * removed: a deleted chat keeps its log, ending in `ChatDeleted`.
  */
 export interface Storage {
   readonly read: (chatId: ChatId, options?: ReadOptions) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
@@ -52,11 +48,6 @@ export interface Storage {
   readonly write: (chatId: ChatId, entries: ReadonlyArray<AssistantEvent.Entry>) => Effect.Effect<void>
   /** Every chat's last entry. */
   readonly lastEntries: Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
-  /**
-   * Removes the chat's entries and keeps a record that it was deleted, at this time (epoch milliseconds).
-   */
-  readonly delete: (chatId: ChatId, at: number) => Effect.Effect<void>
-  readonly isDeleted: (chatId: ChatId) => Effect.Effect<boolean>
 }
 
 /** Creates a `ChatLog` from a {@link Storage}. */
@@ -80,14 +71,11 @@ export const make = (storage: Storage): ChatLog["Service"] =>
     unfinished: Effect.gen(function* () {
       const last = yield* storage.lastEntries
 
-      return last.flatMap((entry) => (AssistantEvent.isTurnEnd(entry.event) ? [] : [entry.chatId]))
-    }),
-    delete: Effect.fn("ChatLog.delete")(function* (chatId: ChatId) {
-      const at = yield* Clock.currentTimeMillis
-
-      yield* storage.delete(chatId, at)
-    }),
-    isDeleted: storage.isDeleted
+      // A deleted chat owes nothing.
+      return last.flatMap((entry) =>
+        AssistantEvent.isTurnEnd(entry.event) || Predicate.isTagged(entry.event, "ChatDeleted") ? [] : [entry.chatId]
+      )
+    })
   })
 
 /** Layer that keeps every chat in memory. */
@@ -95,7 +83,6 @@ export const layerMemory: Layer.Layer<ChatLog> = Layer.effect(
   ChatLog,
   Effect.gen(function* () {
     const chats = yield* Ref.make(new Map<ChatId, ReadonlyArray<AssistantEvent.Entry>>())
-    const deleted = yield* Ref.make(new Set<ChatId>())
 
     return make({
       read: Effect.fnUntraced(function* (chatId: ChatId, options?: ReadOptions) {
@@ -114,20 +101,6 @@ export const layerMemory: Layer.Layer<ChatLog> = Layer.effect(
         const all = yield* Ref.get(chats)
 
         return [...all.values()].flatMap((entries) => entries.slice(-1))
-      }),
-      delete: Effect.fnUntraced(function* (chatId: ChatId) {
-        yield* Ref.update(deleted, (all) => new Set(all).add(chatId))
-        yield* Ref.update(chats, (all) => {
-          const next = new Map(all)
-          next.delete(chatId)
-
-          return next
-        })
-      }),
-      isDeleted: Effect.fnUntraced(function* (chatId: ChatId) {
-        const all = yield* Ref.get(deleted)
-
-        return all.has(chatId)
       })
     })
   })
@@ -143,27 +116,13 @@ const Row = Schema.Struct({ chat_id: ChatId, seq: SqlNumber, at: SqlNumber, even
 const decodeLastSeq = Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ seq: Schema.NullOr(SqlNumber) })))
 
 /**
- * Where the record that a chat was deleted lives. An app that keeps its chats
- * in a table keeps it there, as a flag on the chat.
- */
-export class DeletedChats extends Context.Service<
-  DeletedChats,
-  {
-    readonly isDeleted: (chatId: ChatId) => Effect.Effect<boolean>
-    /** Records that the chat was deleted, at this time (epoch milliseconds). Doing it again does nothing. */
-    readonly markDeleted: (chatId: ChatId, at: number) => Effect.Effect<void>
-  }
->()("effect-assistant/ChatLog/DeletedChats") {}
-
-/**
  * Layer that stores chats in a SQL table, `chat_log` (`chat_id`, `seq`, `at`,
  * `event`; primary key `chat_id, seq`), which must exist.
  */
-export const layerSql: Layer.Layer<ChatLog, never, SqlClient.SqlClient | DeletedChats> = Layer.effect(
+export const layerSql: Layer.Layer<ChatLog, never, SqlClient.SqlClient> = Layer.effect(
   ChatLog,
   Effect.gen(function* () {
     const sql = (yield* SqlClient.SqlClient).withoutTransforms()
-    const deleted = yield* DeletedChats
 
     const toEntries = Effect.fnUntraced(function* (rows: ReadonlyArray<unknown>) {
       const decoded = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(rows)
@@ -217,16 +176,7 @@ export const layerSql: Layer.Layer<ChatLog, never, SqlClient.SqlClient | Deleted
         `
 
         return yield* toEntries(rows)
-      }).pipe(Effect.orDie),
-      delete: Effect.fnUntraced(
-        function* (chatId: ChatId, at: number) {
-          yield* deleted.markDeleted(chatId, at)
-          yield* sql`DELETE FROM chat_log WHERE chat_id = ${chatId}`
-        },
-        sql.withTransaction,
-        Effect.orDie
-      ),
-      isDeleted: deleted.isDeleted
+      }).pipe(Effect.orDie)
     })
   })
 )

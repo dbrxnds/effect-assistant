@@ -16,10 +16,10 @@ ask for reports.
 - `api/src/Prompts.ts`: the prompts, from Langfuse (label `production`), with defaults in code.
   `pnpm --filter @acme/demo-api prompts:push` uploads the defaults.
 - `api/src/Tools.ts`: order history and status, offices, budgets, and the `research` specialist.
-- `api/src/Campaign.ts`: `start_campaign`, which waits for the user's decision with the campaign
-  and budget as the preview, and the `CreateCampaign` workflow.
-- `api/src/PrintOrders.ts`: `order_products`, which waits for the user's decision with its quote as
-  the preview, and the `PrintOrder` workflow.
+- `api/src/Campaign.ts`: `start_campaign`, which waits for the user's decision, and the
+  `CreateCampaign` workflow.
+- `api/src/PrintOrders.ts`: `quote_order`, which the assistant uses to tell the user the total,
+  `order_products`, which waits for the user's decision, and the `PrintOrder` workflow.
 - `api/src/WorkflowStep.ts`: a workflow's step, one of Acme's own events: it wakes a turn, and the
   model reads it as a `<workflow>` update.
 - `api/src/Steps.ts`: what the workflows share: reporting a step to the chat, and durable waits at

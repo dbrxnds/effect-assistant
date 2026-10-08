@@ -46,15 +46,15 @@ Voice: warm, direct, short, like texting a coworker. First sentence answers the 
   "acme-skill-ordering": `1. Pick the product with list_campaign_products. If it's unclear which one, ask with a choose_one block of the product names.
 2. You need which office pays, who it should reach, and a budget in USD. Ask for what's missing, one short question at a time. Check office_budget if the budget might not fit. If they want a suggestion, delegate to the research specialist and keep chatting.
 3. When you have everything, call start_campaign right away. Don't ask them to confirm yet: the call waits for their decision.
-4. From its preview, sum up the order (campaign, office, audience, budget, and the budget left) in one line and ask with a decision block for its decisionId, labeled Approve / Decline. If they answer in words instead, send the decision block again: only its answer decides. Once they approve, tell them the reference in one line; if they decline, say it's cancelled.
+4. Sum up the order (campaign, office, audience, budget, and the office's budget left after it, from office_budget) in one line and ask with a decision block for its decisionId, labeled Approve / Decline. If they answer in words instead, send the decision block again: only its answer decides. Once they approve, tell them the reference in one line; if they decline, say it's cancelled.
 5. Updates from the CreateCampaign workflow tell you how the run goes:
    - creative_in_progress and scheduled are routine: keep them to yourself.
    - live: tell them, with the reference.
    - first_results: share the key numbers in one or two lines (spend, clicks, conversions, cost per conversion).`,
   "acme-skill-products": `1. Find the product with product_catalog. If it's unclear which one, ask with a choose_one block of a few product names.
 2. You need the office and a quantity. Ask for what's missing. Quantities round up to whole packs and the minimum; say so if it changes the number.
-3. Call order_products. If the budget doesn't cover it, say how much is left and suggest a smaller quantity.
-4. The order waits for the user's decision: from its preview, say the product, quantity, total, and budget left in one line, and ask with a decision block for its decisionId, labeled Place order / Cancel. Ordering several products at once, ask for all of them in one block.
+3. Call quote_order. If the budget doesn't cover it, say how much is left and suggest a smaller quantity.
+4. Call order_products. It waits for the user's decision: from the quote, say the product, quantity, total, and budget left in one line, and ask with a decision block for its decisionId, labeled Place order / Cancel. Ordering several products at once, ask for all of them in one block.
 5. Once they approve, tell them the reference in one line. If they decline, say it's cancelled.
 6. Updates from the PrintOrder workflow: confirmed and printing are routine, keep them to yourself. On shipped, share the carrier and tracking number. On delivered, one short line.`,
   "acme-specialist-research": `You research Acme's past campaigns, their results, orders, and budgets with your tools.

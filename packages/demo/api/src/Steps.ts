@@ -72,7 +72,7 @@ export const report = (step: Step) =>
         status: step.status,
         details: step.details
       })
-    )
+    ).pipe(Effect.catchTag("ChatUnavailable", () => Effect.void))
   })
 
 /**

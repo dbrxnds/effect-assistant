@@ -175,8 +175,7 @@ The user is asked to decide something: approve or decline.
 ```ts
 class DecisionRequested extends Schema.TaggedClass<DecisionRequested>()("DecisionRequested", {
   id: DecisionId,
-  origin: CallOrigin,
-  preview: Schema.Json
+  origin: CallOrigin
 })
 ```
 
@@ -453,6 +452,17 @@ class SpecialistStarted extends Schema.TaggedClass<SpecialistStarted>()("Special
   /** The goal it's working on. */
   goal: Schema.String
 })
+```
+
+<small>Since 0.1.0</small>
+
+### ChatDeleted
+
+The chat was deleted: it stores nothing after this, what worked in it
+stopped, and its subscribers' streams end here. Its log stays.
+
+```ts
+class ChatDeleted extends Schema.TaggedClass<ChatDeleted>()("ChatDeleted",
 ```
 
 <small>Since 0.1.0</small>

@@ -74,13 +74,16 @@ once; `ChatView.fromEntries(entries)` makes one from a log on the server.
   with `at` (epoch milliseconds). An assistant's message has its `block`,
   if it has one: its `kind` and `props`, its `status` (`"open"`,
   `"answered"`, or `"closed"`), the user's `answer`, and for a decision
-  block its `decisions`, each with its `preview` and `outcome`.
+  block its `decisions`, each with its call (`tool` and `params`) and
+  `outcome`.
 - **`activity`**: `working` while a turn runs, or is about to start for
   something that arrived; `specialists`, the ones working (which, since
   when). `ChatView.isIdle(view)` is neither. A workflow waiting on a timer
   isn't working.
 - **`failed`**: the last turn failed, and no message came after. Show
   something generic; the server's log says why.
+- **`deleted`**: the chat was deleted. Nothing more arrives, and the stream
+  ends.
 
 The demo's web app (`apps/web/src/lib/ChatState.ts`) keeps nothing else:
 the view, and the messages the tab sent that the server hasn't echoed yet.

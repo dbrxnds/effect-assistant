@@ -3,6 +3,7 @@
  * handler, recording what its loop does, and how the turn ends.
  */
 import type * as LanguageModel from "effect/ai/LanguageModel"
+import type * as Tool from "effect/ai/Tool"
 import type * as Prompt from "effect/ai/Prompt"
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
@@ -17,11 +18,14 @@ import * as Stream from "effect/Stream"
 import type * as Assistant from "../Assistant.ts"
 import type { AssistantChat } from "../AssistantChat.ts"
 import * as AssistantEvent from "../AssistantEvent.ts"
-import * as AssistantLoop from "../AssistantLoop.ts"
+import type * as AssistantLoop from "../AssistantLoop.ts"
+import * as Loop from "./loop.ts"
 import type * as BlockKit from "../BlockKit.ts"
 import * as Decision from "../Decision.ts"
 import * as Instructions from "../Instructions.ts"
 import * as Skill from "../Skill.ts"
+import * as Discovery from "./discovery.ts"
+import * as Skills from "./skills.ts"
 import type * as Specialist from "../Specialist.ts"
 import * as Decisions from "./decisions.ts"
 import * as AppEvents from "./events.ts"
@@ -79,7 +83,7 @@ export interface Registration {
     readonly built: Specialist.Built
   }>
   /** The assistant's own tools: `send_user_message`, `wait`, and the specialist tools. */
-  readonly builtins: AssistantLoop.Tools<Assistant.TurnServices>
+  readonly builtins: Toolkits.Tools<Assistant.TurnServices>
 }
 
 /**
@@ -260,7 +264,8 @@ const failTurn = Effect.fnUntraced(function* (chat: AssistantChat["Service"], ca
 const makeTurnApi = (
   registration: Registration,
   chat: AssistantChat["Service"],
-  startSeq: number
+  startSeq: number,
+  checkOpen: Effect.Effect<void>
 ): Assistant.Turn<any> => {
   const { definition, builtins } = registration
   const { app } = definition
@@ -270,7 +275,10 @@ const makeTurnApi = (
   })
 
   // With how far into the chat it goes: the step records it on the model's output.
+  // Read before every model call: a chat the app deleted meanwhile stops here.
   const history = Effect.fnUntraced(function* (view: Assistant.HistoryView<any> = identity) {
+    yield* checkOpen
+
     const all = yield* chat.entries
 
     const read: AssistantLoop.ChatHistory = {
@@ -291,7 +299,7 @@ const makeTurnApi = (
    */
   const replyPass = <R>(options: {
     readonly instructions: Instructions.Resolved
-    readonly toolkit: AssistantLoop.Tools<R>
+    readonly toolkit: Toolkits.Tools<R>
     readonly view: Assistant.HistoryView<any>
     readonly nudge: string | undefined
   }) =>
@@ -310,7 +318,7 @@ const makeTurnApi = (
 
         const nudge = undelivered ? deliveryNudge : (options.nudge ?? defaultReplyNudge)
 
-        return AssistantLoop.run({
+        return Loop.run({
           instructions: options.instructions,
           // A reply that's owed can only be sent; a result it may have given may also be for nobody.
           toolkit: Toolkits.runOnly(
@@ -319,6 +327,8 @@ const makeTurnApi = (
             "Not now: reply to the user with send_user_message."
           ),
           history: Effect.gen(function* () {
+            yield* checkOpen
+
             const entries = yield* chat.entries
 
             return {
@@ -348,12 +358,20 @@ const makeTurnApi = (
   })
 
   // What the loop sends for these options: its system prompt, its tools, and which entries it reads.
-  const prepare = <RT, RS>(options: Assistant.LoopOptions<RT, RS, any>) => {
+  const prepare = <T extends Record<string, Tool.Any>, RS, C extends Record<string, Tool.Any>>(
+    options: Assistant.LoopOptions<T, RS, any, C>
+  ) => {
     const skills = options.skills ?? []
 
     return {
       system: mapText(instructions(options.instructions), (text) => Skill.withCatalog(text, skills)),
-      toolkit: Toolkits.merge(Toolkits.merge(builtins, Skill.toTools(skills)), options.toolkit ?? Toolkits.empty),
+      toolkit: Toolkits.merge(
+        Toolkits.merge(builtins, Skills.toTools(skills)),
+        Toolkits.merge(
+          Toolkits.fromToolkitOrEmpty(options.toolkit),
+          Toolkits.catalogOf(options.catalog, Discovery.make)
+        )
+      ),
       view: options.history ?? identity
     }
   }
@@ -363,7 +381,6 @@ const makeTurnApi = (
     history,
     entries,
     append,
-    tools: builtins,
     instructions,
     replyIfOwed,
     loop: (options) => {
@@ -381,7 +398,7 @@ const makeTurnApi = (
             ? Stream.die(
                 `${deciding.map((tool) => tool.name).join(", ")} can wait for the user's decision: add Decision.block to the assistant's blocks.`
               )
-            : AssistantLoop.run({
+            : Loop.run({
                 instructions: system,
                 toolkit,
                 history: history(view),
@@ -404,6 +421,8 @@ export const run = Effect.fnUntraced(
     readonly chat: AssistantChat["Service"]
     /** What a turn provides to its handler's stream. */
     readonly services: Context.Context<Assistant.TurnServices | LanguageModel.LanguageModel>
+    /** Whether the app still has the chat: one it deleted is deleted, and the turn stops. */
+    readonly checkOpen: Effect.Effect<void>
   }) {
     const { chat } = options
     const before = yield* chat.entries
@@ -423,13 +442,18 @@ export const run = Effect.fnUntraced(
     ])
 
     const startSeq = lastSeq(started, 0)
-    const turn = makeTurnApi(options.registration, chat, startSeq)
+    const turn = makeTurnApi(options.registration, chat, startSeq, options.checkOpen)
 
     const record = (event: AssistantLoop.Event) => chat.append([event])
 
     yield* options.handler(turn).pipe(
       Stream.runForEach(record),
       Effect.onExit((exit) => (Exit.hasInterrupts(exit) ? Effect.void : closeOpenCalls(chat, startSeq))),
+      // A loop the app writes gets the assistant's own tools too, with this turn's services.
+      Effect.provideService(
+        Loop.TurnTools,
+        Option.some(Toolkits.provide(options.registration.builtins, options.services))
+      ),
       Effect.provideContext(options.services),
       Effect.matchCauseEffect({
         onSuccess: Effect.fnUntraced(function* () {

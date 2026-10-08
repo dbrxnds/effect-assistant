@@ -17,14 +17,12 @@ import {
   AssistantActivity,
   AssistantEngine,
   AssistantEvent,
-  AssistantLoop,
   Block,
   BlockKit,
   ChatLog,
   Instructions,
   Skill,
   Specialist,
-  ToolDiscovery,
   ToolFailure
 } from "../src/index.ts"
 import { toJsonText } from "../src/internal/schema.ts"
@@ -46,7 +44,10 @@ import {
   toolsRun,
   traceEntries,
   turnsDone,
-  viewedMessages
+  viewedMessages,
+  withCatalog,
+  withHandlers,
+  withTools
 } from "./utils/fixtures.ts"
 import * as Scripted from "./utils/scripted.ts"
 
@@ -116,7 +117,7 @@ describe("a turn", () => {
         success: Schema.Struct({ orderId: Schema.String, status: Schema.String })
       })
 
-      const lookup = AssistantLoop.fromToolkit(Toolkit.make(LookupOrder), {
+      const lookup = withHandlers(Toolkit.make(LookupOrder), {
         lookup_order: ({ orderId }) => Effect.sleep("1 second").pipe(Effect.as({ orderId, status: "shipped" }))
       })
 
@@ -142,7 +143,7 @@ describe("a turn", () => {
         yield* TestAssistant.submit(chat, say("Also, what's 12 times 12?"))
 
         return yield* collectUntil(TestAssistant, chat, (es) => text(es).includes("144") && idle(es))
-      }).pipe(Effect.provide(memoryAssistant(simple({ instructions, toolkit: lookup }), Scripted.layer(script))))
+      }).pipe(Effect.provide(memoryAssistant(withTools({ instructions, toolkit: lookup }), Scripted.layer(script))))
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
       // One turn read both messages.
@@ -236,14 +237,16 @@ describe("specialist runs", () => {
     success: Schema.Struct({ query: Schema.String, results: Schema.Array(Schema.String) })
   })
 
-  const archive = AssistantLoop.fromToolkit(Toolkit.make(SearchArchive), {
+  const archive = withHandlers(Toolkit.make(SearchArchive), {
     search_archive: ({ query }) =>
       Effect.sleep("1 second").pipe(Effect.as({ query, results: ["2024: Lisbon", "2025: Porto"] }))
   })
 
   const Archivist = Specialist.make("archivist", { description: "Looks things up in the archive." })
 
-  const ArchivistLive = Archivist.toLayer((run) => run.loop({ instructions: "Search, then answer.", toolkit: archive }))
+  const ArchivistLive = Archivist.toLayer((run) =>
+    run.loop({ instructions: "Search, then answer.", toolkit: archive.toolkit })
+  ).pipe(Layer.provide(archive.toolkit.toLayer(archive.handlers)))
 
   const ArchiveAssistant = Assistant.make("archive-test", { specialists: [Archivist] })
 
@@ -617,7 +620,7 @@ describe("tools found on demand, and skills", () => {
     success: Schema.String
   })
 
-  const officeTools = AssistantLoop.fromToolkit(Toolkit.make(Parking, Invoices), {
+  const officeTools = withHandlers(Toolkit.make(Parking, Invoices), {
     parking_availability: ({ office }) => Effect.succeed({ office, freeSpots: 37 }),
     invoice_lookup: () => Effect.succeed("not relevant")
   })
@@ -650,9 +653,7 @@ describe("tools found on demand, and skills", () => {
 
         return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
       }).pipe(
-        Effect.provide(
-          memoryAssistant(simple({ instructions, toolkit: ToolDiscovery.make(officeTools) }), Scripted.layer(script))
-        )
+        Effect.provide(memoryAssistant(withCatalog({ instructions, catalog: officeTools }), Scripted.layer(script)))
       )
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
@@ -669,7 +670,7 @@ describe("tools found on demand, and skills", () => {
         failure: ToolFailure.ToolFailure
       })
 
-      const broken = AssistantLoop.fromToolkit(Toolkit.make(BrokenPrinter), {
+      const broken = withHandlers(Toolkit.make(BrokenPrinter), {
         broken_printer: () => ToolFailure.fail("Out of paper.")
       })
 
@@ -684,9 +685,7 @@ describe("tools found on demand, and skills", () => {
         yield* TestAssistant.submit(chat, say("Print it."))
 
         return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
-      }).pipe(
-        Effect.provide(memoryAssistant(simple({ instructions, toolkit: ToolDiscovery.make(broken) }), model.layer))
-      )
+      }).pipe(Effect.provide(memoryAssistant(withCatalog({ instructions, catalog: broken }), model.layer)))
 
       // The model got another step to read the failure, stored as the tool's.
       expect(yield* model.requests).toHaveLength(2)

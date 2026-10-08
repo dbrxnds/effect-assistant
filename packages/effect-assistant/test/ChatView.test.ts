@@ -40,9 +40,8 @@ const request = AssistantEvent.DecisionRequested.make({
   origin: AssistantEvent.CallOrigin.make({
     callId: "toolu_quote",
     tool: "quote_order",
-    params: { secret: "internal" }
-  }),
-  preview: { total: 1200 }
+    params: { sku: "tote", quantity: 300 }
+  })
 })
 
 const ask = AssistantEvent.AssistantMessage.make({
@@ -75,7 +74,7 @@ const deciding = [
 ]
 
 describe("ChatView.fromEntries", () => {
-  it("has the messages and their blocks, with a decision's preview and outcome, and nothing internal", () => {
+  it("has the messages and their blocks, with a decision's call and outcome, and nothing internal", () => {
     const shown = view(deciding)
 
     expect(shown.messages).toEqual([
@@ -89,14 +88,16 @@ describe("ChatView.fromEntries", () => {
           props: { decisionIds: [request.id] },
           status: "answered",
           answer: { decisions: { [request.id]: "approved" } },
-          decisions: [{ id: request.id, preview: { total: 1200 }, outcome: "approved" }]
+          decisions: [
+            { id: request.id, tool: "quote_order", params: { sku: "tote", quantity: 300 }, outcome: "approved" }
+          ]
         }
       })
     ])
 
     const json = JSON.stringify(Schema.encodeSync(ChatView.View)(shown))
 
-    for (const internal of ["toolu_quote", "quote_order", "secret", "ModelOutput", "TurnStarted"]) {
+    for (const internal of ["toolu_quote", "ModelOutput", "TurnStarted"]) {
       expect(json).not.toContain(internal)
     }
   })
@@ -156,6 +157,18 @@ describe("ChatView.fromEntries", () => {
     expect(woken.activity.working).toBe(true)
     expect(woken.messages).toEqual([])
   })
+
+  it("says when the chat was deleted, and that nothing works in it any more, even mid-turn", () => {
+    const shown = view([
+      hi,
+      AssistantEvent.TurnStarted.make({ assistant: "test" }),
+      AssistantEvent.ChatDeleted.make({})
+    ])
+
+    expect(shown.deleted).toBe(true)
+    expect(ChatView.isIdle(shown)).toBe(true)
+    expect(shown.messages.map((message) => message.id)).toEqual([hi.id])
+  })
 })
 
 describe("ChatView.apply", () => {
@@ -167,7 +180,8 @@ describe("ChatView.apply", () => {
         ChatView.AssistantMessage.make({ id: "m1", text: "Pick", at: 2 })
       ],
       activity: { working: true, specialists: [] },
-      failed: false
+      failed: false,
+      deleted: false
     }
 
     const second: ChatView.Update = {
@@ -182,7 +196,8 @@ describe("ChatView.apply", () => {
         ChatView.AssistantMessage.make({ id: "m2", text: "Done", at: 5 })
       ],
       activity: { working: false, specialists: [] },
-      failed: false
+      failed: false,
+      deleted: false
     }
 
     const once = [first, second].reduce(ChatView.apply, ChatView.empty)

@@ -22,15 +22,10 @@ const Research = Specialist.make("research", {
   description: "Researches past campaigns and orders. Give it the question and any context."
 })
 
-const ResearchLive = Research.toLayer(
-  Effect.gen(function* () {
-    const toolkit = AssistantLoop.fromToolkit(yield* ResearchTools) // a native toolkit
-
-    return (run) =>
-      run.loop({
-        instructions: "Answer with the findings and numbers the colleague needs, in a few short lines.",
-        toolkit
-      })
+const ResearchLive = Research.toLayer((run) =>
+  run.loop({
+    instructions: "Answer with the findings and numbers the colleague needs, in a few short lines.",
+    toolkit: ResearchTools // a native toolkit
   })
 ).pipe(Layer.provide(ResearchToolsLive))
 
@@ -116,13 +111,13 @@ const AnalystLive = Analyst.toLayer(
 
           return run.loop({
             instructions: "Write the report the colleague asked for, with the numbers.",
-            toolkit: AssistantLoop.fromToolkit(Toolkit.make(SpendReport), { spend_report: spendReport }),
+            toolkit: SpendTools, // Toolkit.make(SpendReport), its handlers' layer provided below
             maxSteps: 12 // model calls per brief; default 8
           })
         })
       )
   })
-).pipe(Layer.provide(AnthropicLanguageModel.model("claude-haiku-4-5"))) // a model of its own
+).pipe(Layer.provide([SpendToolsLive, AnthropicLanguageModel.model("claude-haiku-4-5")])) // a model of its own
 ```
 
 - `run.loop` takes `instructions`, `toolkit`, `skills` (its own

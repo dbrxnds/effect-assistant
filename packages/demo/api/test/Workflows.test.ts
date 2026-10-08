@@ -148,7 +148,7 @@ describe("PrintOrder", () => {
     })
   )
 
-  it.live("goes on quietly when its chat is deleted: the chat takes none of its steps", () =>
+  it.live("goes on quietly when its chat is deleted: the chat takes none of its steps after that", () =>
     Effect.gen(function* () {
       yield* Effect.gen(function* () {
         const chatId = yield* ChatId.make
@@ -191,7 +191,12 @@ describe("PrintOrder", () => {
           Effect.timeout("10 seconds")
         )
 
-        expect(yield* stepsOf(chatId)).toEqual([])
+        // The log stays, and nothing is stored after the delete.
+        const log = yield* ChatLog.ChatLog.use((log) => log.read(chatId))
+        const deletedAt = log.findIndex(({ event }) => Predicate.isTagged(event, "ChatDeleted"))
+
+        expect(deletedAt).toBeGreaterThan(-1)
+        expect(log.slice(deletedAt + 1)).toEqual([])
       }).pipe(Effect.provide(layer))
     })
   )

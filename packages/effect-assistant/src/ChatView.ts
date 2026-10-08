@@ -15,12 +15,14 @@ import { InputId } from "./InputId.ts"
 import { toJson } from "./internal/schema.ts"
 
 /**
- * Schema for a decision as the user sees it on a decision block: what they
- * decide on (the preview), and how they decided, once they did.
+ * Schema for a decision as the user sees it on a decision block: the call
+ * it's for (its tool and params, which the app shows as it likes), and how
+ * they decided, once they did.
  */
 export const Decision = Schema.Struct({
   id: DecisionId,
-  preview: Schema.Json,
+  tool: Schema.String,
+  params: Schema.Json,
   outcome: Schema.optional(AssistantEvent.DecisionOutcome)
 })
 
@@ -115,15 +117,17 @@ export type Activity = typeof Activity.Type
 
 /**
  * Schema for a chat as its user sees it: its messages, what works in it,
- * and whether the last turn failed. `seq` is how far into the chat's log it
- * is.
+ * whether the last turn failed, and whether the chat was deleted. `seq` is
+ * how far into the chat's log it is.
  */
 export const View = Schema.Struct({
   seq: Schema.Int,
   messages: Schema.Array(Message),
   activity: Activity,
   /** The last turn failed, and no message came after. */
-  failed: Schema.Boolean
+  failed: Schema.Boolean,
+  /** The chat was deleted: it takes nothing more, and its stream ends. */
+  deleted: Schema.Boolean
 })
 
 /** A chat as its user sees it. */
@@ -132,14 +136,15 @@ export type View = typeof View.Type
 /**
  * Schema for a change to a chat's view: the messages that are new or
  * changed (a block answered or closed, a decision decided), whole, and what
- * works in the chat and whether the last turn failed, now. `seq` is how far
- * into the log it is.
+ * works in the chat, whether the last turn failed, and whether the chat was
+ * deleted, now. `seq` is how far into the log it is.
  */
 export const Update = Schema.Struct({
   seq: Schema.Int,
   messages: Schema.Array(Message),
   activity: Activity,
-  failed: Schema.Boolean
+  failed: Schema.Boolean,
+  deleted: Schema.Boolean
 })
 
 /** A change to a chat's view. */
@@ -150,7 +155,8 @@ export const empty: View = {
   seq: 0,
   messages: [],
   activity: { working: false, specialists: [] },
-  failed: false
+  failed: false,
+  deleted: false
 }
 
 /**
@@ -168,7 +174,8 @@ export const apply = (view: View, update: Update): View => {
       ...update.messages.filter((message) => !known.has(message.id))
     ],
     activity: update.activity,
-    failed: update.failed
+    failed: update.failed,
+    deleted: update.deleted
   }
 }
 
@@ -238,6 +245,7 @@ const decisionIds = (block: AssistantEvent.MessageBlock): ReadonlyArray<string> 
 const folding = (wakes: ReadonlySet<string>): Folding => {
   let seq = 0
   let failed = false
+  let deleted = false
   let activity = AssistantActivity.empty
   let blocks: ReadonlyMap<string, BlockKit.BlockState> = new Map()
   let decisions: ReadonlyMap<string, Decisions.State> = new Map()
@@ -257,17 +265,12 @@ const folding = (wakes: ReadonlySet<string>): Folding => {
     const shown = ids.flatMap((id) => {
       const decision = decisions.get(id)
 
-      return decision === undefined
-        ? []
-        : [
-            decision.outcome === undefined
-              ? { id: decision.request.id, preview: decision.request.preview }
-              : {
-                  id: decision.request.id,
-                  preview: decision.request.preview,
-                  outcome: decision.outcome
-                }
-          ]
+      if (decision === undefined) return []
+
+      const { tool, params } = decision.request.origin
+      const shown = { id: decision.request.id, tool, params }
+
+      return [decision.outcome === undefined ? shown : { ...shown, outcome: decision.outcome }]
     })
 
     const block: Block = { kind: message.block.kind, props: toJson(message.block.props), status }
@@ -342,12 +345,17 @@ const folding = (wakes: ReadonlySet<string>): Folding => {
         TurnCompleted: () => [],
         SpecialistStarted: () => [],
         SpecialistFinished: () => [],
-        DecisionRequested: () => []
+        DecisionRequested: () => [],
+        ChatDeleted: () => {
+          deleted = true
+
+          return []
+        }
       })
     )
 
   const step = (entry: AssistantEvent.AnyEntry): Update | undefined => {
-    const before = { activity: activityOf(activity), failed }
+    const before = { activity: activityOf(activity), failed, deleted }
     const { event } = entry
 
     seq = entry.seq
@@ -356,7 +364,7 @@ const folding = (wakes: ReadonlySet<string>): Folding => {
     if (!AssistantEvent.isLibraryEvent(event)) {
       const now = activityOf(activity)
 
-      return sameActivity(before.activity, now) ? undefined : { seq, messages: [], activity: now, failed }
+      return sameActivity(before.activity, now) ? undefined : { seq, messages: [], activity: now, failed, deleted }
     }
 
     blocks = BlockKit.nextBlockStates(blocks, event)
@@ -376,15 +384,18 @@ const folding = (wakes: ReadonlySet<string>): Folding => {
 
     const now = activityOf(activity)
 
-    return changed.length === 0 && failed === before.failed && sameActivity(before.activity, now)
+    return changed.length === 0 &&
+      failed === before.failed &&
+      deleted === before.deleted &&
+      sameActivity(before.activity, now)
       ? undefined
-      : { seq, messages: changed, activity: now, failed }
+      : { seq, messages: changed, activity: now, failed, deleted }
   }
 
   return {
     step,
     get view() {
-      return { seq, messages: [...messages.values()], activity: activityOf(activity), failed }
+      return { seq, messages: [...messages.values()], activity: activityOf(activity), failed, deleted }
     }
   }
 }
@@ -405,7 +416,8 @@ const merge = (updates: ReadonlyArray<Update>): Update | undefined => {
     seq: last.seq,
     messages: [...messages.values()],
     activity: last.activity,
-    failed: last.failed
+    failed: last.failed,
+    deleted: last.deleted
   }
 }
 

@@ -91,7 +91,9 @@ const Greet = Tool.make("greet", {
 
 const greet = () => CurrentUser.useSync((user) => `hi ${user.name}`)
 
-const toolkit = AssistantLoop.fromToolkit(Toolkit.make(Greet), { greet })
+const UserTools = Toolkit.make(Greet)
+
+const UserToolsLive = UserTools.toLayer({ greet })
 
 const MyAssistantLive = MyAssistant.toLayer(
   Effect.gen(function* () {
@@ -100,11 +102,13 @@ const MyAssistantLive = MyAssistant.toLayer(
     return (turn) =>
       Stream.unwrap(
         Effect.map(users.forChat(turn.chatId), (user) =>
-          turn.loop({ instructions: `You help ${user.name}.`, toolkit }).pipe(Stream.provideService(CurrentUser, user))
+          turn
+            .loop({ instructions: `You help ${user.name}.`, toolkit: UserTools })
+            .pipe(Stream.provideService(CurrentUser, user))
         )
       )
   })
-)
+).pipe(Layer.provide(UserToolsLive))
 ```
 
 This works for every turn, however it started: a user's message, a
@@ -135,23 +139,19 @@ const MyAssistantLive = MyAssistant.toLayer(
     return (turn) =>
       Stream.unwrap(
         Effect.map(users.forChat(turn.chatId), (user) =>
-          turn
-            .loop({
-              instructions,
-              toolkit: user.admin
-                ? AssistantLoop.fromToolkit(Toolkit.make(AdminReport, Greet), { admin_report: adminReport, greet })
-                : AssistantLoop.fromToolkit(Toolkit.make(Greet), { greet })
-            })
-            .pipe(Stream.provideService(CurrentUser, user))
+          (user.admin
+            ? turn.loop({ instructions, toolkit: AdminTools }) // Toolkit.make(AdminReport, Greet)
+            : turn.loop({ instructions, toolkit: UserTools })
+          ).pipe(Stream.provideService(CurrentUser, user))
         )
       )
   })
-)
+).pipe(Layer.provide(AdminToolsLive)) // both toolkits' handlers: admin_report and greet
 ```
 
 The model only sees the tools the turn got, so it can't call one the user
-may not use. Tools found on demand work the same way: build
-`ToolDiscovery.make(...)` over the tools the user may use. Still check
+may not use. A [catalog](./tools#many-tools-a-catalog) works the same
+way: pass the one for the tools the user may use. Still check
 permissions in the tool, or in the service it calls, if that's where the
 rest of your app enforces them.
 
@@ -164,7 +164,6 @@ handler does the same lookup from `run.chatId`:
 const ResearchLive = Research.toLayer(
   Effect.gen(function* () {
     const users = yield* ChatUsers
-    const toolkit = AssistantLoop.fromToolkit(yield* OrderTools)
 
     return (run) =>
       Stream.unwrap(
@@ -172,7 +171,7 @@ const ResearchLive = Research.toLayer(
           run
             .loop({
               instructions: "Answer with the findings and numbers the colleague needs, in a few short lines.",
-              toolkit
+              toolkit: OrderTools
             })
             .pipe(Stream.provideService(CurrentUser, user))
         )
@@ -190,10 +189,24 @@ the assistant's [events](./app-events). It doesn't carry the user: the
 handler looks the user up from the chat, as for any turn. See
 [whom an event acts for](./app-events#whom-an-event-acts-for).
 
+## Which chats exist
+
+Provide `Chats`, and the assistant asks your app whether a chat exists:
+`get(chatId)` returns the chat, or fails with `ChatUnavailable` and a
+`reason`, `"NotFound"` or `"Deleted"`. When a chat is created is yours to
+decide: up front (and `get` fails for one you don't know), or on its first
+message (and `get` creates it). Without `Chats`, every chat exists from
+its first input.
+
+The assistant asks before `submit` sends (so `submit` fails with
+`ChatUnavailable`, which your server can turn into a 404), when the chat
+stores an input, and before every model call. Provide it where you provide
+the log, so the engine and your server see the same one.
+
 ## Deleting a chat
 
-When the user deletes a chat, delete it from your table and from the
-assistant:
+When the user deletes a chat, mark it deleted in your table, then delete it
+from the assistant:
 
 ```ts
 const deleteChat = (userId: string, chatId: ChatId.ChatId) =>
@@ -202,24 +215,29 @@ const deleteChat = (userId: string, chatId: ChatId.ChatId) =>
 
     if (chat?.ownerId !== userId) return yield* Effect.fail("not_found" as const)
 
-    yield* chats.remove(chatId)
+    yield* chats.markDeleted(chatId)
     yield* MyAssistant.delete(chatId)
   })
 ```
 
 `MyAssistant.delete` goes through the engine to the chat, which:
 
-- removes its log (`ChatLog.delete`), and remembers it was deleted;
+- appends a `ChatDeleted` to its log, which stays;
 - stops what works in it: a turn, specialist runs, what the handler's build
   set up;
-- ends its subscribers' streams.
+- ends its subscribers' streams after they get the `ChatDeleted`, and a
+  client's view says `deleted: true`.
 
-After that the chat stores nothing, also after a restart: a later `submit`,
-a specialist's report, or a workflow's event for it is dropped, quietly (no
-failure, no turn). Work that reports into it, like a workflow, goes on and
+After that the chat stores nothing, also after a restart: a later input, a
+specialist's report, or a workflow's event for it is dropped, quietly (no
+turn). Work that reports into it, like a workflow, goes on and
 ends as it would; what it reports does nothing. Deleting a chat again does
 nothing.
 
-Your own records about the chat (orders it placed, say) are yours to
-delete. The demo deletes a thread's orders with it
+If your app marks a chat deleted and never calls `delete`, the assistant
+finds out from [`Chats`](#which-chats-exist) the next time it asks, and
+deletes it the same way.
+
+The log stays: removing old logs is yours, like your own records about the
+chat (orders it placed, say). The demo deletes a thread's orders with it
 (`packages/demo/api/src/Server.ts`).

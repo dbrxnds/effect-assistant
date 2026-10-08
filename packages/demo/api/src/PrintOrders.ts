@@ -1,9 +1,10 @@
 /**
  * Ordering branded products for an office.
  *
+ * `quote_order` says what an order comes to (the product, units, total, and
+ * the budget left after it), for the assistant to tell the user.
  * `order_products` needs the user's decision: when the model calls it, the
- * call waits, and the user sees its quote (the product, units, total, and
- * the budget left after it). Their yes runs it: it checks the budget again
+ * call waits, and the user approves it. Their yes runs it: it checks the budget again
  * and starts the `PrintOrder` workflow, which reports each stage as a `WorkflowStep`
  * from `workflow:PrintOrder`: `confirmed`, `printing`, `shipped` (with a
  * tracking number), and `delivered`. The assistant decides which ones the
@@ -138,7 +139,7 @@ const OrderInput = Schema.Struct({
 })
 
 /**
- * What an order comes to: what the user approves, and what the order checks
+ * What an order comes to: what the user is told, and what the order checks
  * again when it runs. Fails for an unknown office or product, or an order
  * over the office's budget.
  *
@@ -177,6 +178,28 @@ export const quote = Effect.fn(function* ({ office, product, quantity }: typeof 
 })
 
 /**
+ * Quotes a product order for an office: what the assistant tells the user
+ * before they approve it.
+ *
+ * @category tools
+ * @since 0.1.0
+ */
+export const QuoteOrder = Tool.make("quote_order", {
+  description:
+    "What an order of branded products comes to for an office: units (rounded up to whole packs and the minimum), total, budget left after it, and lead time. Places nothing.",
+  parameters: OrderInput,
+  success: Schema.Struct({
+    office: Schema.String,
+    product: Schema.String,
+    quantity: Schema.Int,
+    total: Schema.Finite,
+    remainingBudget: Schema.Finite,
+    leadTimeDays: Schema.Int
+  }),
+  failure: ToolFailure.ToolFailure
+})
+
+/**
  * Orders products for an office, within its budget, once the user approves.
  *
  * @category tools
@@ -201,7 +224,7 @@ export const OrderProducts = Tool.make("order_products", {
  * @category toolkits
  * @since 0.1.0
  */
-export const PrintTools = Toolkit.make(ProductCatalog, OrderProducts)
+export const PrintTools = Toolkit.make(ProductCatalog, QuoteOrder, OrderProducts)
 
 /**
  * Layer for the product ordering tools' handlers, on the orders placed
@@ -217,6 +240,18 @@ export const layerTools = PrintTools.toLayer(
     return PrintTools.of({
       product_catalog: ({ category }) =>
         Effect.succeed(Products.all.filter((product) => category === undefined || product.category === category)),
+      quote_order: (order) =>
+        quote(order).pipe(
+          Effect.map(({ office, product, quantity, total, remainingBudget, leadTimeDays }) => ({
+            office,
+            product,
+            quantity,
+            total,
+            remainingBudget,
+            leadTimeDays
+          })),
+          Effect.provideContext(services)
+        ),
       order_products: (order) =>
         Effect.gen(function* () {
           // The same run for every time this call runs: after a crash it runs again, and finds its order.
@@ -272,29 +307,3 @@ export const layerTools = PrintTools.toLayer(
     })
   })
 )
-
-/**
- * What the user sees before they approve a product order: its quote, on the
- * orders placed through Acme.
- *
- * @category layers
- * @since 0.1.0
- */
-export const previews = Effect.gen(function* () {
-  const orders = yield* LiveOrders.LiveOrders
-
-  return {
-    order_products: ({ office, product, quantity }: typeof OrderInput.Type) =>
-      quote({ office, product, quantity }).pipe(
-        Effect.map((quoted) => ({
-          office: quoted.office,
-          product: quoted.product,
-          quantity: quoted.quantity,
-          total: quoted.total,
-          remainingBudget: quoted.remainingBudget,
-          leadTimeDays: quoted.leadTimeDays
-        })),
-        Effect.provideService(LiveOrders.LiveOrders, orders)
-      )
-  }
-})

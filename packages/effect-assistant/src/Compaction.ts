@@ -66,7 +66,7 @@ export const openItems = (
           event.id === state.request.id
       )
     )
-      ? [`- decision ${state.request.id}, for ${state.request.origin.tool}: ${toJsonText(state.request.preview)}`]
+      ? [`- decision ${state.request.id}, for ${state.request.origin.tool}: ${toJsonText(state.request.origin.params)}`]
       : []
   )
 

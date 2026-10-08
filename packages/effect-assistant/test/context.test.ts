@@ -7,8 +7,8 @@ import * as Layer from "effect/Layer"
 import * as Queue from "effect/Queue"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { Assistant, AssistantLoop, ChatId, Specialist } from "../src/index.ts"
-import { runEntity, runMemory, say, update, type Update, UpdateEvent } from "./utils/fixtures.ts"
+import { Assistant, ChatId, Specialist } from "../src/index.ts"
+import { runEntity, runMemory, say, update, type Update, UpdateEvent, withHandlers } from "./utils/fixtures.ts"
 import * as Scripted from "./utils/scripted.ts"
 
 interface User {
@@ -101,16 +101,16 @@ const recording = (seen: Queue.Queue<Seen>) =>
 
         // This turn's tools: only admins get the report.
         const toolkit = current.admin
-          ? AssistantLoop.fromToolkit(Toolkit.make(AdminReport, Greet), {
+          ? withHandlers(Toolkit.make(AdminReport, Greet), {
               admin_report: () => Effect.succeed("report"),
               greet
             })
-          : AssistantLoop.fromToolkit(Toolkit.make(Greet), { greet })
+          : withHandlers(Toolkit.make(Greet), { greet })
 
         yield* Queue.offer(seen, {
           by: "assistant",
           instructions: `You help ${current.name}.`,
-          tools: toolkit.definitions.map((tool) => tool.name)
+          tools: Object.keys(toolkit.toolkit.tools)
         })
 
         const history = JSON.stringify(yield* turn.history())

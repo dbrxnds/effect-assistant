@@ -108,8 +108,7 @@ export type CallOrigin = typeof CallOrigin.Type
 /** The user is asked to decide something: approve or decline. */
 export class DecisionRequested extends Schema.TaggedClass<DecisionRequested>()("DecisionRequested", {
   id: DecisionId,
-  origin: CallOrigin,
-  preview: Schema.Json
+  origin: CallOrigin
 }) {}
 
 /**
@@ -277,6 +276,12 @@ export class SpecialistStarted extends Schema.TaggedClass<SpecialistStarted>()("
 }) {}
 
 /**
+ * The chat was deleted: it stores nothing after this, what worked in it
+ * stopped, and its subscribers' streams end here. Its log stays.
+ */
+export class ChatDeleted extends Schema.TaggedClass<ChatDeleted>()("ChatDeleted", {}) {}
+
+/**
  * Blocks closed without an answer, like the ones `turn.loop`'s
  * `BlockKit.closeStale` closes once the user moved on. The model doesn't see it.
  */
@@ -299,7 +304,8 @@ export const AssistantEvent = Schema.Union([
   SpecialistFinished,
   BlocksClosed,
   DecisionRequested,
-  DecisionResolved
+  DecisionResolved,
+  ChatDeleted
 ])
 
 /** An event the library defines. */

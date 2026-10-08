@@ -9,7 +9,6 @@ import * as Budgets from "@acme/demo-shared/Budgets"
 import * as Locations from "@acme/demo-shared/Locations"
 import * as Orders from "@acme/demo-shared/Orders"
 import * as Performance from "@acme/demo-shared/Performance"
-import * as AssistantLoop from "effect-assistant/AssistantLoop"
 import * as ToolFailure from "effect-assistant/ToolFailure"
 import * as Config from "effect/Config"
 import * as Duration from "effect/Duration"
@@ -223,9 +222,7 @@ export const layerResearch = Research.toLayer(
   Effect.gen(function* () {
     const prompts = yield* Prompts.Prompts
 
-    const toolkit = AssistantLoop.fromToolkit(
-      yield* Toolkit.merge(ResearchTools, Toolkit.make(OrderHistory, OfficeBudget))
-    )
+    const toolkit = Toolkit.merge(ResearchTools, Toolkit.make(OrderHistory, OfficeBudget))
 
     return Effect.fn(function* (run) {
       return run.loop({ instructions: yield* prompts.get("acme-specialist-research"), toolkit, maxSteps: 24 })

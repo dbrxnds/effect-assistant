@@ -92,15 +92,14 @@ describe("Compaction", () => {
           callId,
           tool: "place_order",
           params: { quantity: 300 }
-        }),
-        preview: { total: 600 }
+        })
       })
     ]
 
     const entries = events.map((event, i) => AssistantEvent.Entry.make({ chatId, seq: i + 1, at: 0, event }))
 
     expect(Compaction.openItems(entries, entries.length)).toEqual(
-      Option.some(`Decisions waiting for the user:\n- decision ${decisionId}, for place_order: {"total":600}`)
+      Option.some(`Decisions waiting for the user:\n- decision ${decisionId}, for place_order: {"quantity":300}`)
     )
     // Opened after the summary: the entries after it show it themselves.
     expect(Compaction.openItems(entries, 1)).toEqual(Option.none())

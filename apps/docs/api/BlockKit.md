@@ -111,7 +111,8 @@ interface RenderArgs<B> {
   /** The user's answer, if they used the block. */
   readonly answer: AnswerOf<B> | undefined
   /**
-   * For the decision block: what each decision is about (its preview), and how it was decided. Empty otherwise.
+   * For the decision block: the call each decision is for (its tool and params), and how it was decided. Empty
+   * otherwise.
    */
   readonly decisions: ReadonlyArray<ChatView.Decision>
   /** Sends an answer. Only call it while `open`. */

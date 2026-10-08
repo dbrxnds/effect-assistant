@@ -2,6 +2,8 @@
 import type * as AiError from "effect/ai/AiError"
 import type * as LanguageModel from "effect/ai/LanguageModel"
 import type * as Prompt from "effect/ai/Prompt"
+import type * as Tool from "effect/ai/Tool"
+import type * as Toolkit from "effect/ai/Toolkit"
 import * as Effect from "effect/Effect"
 import * as Filter from "effect/Filter"
 import * as Layer from "effect/Layer"
@@ -15,6 +17,7 @@ import * as AssistantEvent from "./AssistantEvent.ts"
 import type * as AssistantLoop from "./AssistantLoop.ts"
 import type * as BlockKit from "./BlockKit.ts"
 import { ChatId } from "./ChatId.ts"
+import * as Chats from "./Chats.ts"
 import * as ChatView from "./ChatView.ts"
 import type * as Instructions from "./Instructions.ts"
 import * as AppEvents from "./internal/events.ts"
@@ -29,14 +32,24 @@ import type * as Specialist from "./Specialist.ts"
 export type TurnServices = AssistantChat | Specialist.Runner
 
 /** Options for `turn.loop`. */
-export interface LoopOptions<RT = never, RS = never, Events = never> {
+export interface LoopOptions<
+  T extends Record<string, Tool.Any> = Record<never, never>,
+  RS = never,
+  Events = never,
+  C extends Record<string, Tool.Any> = Record<never, never>
+> {
   /** The assistant's role and rules. `Instructions.protocol` goes before them. */
   readonly instructions: string | Instructions.Resolved
   /**
-   * Its tools, next to its own: `AssistantLoop.fromToolkit(toolkit)` of a native toolkit. For tools found on demand, merge
-   * in `ToolDiscovery.make(...)`.
+   * Its tools, next to its own: a native toolkit, with its handlers from the layer. Merge several with
+   * `Toolkit.merge`, like `Memory.Tools` or `ToolDiscovery.Tools` with yours.
    */
-  readonly toolkit?: AssistantLoop.Tools<RT> | undefined
+  readonly toolkit?: Toolkit.Toolkit<T> | undefined
+  /**
+   * Tools the model finds when it needs them, instead of in every prompt: it gets `search_tools` and `execute_tool`
+   * over this toolkit, whose handlers come from the layer too.
+   */
+  readonly catalog?: Toolkit.Toolkit<C> | undefined
   /** Playbooks: a catalog in the prompt, loaded with `load_skill` when a task matches. */
   readonly skills?: ReadonlyArray<Skill<RS>> | undefined
   /** Model calls per turn. Default 16. */
@@ -98,8 +111,6 @@ export interface Turn<Events = never> {
    * Writes the assistant's own events to the chat, like a summary. One that wakes a turn gets the next turn.
    */
   readonly append: (...events: ReadonlyArray<Events>) => Effect.Effect<void>
-  /** The assistant's own tools: `send_user_message`, `wait`, and the specialist tools. */
-  readonly tools: AssistantLoop.Tools<TurnServices>
   /**
    * The full system prompt for these instructions: `Instructions.protocol`,
    * the instructions, and the specialist runs working now.
@@ -110,9 +121,21 @@ export interface Turn<Events = never> {
    * and these instructions, tools, and skills. Every step is a tool call. It
    * ends with `replyIfOwed`.
    */
-  readonly loop: <RT = never, RS = never>(
-    options: LoopOptions<RT, RS, Events>
-  ) => Stream.Stream<AssistantLoop.Event, AiError.AiError, LanguageModel.LanguageModel | TurnServices | RT | RS>
+  readonly loop: <
+    T extends Record<string, Tool.Any> = Record<never, never>,
+    RS = never,
+    C extends Record<string, Tool.Any> = Record<never, never>
+  >(
+    options: LoopOptions<T, RS, Events, C>
+  ) => Stream.Stream<
+    AssistantLoop.Event,
+    AiError.AiError,
+    | LanguageModel.LanguageModel
+    | TurnServices
+    | AssistantLoop.ToolkitServices<T>
+    | AssistantLoop.ToolkitServices<C>
+    | RS
+  >
   /**
    * One more pass, when the turn would end without replying to the user's
    * latest message: the model can then only reply. Empty when no reply is
@@ -137,10 +160,10 @@ export type Handler<R = never, RE = R, Events = never> = (
 
 /**
  * Returns what an assistant's handler needs beyond what its turns provide
- * (the turn services and `LanguageModel`): what its build Effect must
- * require.
+ * (the turn services and `LanguageModel`) and its tools' handlers (which its
+ * layer needs): what its build Effect must require.
  */
-export type HandlerServices<R> = Exclude<R, TurnServices | LanguageModel.LanguageModel>
+export type HandlerServices<R> = Exclude<R, TurnServices | LanguageModel.LanguageModel | Tool.Handler<string>>
 
 /** A handler's result as a stream: it may return the stream from an Effect. */
 const toStream = <R, RE>(
@@ -177,13 +200,19 @@ export interface Assistant<Name extends string = string, Specs extends Specialis
     | LanguageModel.LanguageModel
     | Specialist.HandlerOf<Specs>
     | Exclude<RX, Scope.Scope | AssistantChat>
+    | Specialist.ToolHandlers<R | RE>
   >
   /**
    * Stores an input or one of the assistant's own events, and returns: a
    * user's message or block answer, a workflow's progress, the draft the
    * user opened. The assistant works on what wakes a turn in the background.
+   * Fails when the app says the chat can't be used (see `Chats`): it doesn't
+   * know it, or deleted it.
    */
-  readonly submit: (chatId: ChatId, input: AssistantEvent.Input | Events) => Effect.Effect<void, never, AssistantEngine>
+  readonly submit: (
+    chatId: ChatId,
+    input: AssistantEvent.Input | Events
+  ) => Effect.Effect<void, Chats.ChatUnavailable, AssistantEngine>
   /**
    * Streams the chat's whole log (the entries after `after`, for a reader
    * that has the rest), then live ones, with the assistant's own events
@@ -204,10 +233,15 @@ export interface Assistant<Name extends string = string, Specs extends Specialis
     options?: { readonly after?: number | undefined }
   ) => Stream.Stream<ChatView.Update, never, AssistantEngine>
   /**
-   * Deletes a chat: its log, and what works in it. A turn or specialist run
-   * working in it stops, subscribers' streams end, and the chat stores
-   * nothing again: a later `submit`, a run's report, or a workflow's event
-   * for it is dropped, quietly. Deleting it again does nothing.
+   * Deletes a chat: stores a `ChatDeleted`, and stops what works in it. A
+   * turn or specialist run working in it stops, subscribers' streams end with
+   * the `ChatDeleted`, and the chat stores nothing again: a later input, a
+   * run's report, or a workflow's event for it is dropped, quietly. The log
+   * stays; removing it is the app's. Deleting it again does nothing.
+   *
+   * A chat the app says is deleted (see `Chats`) is deleted the same way
+   * when the assistant next asks: before an input is stored, and before each
+   * model call.
    */
   readonly delete: (chatId: ChatId) => Effect.Effect<void, never, AssistantEngine>
   /** Schema for the chat's entries, the assistant's own events included, in JSON. */
@@ -281,6 +315,7 @@ export const make = <
     | LanguageModel.LanguageModel
     | Specialist.HandlerOf<Specs[number]>
     | Exclude<RX, Scope.Scope | AssistantChat>
+    | Specialist.ToolHandlers<R | RE>
   >
   function toLayer(
     build: Handler<any, any, any> | Effect.Effect<Handler<any, any, any>, unknown, any>
@@ -320,6 +355,9 @@ export const make = <
       chatId: ChatId,
       input: AssistantEvent.Input | AppEvent.Type<Events[number]>
     ) {
+      // Checked here, where the caller can handle it: the chat checks again when it stores the input.
+      yield* (yield* Chats.Chats).get(chatId)
+
       const event = yield* stored(input)
 
       yield* AssistantEngine.use((engine) => engine.submit(name, chatId, event))

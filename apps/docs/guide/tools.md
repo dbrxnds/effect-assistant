@@ -2,8 +2,10 @@
 
 Tools are how the assistant looks things up and gets things done. They're
 Effect's own tools (`effect/ai/Tool`), grouped in a toolkit
-(`effect/ai/Toolkit`) with a handler for each, and passed to
-`turn.loop` as a `toolkit`, next to the assistant's own.
+(`effect/ai/Toolkit`), with their handlers in a layer
+(`MyToolkit.toLayer(...)`). The toolkit goes to `turn.loop` as `toolkit`,
+next to the assistant's own tools; the handlers' layer is provided to the
+assistant's.
 
 Tool calls and their results are the assistant's own work: they're in the
 chat's log, and the model reads them, but the user only sees what the
@@ -12,8 +14,9 @@ assistant tells them with `send_user_message`.
 **Example** (A tool)
 
 ```ts
-import { AssistantLoop, ToolFailure } from "effect-assistant"
+import { ToolFailure } from "effect-assistant"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as Tool from "effect/ai/Tool"
 import * as Toolkit from "effect/ai/Toolkit"
@@ -25,11 +28,15 @@ const ListProducts = Tool.make("list_products", {
   failure: ToolFailure.ToolFailure
 })
 
-const toolkit = AssistantLoop.fromToolkit(Toolkit.make(ListProducts), {
+const ProductTools = Toolkit.make(ListProducts)
+
+const ProductToolsLive = ProductTools.toLayer({
   list_products: ({ category }) => Effect.succeed([{ name: "Flyers", category: category ?? "print" }])
 })
 
-const MyAssistantHandlers = MyAssistant.toLayer((turn) => turn.loop({ instructions, toolkit }))
+const MyAssistantHandlers = MyAssistant.toLayer((turn) => turn.loop({ instructions, toolkit: ProductTools })).pipe(
+  Layer.provide(ProductToolsLive)
+)
 ```
 
 A tool is a name, a description the model reads, schemas for its parameters
@@ -38,16 +45,10 @@ Names must be unique in a turn, including the assistant's own tools
 (`send_user_message`, `wait`, `load_skill`, and the specialist tools): a
 clash fails the turn.
 
-`AssistantLoop.fromToolkit` takes a toolkit in one of three ways:
-
-- `AssistantLoop.fromToolkit(toolkit, handlers)`: the handlers inline, as above.
-- `AssistantLoop.fromToolkit(yield* MyToolkit)`: resolved in the handler's build,
-  from the handlers' layer (`MyToolkit.toLayer(...)`), which the assistant's
-  layer is then given.
-- `AssistantLoop.fromToolkit(MyToolkit)`: resolved at every call, when the loop
-  has the handlers' layer.
-
-`AssistantLoop.merge(a, b)` puts two together.
+The assistant's layer needs every tool's handler: leave out
+`ProductToolsLive` and it's a type error naming the tool
+(`Missing 'Handler<"list_products">'`). Several toolkits go together with
+Effect's `Toolkit.merge(a, b)`, and their layers with `Layer.provide([...])`.
 
 ## Tools that use services
 
@@ -71,13 +72,9 @@ const OrderToolsLive = OrderTools.toLayer(
   })
 )
 
-const MyAssistantHandlers = MyAssistant.toLayer(
-  Effect.gen(function* () {
-    const toolkit = AssistantLoop.fromToolkit(yield* OrderTools)
-
-    return (turn) => turn.loop({ instructions, toolkit })
-  })
-).pipe(Layer.provide(OrderToolsLive))
+const MyAssistantHandlers = MyAssistant.toLayer((turn) => turn.loop({ instructions, toolkit: OrderTools })).pipe(
+  Layer.provide(OrderToolsLive)
+)
 ```
 
 Services a handler needs at call time, like the chat or the chat's user, are
@@ -162,8 +159,8 @@ That's how durable-execution tools handle it too: a step runs at least once,
 and the side effect is idempotent.
 
 A tool whose effect the user must approve first sets `needsApproval`: the
-call waits for the user's [decision](./decisions), with a preview of what
-it will do, and runs once they approve.
+call waits for the user's [decision](./decisions), and runs once they
+approve.
 
 A call whose handler stopped while it ran (not a crash) gets a failed result
 saying it may have run (kind `may_have_run`); one that never started, that it
@@ -203,27 +200,22 @@ Turn it off on the model, `AnthropicLanguageModel.model(name, { strictJsonSchema
 or per tool with `tool.annotate(Tool.Strict, false)`: params that don't fit are then
 a failure the model reads and corrects.
 
-## Many tools: discovery
+## Many tools: a catalog
 
 Every tool definition goes into the prompt on every call. For catalogs that
-are big, or that change at runtime (MCP servers, plugins),
-[`ToolDiscovery`](/api/ToolDiscovery) turns tools into two:
-`search_tools` finds tools by what the model needs to do, and `execute_tool`
-runs one with a validated input.
+are big, or that change at runtime (MCP servers, plugins), pass them to the
+loop as `catalog`: the model gets two tools instead, `search_tools`, which
+finds tools by what it needs to do, and `execute_tool`, which runs one with a
+validated input.
 
 ```ts
-import { AssistantLoop, ToolDiscovery } from "effect-assistant"
-
-const MyAssistantHandlers = MyAssistant.toLayer(
-  Effect.gen(function* () {
-    const toolkit = AssistantLoop.merge(
-      AssistantLoop.fromToolkit(yield* CommonTools), // common: always in the prompt
-      ToolDiscovery.make(AssistantLoop.fromToolkit(yield* OfficeTools)) // rare: found when needed
-    )
-
-    return (turn) => turn.loop({ instructions, toolkit })
+const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
+  turn.loop({
+    instructions,
+    toolkit: CommonTools, // common: always in the prompt
+    catalog: OfficeTools // rare: found when needed
   })
-)
+).pipe(Layer.provide([CommonToolsLive, OfficeToolsLive]))
 ```
 
 Keep the tools an assistant uses often in the toolkit directly; discovery

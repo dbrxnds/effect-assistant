@@ -8,6 +8,7 @@ const modules = [
   "AssistantEngine",
   "AssistantEvent",
   "ChatLog",
+  "Chats",
   "ChatView",
   "AssistantLoop",
   "Block",
@@ -16,7 +17,6 @@ const modules = [
   "Instructions",
   "Skill",
   "Specialist",
-  "ToolDiscovery",
   "ToolFailure",
   "ChatId",
   "DecisionId",
@@ -64,6 +64,7 @@ export default defineConfig({
             { text: "Skills", link: "/guide/skills" },
             { text: "UI blocks", link: "/guide/blocks" },
             { text: "Decisions", link: "/guide/decisions" },
+            { text: "Memory and long chats", link: "/guide/memory" },
             { text: "The chat client", link: "/guide/client" },
             { text: "Instructions and prompts", link: "/guide/instructions" }
           ]

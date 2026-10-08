@@ -7,7 +7,6 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import { AssistantChat } from "../AssistantChat.ts"
 import * as AssistantEvent from "../AssistantEvent.ts"
-import type * as AssistantLoop from "../AssistantLoop.ts"
 import { AssistantToolCall } from "../AssistantToolCall.ts"
 import * as BlockKit from "../BlockKit.ts"
 import * as Decision from "../Decision.ts"
@@ -215,7 +214,7 @@ ${catalog}`,
  * `send_user_message`, taking an optional block from the kit when there is
  * one, and `wait`.
  */
-export const makeMessaging: (kit: BlockKit.BlockKit | undefined) => Effect.Effect<AssistantLoop.Tools<AssistantChat>> =
+export const makeMessaging: (kit: BlockKit.BlockKit | undefined) => Effect.Effect<Toolkits.Tools<AssistantChat>> =
   Effect.fnUntraced(function* (kit) {
     if (kit === undefined || kit.blocks.length === 0) {
       return Toolkits.fromWithHandler(yield* plainTools)

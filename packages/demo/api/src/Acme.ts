@@ -6,7 +6,6 @@
  */
 import * as AnthropicClient from "@effect/ai-anthropic/AnthropicClient"
 import * as AnthropicLanguageModel from "@effect/ai-anthropic/AnthropicLanguageModel"
-import * as AssistantLoop from "effect-assistant/AssistantLoop"
 import * as BlockKit from "effect-assistant/BlockKit"
 import * as Skill from "effect-assistant/Skill"
 import * as Config from "effect/Config"
@@ -52,9 +51,6 @@ export const model = Config.String("ACME_MODEL").pipe(Config.withDefault("claude
 export const layer = AcmeAssistant.toLayer(
   Effect.gen(function* () {
     const prompts = yield* Prompts.Prompts
-    // Orders wait for the user's decision; their previews are what they approve.
-    const previews = { ...(yield* PrintOrders.previews), ...(yield* Campaign.previews) }
-    const toolkit = AssistantLoop.fromToolkit(yield* AcmeTools, { previews })
 
     return Effect.fn(function* (turn) {
       const prompt = yield* prompts.get("acme")
@@ -64,7 +60,7 @@ export const layer = AcmeAssistant.toLayer(
 
       return turn.loop({
         instructions: { ...prompt, text: `${prompt.text}\n\nToday is ${new Date().toDateString()}.` },
-        toolkit,
+        toolkit: AcmeTools,
         skills: [orderingCampaigns, orderingProducts]
       })
     })

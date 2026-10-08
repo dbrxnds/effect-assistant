@@ -27,6 +27,7 @@ import * as Assistant from "effect-assistant/Assistant"
 - [ChatId](./ChatId)
 - [ChatLog](./ChatLog)
 - [ChatView](./ChatView)
+- [Chats](./Chats)
 - [Compaction](./Compaction)
 - [Decision](./Decision)
 - [DecisionId](./DecisionId)
@@ -36,5 +37,4 @@ import * as Assistant from "effect-assistant/Assistant"
 - [RunId](./RunId)
 - [Skill](./Skill)
 - [Specialist](./Specialist)
-- [ToolDiscovery](./ToolDiscovery)
 - [ToolFailure](./ToolFailure)

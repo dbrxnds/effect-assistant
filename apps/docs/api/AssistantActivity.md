@@ -137,6 +137,8 @@ export const apply = (activity: Activity, entry: AssistantEvent.AnyEntry, option
         since: entry.at
       })
     })),
+    // Deleting a chat stops everything in it, and nothing starts again.
+    Match.tag("ChatDeleted", (): Activity => ({ ...empty, lastInputSeq: activity.lastInputSeq })),
     Match.orElse(() => activity)
   )
 }

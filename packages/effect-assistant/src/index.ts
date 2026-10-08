@@ -18,6 +18,8 @@ export * as AssistantEvent from "./AssistantEvent.ts"
 
 export * as ChatLog from "./ChatLog.ts"
 
+export * as Chats from "./Chats.ts"
+
 export * as ChatView from "./ChatView.ts"
 
 export * as Compaction from "./Compaction.ts"
@@ -43,7 +45,5 @@ export * as RunId from "./RunId.ts"
 export * as Skill from "./Skill.ts"
 
 export * as Specialist from "./Specialist.ts"
-
-export * as ToolDiscovery from "./ToolDiscovery.ts"
 
 export * as ToolFailure from "./ToolFailure.ts"

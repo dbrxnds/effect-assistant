@@ -22,8 +22,10 @@ features:
     details: The assistant talks only through a send_user_message tool. Workflow updates and specialist results arrive as events it reads, and the assistant chooses whether to tell you.
   - title: Specialists, skills, blocks
     details: Hand work to background specialists, load playbooks on demand, and put buttons or inputs in messages when a structured answer is easier.
-  - title: Memory or cluster
+  - title: In-process or cluster
     details: Run in-process for tests, or one cluster entity per chat, where a crash mid-turn resumes on redelivery.
+  - title: Memory and long chats
+    details: Facts per user and team that carry across chats, and summaries so a long chat reads a summary instead of everything before it.
   - title: Observable
     details: Turns, model calls, and tool calls are OpenTelemetry GenAI spans, ready for Langfuse or any LLM tracing tool.
 ---

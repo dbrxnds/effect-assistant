@@ -10,7 +10,6 @@ stream.
 | Piece                                           | What it is                                                                                       |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | `turn.instructions(text)`                       | The full system prompt: `Instructions.protocol`, your text, and the specialist runs working now. |
-| `turn.tools`                                    | The assistant's own tools: `send_user_message`, `wait`, and the specialist tools.                |
 | `turn.history(view?)`                           | The model's history from the chat's entries: all of them, or what a view keeps.                  |
 | `turn.entries`                                  | The chat's entries, with the assistant's own events decoded.                                     |
 | [`AssistantLoop.step`](/api/AssistantLoop#step) | One step: call the model, run its tool calls.                                                    |
@@ -18,7 +17,10 @@ stream.
 | `turn.replyIfOwed(...)`                         | One more pass, reply-only, when the user's latest message has no reply.                          |
 
 `turn.loop` is `AssistantLoop.run` with these wired in, the skill catalog,
-and a tool call required at every step, followed by `turn.replyIfOwed`.
+and a tool call required at every step, followed by `turn.replyIfOwed`. In a
+turn, `AssistantLoop.step` and `run` add the assistant's own tools
+(`send_user_message`, `wait`, the specialist tools) to the toolkit you pass,
+so a loop of your own can message the user. A specialist's run has none.
 
 ## A loop of your own
 
@@ -44,7 +46,7 @@ const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
     AssistantLoop.step(
       {
         instructions: turn.instructions(instructions),
-        toolkit: AssistantLoop.merge(turn.tools, toolkit),
+        toolkit: MyTools, // the assistant's own tools come with them
         history: turn.history(),
         toolChoice: "required"
       },
@@ -52,7 +54,7 @@ const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
         result.done || state.steps >= 12 ? AssistantLoop.stop() : AssistantLoop.next({ steps: state.steps + 1 })
     )
   ).pipe(Stream.concat(turn.replyIfOwed({ instructions })))
-)
+).pipe(Layer.provide(MyToolsLive))
 ```
 
 The loop's state is yours: step limits, budgets, anything `then` decides on.
@@ -105,62 +107,9 @@ it ends, so every call keeps its result.
 
 ## Compaction
 
-Instead of dropping the start of a long chat, summarize it. Store the summary
-as an event of your own, and start the history at the last one.
-
-Register the event with the assistant's `events` option (see
-[your own events](./app-events)). `turn.append` writes it to the chat, and
-`turn.entries` reads it back as a `Summary`. It doesn't wake a turn, and
-with no `render` the model doesn't read it unless a view puts it in.
-
-```ts
-import { AppEvent, Assistant } from "effect-assistant"
-import * as Schema from "effect/Schema"
-
-class Summary extends Schema.TaggedClass<Summary>()("Summary", { text: Schema.String }) {}
-
-export const MyAssistant = Assistant.make("my-assistant", { events: [AppEvent.make(Summary)] })
-```
-
-The view starts at the last summary: its text first, then the entries after
-it. When that grows past a size, the handler appends a new summary before it
-runs the loop.
-
-**Example** (Summarize past 200 messages)
-
-```ts
-import type { Assistant } from "effect-assistant"
-import * as Effect from "effect/Effect"
-import * as Prompt from "effect/ai/Prompt"
-
-const sinceSummary: Assistant.HistoryView<Summary> = (entries) => {
-  const last = entries.findLast(({ event }) => event instanceof Summary)
-
-  return last === undefined || !(last.event instanceof Summary)
-    ? entries
-    : [
-        ...Prompt.make(`Earlier in this chat: ${last.event.text}`).content,
-        ...entries.filter(({ seq }) => seq > last.seq)
-      ]
-}
-
-const MyAssistantHandlers = MyAssistant.toLayer(
-  Effect.gen(function* () {
-    const summarizer = yield* Summarizer // your service: summarizes a history
-
-    return Effect.fn(function* (turn: Assistant.Turn<Summary>) {
-      const history = yield* turn.history(sinceSummary)
-
-      if (history.length > 200) yield* turn.append(Summary.make({ text: yield* summarizer.summarize(history) }))
-
-      return turn.loop({ instructions, history: sinceSummary })
-    })
-  })
-)
-```
-
-A new summary covers the earlier one, since the view puts it first. The full
-log stays in the chat: the UI still shows everything.
+To have a long chat read a summary instead of everything before it, use
+`Compaction.since` as the loop's `history`. See
+[memory and long chats](./memory#long-chats-compaction).
 
 ## Change when it stops
 

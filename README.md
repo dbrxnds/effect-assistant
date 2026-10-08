@@ -39,16 +39,7 @@ is `ANTHROPIC_API_KEY`.
 ```ts
 import * as AnthropicClient from "@effect/ai-anthropic/AnthropicClient"
 import * as AnthropicLanguageModel from "@effect/ai-anthropic/AnthropicLanguageModel"
-import {
-  Assistant,
-  AssistantEngine,
-  AssistantEvent,
-  AssistantLoop,
-  ChatId,
-  ChatLog,
-  ChatView,
-  InputId
-} from "effect-assistant"
+import { Assistant, AssistantEngine, AssistantEvent, ChatId, ChatLog, ChatView, InputId } from "effect-assistant"
 import * as Tool from "effect/ai/Tool"
 import * as Toolkit from "effect/ai/Toolkit"
 import * as Config from "effect/Config"
@@ -63,21 +54,23 @@ import * as Stream from "effect/Stream"
 // 1. The definition. Your server and UI import it to submit and subscribe.
 export const MyAssistant = Assistant.make("my-assistant")
 
-// 2. A native Effect tool, with its handler.
+// 2. A native Effect toolkit, and its handlers as a layer.
 const GetWeather = Tool.make("get_weather", {
   description: "Current weather for a city.",
   parameters: Schema.Struct({ city: Schema.String }),
   success: Schema.Struct({ city: Schema.String, weather: Schema.String })
 })
 
-const toolkit = AssistantLoop.fromToolkit(Toolkit.make(GetWeather), {
+const WeatherTools = Toolkit.make(GetWeather)
+
+const WeatherToolsLive = WeatherTools.toLayer({
   get_weather: ({ city }) => Effect.succeed({ city, weather: "sunny, 21°C" })
 })
 
-// 3. The handler. Every turn runs the agent loop.
+// 3. The handler. Every turn runs the agent loop, with the toolkit next to the assistant's own tools.
 const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
-  turn.loop({ instructions: "You help a small team. Be brief.", toolkit })
-)
+  turn.loop({ instructions: "You help a small team. Be brief.", toolkit: WeatherTools })
+).pipe(Layer.provide(WeatherToolsLive)) // leaving this out is a type error
 
 // 4. The model the loop calls. Any LanguageModel works.
 const ModelLive = AnthropicLanguageModel.model("claude-sonnet-5-5").pipe(
@@ -149,38 +142,13 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { AssistantEngine, ChatLog } from "effect-assistant"
 import * as SingleRunner from "effect/cluster/SingleRunner"
-import * as SqlClient from "effect/sql/SqlClient"
-
-// Where your app records that a chat was deleted, here a column on its own chats table.
-const DeletedChatsLive = Layer.effect(
-  ChatLog.DeletedChats,
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-
-    return ChatLog.DeletedChats.of({
-      isDeleted: (chatId) =>
-        sql`SELECT 1 FROM chats WHERE chat_id = ${chatId} AND deleted_at IS NOT NULL`.pipe(
-          Effect.map((rows) => rows.length > 0),
-          Effect.orDie
-        ),
-      markDeleted: (chatId, at) =>
-        sql`UPDATE chats SET deleted_at = ${at} WHERE chat_id = ${chatId} AND deleted_at IS NULL`.pipe(
-          Effect.asVoid,
-          Effect.orDie
-        )
-    })
-  })
-)
 
 export const AppLive = MyAssistantHandlers.pipe(
   Layer.provide(ModelLive),
   // One cluster entity per chat.
   Layer.provideMerge(AssistantEngine.layerCluster),
   Layer.provideMerge(
-    Layer.merge(
-      ChatLog.layerSql.pipe(Layer.provide(DeletedChatsLive)),
-      SingleRunner.layer({ runnerStorage: "sql" }).pipe(Layer.provide(NodeCrypto.layer))
-    )
+    Layer.merge(ChatLog.layerSql, SingleRunner.layer({ runnerStorage: "sql" }).pipe(Layer.provide(NodeCrypto.layer)))
   ),
   // One pool for the log, the cluster's messages, and your own tables.
   Layer.provide(PgClient.layerConfig({ url: Config.Redacted("DATABASE_URL") }))
@@ -204,6 +172,60 @@ With several processes, use a multi-runner cluster in place of
 [deploying](./apps/docs/guide/deploying.md) and
 [engines](./apps/docs/guide/engines.md).
 
+### Your chats: who owns them, and deleting them
+
+A chat's record (its owner, its title, whether it was deleted) is your
+app's. Tell the assistant which chats exist with `Chats`. Its `get` returns
+the chat, or fails with `ChatUnavailable` and a `reason` of `"NotFound"` or
+`"Deleted"`. You decide when a chat is created: up front, or by creating it
+on its first message inside `get`. Without `Chats`, every chat exists from
+its first input.
+
+```ts
+import { Chats } from "effect-assistant"
+import * as SqlClient from "effect/sql/SqlClient"
+
+// Here, a row in the app's own chats table.
+const ChatsLive = Layer.effect(
+  Chats.Chats,
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+
+    return {
+      get: Effect.fn(function* (chatId: ChatId.ChatId) {
+        const [row] = yield* sql<{ readonly deleted_at: number | null }>`
+          SELECT deleted_at FROM chats WHERE chat_id = ${chatId}
+        `.pipe(Effect.orDie)
+
+        if (row === undefined) return yield* Chats.ChatUnavailable.make({ chatId, reason: "NotFound" })
+        if (row.deleted_at !== null) return yield* Chats.ChatUnavailable.make({ chatId, reason: "Deleted" })
+
+        return { chatId }
+      })
+    }
+  })
+)
+
+// Provide it where you provide the log, so the engine and your server both see it.
+Layer.mergeAll(ChatLog.layerSql, ChatsLive)
+```
+
+The assistant asks `get` at three points:
+
+- **Before `submit` sends.** `submit` fails with `ChatUnavailable`, which
+  your server can turn into a 404.
+- **When the chat stores an input.** A refused input is dropped quietly,
+  for example a workflow's update.
+- **Before every model call.**
+
+To delete a chat, mark it deleted in your table, then call
+`MyAssistant.delete(chatId)`. That appends a `ChatDeleted` to the log and
+stops the running turn and specialists. Subscribers receive the event, and
+then their streams end. The client's view says `deleted: true`. If your
+app marks a chat deleted and never calls `delete`, the assistant deletes it
+the same way the next time it asks `get`. The log stays. Removing old logs
+is up to the app.
+
 ### Serve a chat client
 
 Whom a chat belongs to is your app's data. At the edge, check that the
@@ -220,17 +242,17 @@ const watch = (chatId: ChatId.ChatId, after?: number) => MyAssistant.subscribeVi
 
 On the client, fold the updates with `ChatView.apply` starting from
 `ChatView.empty`. Show a working indicator while `view.activity` says
-something is working. `MyAssistant.delete(chatId)` removes the log, stops
-whatever is running in the chat, and ends its subscribers. The demo serves
-all of this over an Effect RPC WebSocket (`packages/demo/shared/src/Rpc.ts`).
-See [the chat client](./apps/docs/guide/client.md) and
+something is working, and close the chat when `view.deleted` is true. The
+demo serves all of this over an Effect RPC WebSocket
+(`packages/demo/shared/src/Rpc.ts`). See
+[the chat client](./apps/docs/guide/client.md) and
 [chats and users](./apps/docs/guide/chats.md).
 
 ### Ask before acting: decisions
 
 A tool with Effect's `needsApproval` doesn't run when the model calls it.
-The call waits, with a preview, until the user approves or declines it in a
-decision block. Only that answer runs the call.
+The call waits until the user approves or declines it in a decision block.
+Only that answer runs the call, exactly as the model made it.
 
 ```ts
 import { BlockKit, Decision } from "effect-assistant"
@@ -245,15 +267,19 @@ const PlaceOrder = Tool.make("place_order", {
   needsApproval: true // or a function of the params
 })
 
-const orders = AssistantLoop.fromToolkit(
-  Toolkit.make(PlaceOrder),
-  { place_order: () => Effect.succeed({ reference: "R-1042" }) },
-  // What the user sees before they decide.
-  { previews: { place_order: ({ sku, quantity }) => Effect.succeed({ sku, quantity, total: quantity * 2.5 }) } }
-)
+const OrderTools = Toolkit.make(PlaceOrder)
 
-const ShopHandlers = Shop.toLayer((turn) => turn.loop({ instructions, toolkit: orders }))
+const OrderToolsLive = OrderTools.toLayer({ place_order: () => Effect.succeed({ reference: "R-1042" }) })
+
+const ShopHandlers = Shop.toLayer((turn) => turn.loop({ instructions, toolkit: OrderTools })).pipe(
+  Layer.provide(OrderToolsLive)
+)
 ```
+
+What the user sees about the call is your app's: the view gives the client
+the paused call's `tool` and `params`, and it shows them as it likes (or
+looks up more, like a quote). The tool checks everything again when it
+runs.
 
 Work that needs approval asks before it starts: put `needsApproval` on the
 tool that starts the workflow. See [decisions](./apps/docs/guide/decisions.md).
@@ -290,7 +316,7 @@ const renderBlock = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
   decision: ({ props, open, decisions, respond }) => (
     <div>
       {decisions.map((decision) => (
-        <pre key={decision.id}>{JSON.stringify(decision.preview)}</pre>
+        <pre key={decision.id}>{JSON.stringify(decision.params)}</pre>
       ))}
       <button disabled={!open} onClick={() => respond(Decision.answerAll(props, "approved"))}>
         Approve
@@ -340,11 +366,12 @@ its layer. See [specialists](./apps/docs/guide/specialists.md).
 
 A skill is a playbook. Only its name and a single line appear in the
 prompt, and the model loads the rest with `load_skill` when a task matches.
-`ToolDiscovery.make` turns a large toolkit into `search_tools` and
-`execute_tool`, so the prompt doesn't carry every tool definition.
+A `catalog` is a large toolkit the model searches instead: it gets
+`search_tools` and `execute_tool` over it, so the prompt doesn't carry
+every tool definition.
 
 ```ts
-import { Skill, ToolDiscovery } from "effect-assistant"
+import { Skill } from "effect-assistant"
 
 const reorder = Skill.make({
   name: "reorder",
@@ -353,17 +380,13 @@ const reorder = Skill.make({
 })
 
 MyAssistant.toLayer((turn) =>
-  turn.loop({
-    instructions,
-    toolkit: AssistantLoop.merge(coreTools, ToolDiscovery.make(catalog)),
-    skills: [reorder]
-  })
-)
+  turn.loop({ instructions, toolkit: CoreTools, catalog: AllOtherTools, skills: [reorder] })
+).pipe(Layer.provide([CoreToolsLive, AllOtherToolsLive]))
 ```
 
 A skill's `instructions` can be an Effect, resolved each time it loads, for
-example from a prompt store. `AssistantLoop.only(tools, predicate)` hides
-tools a user may not use. See [skills](./apps/docs/guide/skills.md) and
+example from a prompt store. To give a user fewer tools, build a smaller
+`Toolkit.make(...)` for their turn. See [skills](./apps/docs/guide/skills.md) and
 [tools](./apps/docs/guide/tools.md).
 
 ### Your own events: webhooks, workflows, drafts
@@ -458,19 +481,20 @@ const MyAssistantHandlers = MyAssistant.toLayer(
           return Stream.concat(
             turn.loop({
               instructions: `You help ${user.name}. Be brief.\n\n${remembered}`,
-              toolkit: AssistantLoop.merge(toolkit, Memory.makeToolkit(scopes)),
+              toolkit: Toolkit.merge(WeatherTools, Memory.Tools),
               history: sinceSummary
             }),
             // After the reply, so the user doesn't wait for it.
             Stream.drain(Stream.fromEffect(compact))
           ).pipe(
             Stream.provideService(CurrentUser, user), // for tools that declare it as a dependency
+            Stream.provideService(Memory.CurrentScopes, scopes), // whose memory the tools read and write
             Stream.provideService(Memory.MemoryStore, store)
           )
         })
       )
   })
-)
+).pipe(Layer.provide([WeatherToolsLive, Memory.layerTools]))
 ```
 
 A prompt that changes between turns breaks the provider's prompt cache.

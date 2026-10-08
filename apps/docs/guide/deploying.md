@@ -37,8 +37,9 @@ to set up.
 One `SqlClient` serves everything:
 
 - `ChatLog.layerSql` stores the log in a `chat_log` table you create (see
-  [the log](./events#storage)). It needs a `ChatLog.DeletedChats`: where your
-  app records that a chat was deleted, like a `deleted_at` on its chat table.
+  [the log](./events#storage)).
+- Your [`Chats`](./chats#which-chats-exist) can read your own chat table in
+  the same database.
 - `SingleRunner` keeps the cluster's messages and shards in the same
   database, so a persisted `submit` survives a crash.
 - `ClusterWorkflowEngine` runs the [workflows](./app-events#long-running-work)

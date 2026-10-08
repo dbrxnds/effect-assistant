@@ -22,6 +22,7 @@ import * as AssistantEvent from "../AssistantEvent.ts"
 import type { ChatId } from "../ChatId.ts"
 import { ChatLog } from "../ChatLog.ts"
 import type { InputId } from "../InputId.ts"
+import * as Chats from "../Chats.ts"
 import * as SpecialistService from "../Specialist.ts"
 import * as Decisions from "./decisions.ts"
 import * as AppEvents from "./events.ts"
@@ -95,21 +96,26 @@ export interface Chat {
    * The chat's entries after `after` (all of them by default), then new ones as they're appended.
    */
   readonly stream: (after: number) => Stream.Stream<AssistantEvent.Entry>
-  /** Deletes the chat: its log, what works in it, and what it holds. */
+  /**
+   * Deletes the chat: stores a `ChatDeleted`, stops what works in it, and ends its subscribers' streams. Its log
+   * stays.
+   */
   readonly delete: Effect.Effect<void>
 }
 
-/** A chat that was deleted: it takes nothing, and streams nothing. */
-const deletedChat: Chat = {
+const isChatDeleted = (entry: AssistantEvent.Entry) => Predicate.isTagged(entry.event, "ChatDeleted")
+
+/** A chat whose log ends in `ChatDeleted`: it streams its log, and takes nothing. */
+const deletedChat = (entries: ReadonlyArray<AssistantEvent.Entry>): Chat => ({
   submit: () => Effect.void,
   submitInBackground: () => Effect.void,
   resume: Effect.void,
-  stream: () => Stream.empty,
+  stream: (after) => Stream.fromIterable(entries.filter((entry) => entry.seq > after)),
   delete: Effect.void
-}
+})
 
-const refusedDeleted = (input: { readonly _tag: string }) =>
-  Effect.logDebug(`assistant chat is deleted: ${input._tag} not stored`)
+const refused = (input: { readonly _tag: string }, why: string) =>
+  Effect.logDebug(`assistant chat ${why}: ${input._tag} not stored`)
 
 /**
  * Opens one chat of an assistant, in the current scope: runs the handlers'
@@ -124,8 +130,10 @@ export const make = Effect.fnUntraced(function* (options: {
   const { app } = registration.definition
   const { wakes } = app
   const storage = yield* ChatLog
+  const chats = yield* Chats.Chats
+  const initial = yield* storage.read(chatId)
 
-  if (yield* storage.isDeleted(chatId)) return deletedChat
+  if (initial.some(isChatDeleted)) return deletedChat(initial)
 
   const channel = yield* makeChannelPubSub
   const writes = yield* Semaphore.make(1)
@@ -143,7 +151,7 @@ export const make = Effect.fnUntraced(function* (options: {
   const isDeleted = Deferred.isDone(deleted)
 
   // The chat is its log's only writer, so it reads the log once and keeps the entries: a turn reads memory.
-  const entries = yield* Ref.make(yield* storage.read(chatId))
+  const entries = yield* Ref.make(initial)
 
   // Every writer (the turn's loop, specialist runs, a handler's own appends) goes through here, one at a time: each
   // append is numbered after the last, and its entries go to the chat's subscribers. After a delete it stores nothing.
@@ -187,18 +195,36 @@ export const make = Effect.fnUntraced(function* (options: {
   })
 
   /**
-   * Stores the input unless an input with its id is already stored, the chat is deleted, or the chat refuses it: a
-   * decision answer that doesn't fit its block or what's still waiting. A decision answer's decisions are resolved
-   * before the next input.
+   * Whether the app has the chat (`Chats`). One it deleted is deleted here too, which stops what works in it: a
+   * turn that asks stops there.
+   */
+  const checkAvailable: Effect.Effect<boolean> = chats.get(chatId).pipe(
+    Effect.as(true),
+    Effect.catchTag("ChatUnavailable", (unavailable) =>
+      unavailable.reason === "Deleted"
+        ? Effect.as(
+            Effect.suspend(() => remove),
+            false
+          )
+        : Effect.succeed(false)
+    )
+  )
+
+  /**
+   * Stores the input unless an input with its id is already stored, the chat is deleted or unavailable, or the chat
+   * refuses it: a decision answer that doesn't fit its block or what's still waiting. A decision answer's decisions
+   * are resolved before the next input.
    */
   const store = Effect.fnUntraced(function* (input: AssistantEvent.Input | AssistantEvent.StoredAppEvent) {
-    if (yield* isDeleted) return yield* refusedDeleted(input)
+    if (yield* isDeleted) return yield* refused(input, "is deleted")
+
+    if (!(yield* checkAvailable)) return yield* refused(input, "is unavailable")
 
     // Checked under the write lock: a retry that arrives while the first submit is storing is stored once.
     const verdict = yield* Semaphore.withPermit(writes)(
       Effect.gen(function* () {
         if (yield* isDeleted) {
-          yield* refusedDeleted(input)
+          yield* refused(input, "is deleted")
 
           return Option.none()
         }
@@ -263,7 +289,7 @@ export const make = Effect.fnUntraced(function* (options: {
   const drain: Effect.Effect<void> = Semaphore.withPermit(turnsLock)(
     Effect.gen(function* () {
       while (!(yield* isDeleted) && History.needsTurn(yield* chat.entries, wakes)) {
-        yield* Turns.run({ registration, handler, chat, services })
+        yield* Turns.run({ registration, handler, chat, services, checkOpen: Effect.asVoid(checkAvailable) })
       }
     })
   )
@@ -297,13 +323,12 @@ export const make = Effect.fnUntraced(function* (options: {
   )
 
   const remove = Effect.gen(function* () {
-    // Under the write lock: an append in flight is stored, and deleted with the rest; none comes after.
+    // Under the write lock: an append in flight is stored before the `ChatDeleted`; none comes after.
     const first = yield* Semaphore.withPermit(writes)(
       Effect.gen(function* () {
         if (yield* isDeleted) return false
 
-        yield* storage.delete(chatId)
-        yield* Ref.set(entries, [])
+        yield* stored([AssistantEvent.ChatDeleted.make({})])
 
         return yield* Deferred.succeed(deleted, undefined)
       })
@@ -323,6 +348,9 @@ export const make = Effect.fnUntraced(function* (options: {
     yield* Fiber.await(closing)
   })
 
+  // A chat the app deleted while it was closed is deleted now, so its subscribers hear it.
+  yield* checkAvailable
+
   const chatApi: Chat = {
     submit: Effect.fnUntraced(function* (input) {
       yield* store(input)
@@ -338,17 +366,19 @@ export const make = Effect.fnUntraced(function* (options: {
     stream: (after) =>
       Stream.unwrap(
         Effect.gen(function* () {
-          if (yield* isDeleted) return Stream.empty
-
           // Subscribes before it reads, so nothing appended in between is missed.
           const subscription = yield* PubSub.subscribe(channel)
-          const stored = (yield* chat.entries).filter((entry) => entry.seq > after)
+          const all = yield* chat.entries
+          const stored = all.filter((entry) => entry.seq > after)
           const last = stored.at(-1)?.seq ?? after
+
+          // Deleted: what the reader hasn't seen, then the end. Otherwise the stream ends with the `ChatDeleted`.
+          if (all.some(isChatDeleted)) return Stream.fromIterable(stored)
 
           return Stream.concat(
             Stream.fromIterable(stored),
             Stream.fromSubscription(subscription).pipe(Stream.filter((entry) => entry.seq > last))
-          ).pipe(Stream.interruptWhen(Deferred.await(deleted)))
+          ).pipe(Stream.takeUntil(isChatDeleted))
         })
       ),
     delete: remove

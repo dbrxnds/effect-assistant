@@ -29,8 +29,9 @@ interface Specialist<Name extends string = string> {
    * {@link CheckServices}).
    */
   readonly toLayer: <R = never, RE = never, E = never, RX = never>(
-    build: (Handler<R, RE> | Effect.Effect<Handler<R, RE>, E, RX>) & CheckServices<Exclude<R | RE, RunServices | RX>>
-  ) => Layer.Layer<SpecialistHandler<Name>, never, Exclude<RX, Scope.Scope | AssistantChat>>
+    build: (Handler<R, RE> | Effect.Effect<Handler<R, RE>, E, RX>) &
+      CheckServices<Exclude<R | RE, RunServices | RX | Tool.Handler<string>>>
+  ) => Layer.Layer<SpecialistHandler<Name>, never, Exclude<RX, Scope.Scope | AssistantChat> | ToolHandlers<R | RE>>
 }
 ```
 
@@ -52,6 +53,18 @@ type CheckServices<Undeclared> = [Undeclared] extends [never]
         readonly services: Undeclared
       }
     }
+```
+
+<small>Since 0.1.0</small>
+
+### ToolHandlers
+
+The tool handlers a handler's loop uses (`Toolkit.toLayer`): they're the
+layer's to have, so `Layer.provide(MyToolsLive)` gives them, and a missing
+one is a type error.
+
+```ts
+type ToolHandlers<R> = Extract<R, Tool.Handler<string>>
 ```
 
 <small>Since 0.1.0</small>
@@ -104,10 +117,16 @@ type RunServices = AssistantChat | Runner | LanguageModel.LanguageModel
 Options for `run.loop`.
 
 ```ts
-interface LoopOptions<RT = never, RS = never> {
+interface LoopOptions<
+  T extends Record<string, Tool.Any> = Record<never, never>,
+  RS = never,
+  C extends Record<string, Tool.Any> = Record<never, never>
+> {
   readonly instructions: string | Instructions.Resolved
-  /** Its tools: `AssistantLoop.fromToolkit(toolkit)` of a native toolkit. */
-  readonly toolkit?: AssistantLoop.Tools<RT> | undefined
+  /** Its tools: a native toolkit, with its handlers from the layer. */
+  readonly toolkit?: Toolkit.Toolkit<T> | undefined
+  /** Tools it finds when it needs them: `search_tools` and `execute_tool` over this toolkit. */
+  readonly catalog?: Toolkit.Toolkit<C> | undefined
   /** Playbooks: a catalog in the prompt, loaded with `load_skill` when a task matches. */
   readonly skills?: ReadonlyArray<Skill<RS>> | undefined
   /** Model calls per brief. Default 8. */
@@ -134,9 +153,17 @@ interface Run {
    */
   readonly history: Effect.Effect<ReadonlyArray<Prompt.Message>>
   /** The agent loop over the run's history, with these instructions, tools, and skills. */
-  readonly loop: <RT = never, RS = never>(
-    options: LoopOptions<RT, RS>
-  ) => Stream.Stream<AssistantLoop.Event, AiError.AiError, LanguageModel.LanguageModel | RT | RS>
+  readonly loop: <
+    T extends Record<string, Tool.Any> = Record<never, never>,
+    RS = never,
+    C extends Record<string, Tool.Any> = Record<never, never>
+  >(
+    options: LoopOptions<T, RS, C>
+  ) => Stream.Stream<
+    AssistantLoop.Event,
+    AiError.AiError,
+    LanguageModel.LanguageModel | AssistantLoop.ToolkitServices<T> | AssistantLoop.ToolkitServices<C> | RS
+  >
 }
 
 /**
@@ -183,8 +210,9 @@ export const make = <const Name extends string>(
   // The signature checks what the handler uses (`CheckServices`); the layer's services, which the build
   // required, are provided to it and to every run's stream, so what's left is the run services.
   function toLayer<R = never, RE = never, E = never, RX = never>(
-    build: (Handler<R, RE> | Effect.Effect<Handler<R, RE>, E, RX>) & CheckServices<Exclude<R | RE, RunServices | RX>>
-  ): Layer.Layer<SpecialistHandler<Name>, never, Exclude<RX, Scope.Scope | AssistantChat>>
+    build: (Handler<R, RE> | Effect.Effect<Handler<R, RE>, E, RX>) &
+      CheckServices<Exclude<R | RE, RunServices | RX | Tool.Handler<string>>>
+  ): Layer.Layer<SpecialistHandler<Name>, never, Exclude<RX, Scope.Scope | AssistantChat> | ToolHandlers<R | RE>>
   function toLayer(
     build: Handler<any, any> | Effect.Effect<Handler<any, any>, unknown, any>
   ): Layer.Layer<SpecialistHandler<Name>, never, any> {

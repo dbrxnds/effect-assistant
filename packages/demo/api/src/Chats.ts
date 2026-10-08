@@ -6,7 +6,7 @@
  */
 import { ChatSummary, newChatTitle, seededChat, sortChats, titleFromText } from "@acme/demo-shared/ChatList"
 import * as ChatId from "effect-assistant/ChatId"
-import * as ChatLog from "effect-assistant/ChatLog"
+import * as AssistantChats from "effect-assistant/Chats"
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -145,35 +145,27 @@ export const layerSql: Layer.Layer<Chats, never, SqlClient.SqlClient> = Layer.ef
 )
 
 /**
- * Layer for where the log records that a chat was deleted: its own table,
- * since a deleted thread's row in `demo_chats` is gone. The log refuses
- * writes to a chat recorded here.
+ * Layer that tells the assistant which chats exist: the threads in the list.
+ * A thread that was never created, or was deleted (its row is gone), is
+ * `NotFound`, and nothing is stored for it.
  *
  * @category layers
  * @since 0.1.0
  */
-export const layerDeletedChats: Layer.Layer<ChatLog.DeletedChats, never, SqlClient.SqlClient> = Layer.effect(
-  ChatLog.DeletedChats,
+export const layerAssistantChats: Layer.Layer<never, never, Chats> = Layer.effect(
+  AssistantChats.Chats,
   Effect.gen(function* () {
-    const sql = (yield* SqlClient.SqlClient).withoutTransforms()
-    yield* sql`
-      CREATE TABLE IF NOT EXISTS demo_deleted_chats (
-        chat_id TEXT PRIMARY KEY,
-        deleted_at DOUBLE PRECISION NOT NULL
-      )
-    `
+    const chats = yield* Chats
 
-    return ChatLog.DeletedChats.of({
-      isDeleted: (chatId) =>
-        sql`SELECT chat_id FROM demo_deleted_chats WHERE chat_id = ${chatId}`.pipe(
-          Effect.map((rows) => rows.length > 0),
-          Effect.orDie
-        ),
-      markDeleted: (chatId, at) =>
-        sql`
-          INSERT INTO demo_deleted_chats (chat_id, deleted_at) VALUES (${chatId}, ${at})
-          ON CONFLICT (chat_id) DO NOTHING
-        `.pipe(Effect.asVoid, Effect.orDie)
-    })
-  }).pipe(Effect.orDie)
+    return {
+      get: (chatId) =>
+        chats.list.pipe(
+          Effect.flatMap((all) =>
+            all.some((chat) => chat.chatId === chatId)
+              ? Effect.succeed({ chatId })
+              : Effect.fail(AssistantChats.ChatUnavailable.make({ chatId, reason: "NotFound" }))
+          )
+        )
+    }
+  })
 )

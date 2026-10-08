@@ -16,12 +16,11 @@ import {
   AssistantChat,
   AssistantEngine,
   AssistantEvent,
-  AssistantLoop,
   AssistantToolCall,
   ChatId,
   ChatLog
 } from "../src/index.ts"
-import { collectUntil, say, simple, turnsDone } from "./utils/fixtures.ts"
+import { collectUntil, say, simple, turnsDone, withHandlers } from "./utils/fixtures.ts"
 import * as Scripted from "./utils/scripted.ts"
 
 const Resumer = Assistant.make("resumer")
@@ -102,7 +101,7 @@ describe("tool calls after a crash", () => {
         dependencies: [AssistantToolCall.AssistantToolCall]
       })
 
-      const sendReport = AssistantLoop.fromToolkit(Toolkit.make(SendReport), {
+      const sendReport = withHandlers(Toolkit.make(SendReport), {
         send_report: () =>
           Effect.gen(function* () {
             const call = yield* AssistantToolCall.AssistantToolCall
@@ -134,8 +133,8 @@ describe("tool calls after a crash", () => {
       ])
 
       const handlers = Resumer.toLayer((turn) =>
-        turn.loop({ instructions: "You help a small team. Be brief.", toolkit: sendReport })
-      )
+        turn.loop({ instructions: "You help a small team. Be brief.", toolkit: sendReport.toolkit })
+      ).pipe(Layer.provide(sendReport.toolkit.toLayer(sendReport.handlers)))
 
       const call = yield* Effect.scoped(
         Layer.build(
@@ -164,9 +163,7 @@ describe("a chat's log", () => {
           Effect.map((all) => all.filter((entry) => entry.chatId === chatId).at(-1)?.seq ?? 0)
         ),
       write: (_, entries) => Ref.update(stored, (all) => [...all, ...entries]),
-      lastEntries: Effect.succeed([]),
-      delete: () => Effect.void,
-      isDeleted: () => Effect.succeed(false)
+      lastEntries: Effect.succeed([])
     })
   })
 
@@ -241,9 +238,7 @@ describe("a chat's log", () => {
         lastSeq: (chatId) =>
           Effect.map(Ref.get(stored), (all) => all.filter((entry) => entry.chatId === chatId).length),
         write: (_, entries) => Ref.update(stored, (all) => [...all, ...entries]),
-        lastEntries: Effect.succeed([]),
-        delete: () => Effect.void,
-        isDeleted: () => Effect.succeed(false)
+        lastEntries: Effect.succeed([])
       })
 
       const handler = Resumer.toLayer(simple({ instructions: "Be brief." }))

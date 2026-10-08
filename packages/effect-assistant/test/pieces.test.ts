@@ -212,7 +212,6 @@ describe("a loop of your own", () => {
           AssistantLoop.step(
             {
               instructions: turn.instructions("You help a small team. Be brief."),
-              toolkit: turn.tools,
               history: turn.history(),
               toolChoice: "required"
             },

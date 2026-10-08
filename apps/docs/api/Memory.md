@@ -7,7 +7,9 @@ import { Memory } from "effect-assistant"
 ```
 
 The `Memory` module is what an assistant remembers across chats, in three
-kinds:
+kinds: lasting facts about the user (`profile`), short-lived ones that
+expire (`note`), and one line per chat about what happened in it (`log`).
+Facts live in scopes the app picks: the user's own, and their team's.
 
 ## Other
 
@@ -147,13 +149,35 @@ const log: (scopes: Scopes, chatId: ChatId, text: string) => Effect.Effect<void,
 
 <small>Since 0.1.0</small>
 
-### makeToolkit
+### CurrentScopes
 
-The `remember`, `forget` and `recall` tools, over these scopes. They need
-the `MemoryStore`.
+Whose memory the tools read and write: a turn provides it, from whom the
+chat is for (`Stream.provideService(Memory.CurrentScopes, scopes)`).
 
 ```ts
-const makeToolkit: (scopes: Scopes) => AssistantLoop.Tools<MemoryStore | AssistantChat>
+class CurrentScopes extends Context.Service<CurrentScopes, Scopes>()("effect-assistant/Memory/CurrentScopes")
+```
+
+<small>Since 0.1.0</small>
+
+### Tools
+
+The `remember`, `forget` and `recall` tools. Merge them into the loop's
+toolkit, provide `layerTools`, and provide `CurrentScopes` for
+each turn.
+
+```ts
+const Tools = Toolkit.make(Remember, Forget, Recall)
+```
+
+<small>Since 0.1.0</small>
+
+### layerTools
+
+Layer for the `Tools`' handlers. They use the `MemoryStore` and the turn's `CurrentScopes`.
+
+```ts
+const layerTools = Tools.toLayer({ …
 ```
 
 <small>Since 0.1.0</small>

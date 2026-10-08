@@ -1,5 +1,7 @@
 /** What the tests share: they run on a scripted model (`scripted.ts`). */
 import type * as LanguageModel from "effect/ai/LanguageModel"
+import type * as Tool from "effect/ai/Tool"
+import type * as Toolkit from "effect/ai/Toolkit"
 import * as TestRunner from "effect/cluster/TestRunner"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -59,10 +61,54 @@ export const runEntity = <E, RIn>(handlers: Layer.Layer<never, E, RIn>, model: M
   )
 
 /** A handler that runs the turn's loop with these options. */
+/** A native toolkit with its handlers, for a test's loop: `simple` provides them. */
+export interface WithHandlers<T extends Record<string, Tool.Any>> {
+  readonly toolkit: Toolkit.Toolkit<T>
+  readonly handlers: Toolkit.HandlersFrom<T>
+}
+
+export const withHandlers = <T extends Record<string, Tool.Any>>(
+  toolkit: Toolkit.Toolkit<T>,
+  handlers: Toolkit.HandlersFrom<T>
+): WithHandlers<T> => ({ toolkit, handlers })
+
+/** A handler that runs `turn.loop` with these options. */
 export const simple =
-  <RT = never, RS = never>(options: Assistant.LoopOptions<RT, RS>) =>
+  <RS = never>(options: Assistant.LoopOptions<Record<never, never>, RS>) =>
   (turn: Assistant.Turn) =>
     turn.loop(options)
+
+/** A handler that runs `turn.loop` with a toolkit, its handlers provided. */
+export const withTools =
+  <T extends Record<string, Tool.Any>, RS = never>(
+    options: Omit<Assistant.LoopOptions<T, RS>, "toolkit"> & { readonly toolkit: WithHandlers<T> }
+  ) =>
+  (turn: Assistant.Turn) => {
+    const { toolkit, ...rest } = options
+
+    return Stream.unwrap(
+      Effect.map(toolkit.toolkit.toHandlers(toolkit.handlers), (handlers) =>
+        turn.loop({ ...rest, toolkit: toolkit.toolkit }).pipe(Stream.provideContext(handlers))
+      )
+    )
+  }
+
+/** A handler that runs `turn.loop` with a catalog the model searches, its handlers provided. */
+export const withCatalog =
+  <C extends Record<string, Tool.Any>, RS = never>(
+    options: Omit<Assistant.LoopOptions<Record<never, never>, RS, never, C>, "catalog"> & {
+      readonly catalog: WithHandlers<C>
+    }
+  ) =>
+  (turn: Assistant.Turn) => {
+    const { catalog, ...rest } = options
+
+    return Stream.unwrap(
+      Effect.map(catalog.toolkit.toHandlers(catalog.handlers), (handlers) =>
+        turn.loop({ ...rest, catalog: catalog.toolkit }).pipe(Stream.provideContext(handlers))
+      )
+    )
+  }
 
 /** An in-memory `TestAssistant` with this handler, its own event log, and this model. */
 export const memoryAssistant = (

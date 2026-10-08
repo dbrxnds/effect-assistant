@@ -34,41 +34,22 @@ export const OrderProducts = Tool.make("order_products", {
 })
 ```
 
-Give it a preview: what the user must see before they decide, like the
-order's total and the budget left. It's an Effect of the call's params, run
-when the call is parked, with the services the tool declares. Previews go
-with the toolkit, in the handler's build:
-
-```ts
-import { AssistantLoop } from "effect-assistant"
-
-const MyAssistantLive = MyAssistant.toLayer(
-  Effect.gen(function* () {
-    const orders = yield* Orders
-
-    const toolkit = AssistantLoop.fromToolkit(yield* OrderTools, {
-      previews: {
-        // A ToolFailure goes to the model instead ("Berlin has $200 left"), and nothing waits.
-        order_products: (order) => orders.quote(order)
-      }
-    })
-
-    return (turn) => turn.loop({ instructions, toolkit })
-  })
-)
-```
-
-When the model calls `order_products`, the loop runs the preview and records
-a `DecisionRequested` for the call. The model reads it as the call's result:
+It goes in the toolkit like any tool. When the model calls `order_products`,
+the loop records a `DecisionRequested` for the call instead of running it,
+and the model reads it as the call's result:
 
 ```json
 {
   "status": "waiting_for_decision",
   "decisionId": "decision:6f1c…",
-  "preview": { "product": "Cotton tote", "quantity": 300, "total": 930, "remainingBudget": 5440 },
   "next": "Not run: it runs only if the user approves it. Send them a message with a decision block …"
 }
 ```
+
+What the user sees about the call is the app's to decide. The model can
+look things up first, with a tool of yours like `quote_order`, and say them
+in its message; the [chat's view](./client) gives the client the paused
+call's tool and params, to show as it likes.
 
 A parked call doesn't end the turn, even next to `send_user_message` with
 `wait: true`: the model reads that it waits, and asks.
@@ -79,8 +60,8 @@ A parked call doesn't end the turn, even next to `send_user_message` with
   the same too. The model reads its result as the decision's.
 - **Declined**: the call never runs, and the model reads that it didn't.
 
-The user decided on the preview; things may have changed since. The tool can
-still refuse when it runs, like any tool: an order checks the budget again,
+Things may have changed since the user decided. The tool can still refuse
+when it runs, like any tool: an order checks the budget again,
 and fails with a `ToolFailure` the model reads.
 
 ## The decision block
@@ -110,9 +91,8 @@ a failure the model reads (kind `not_waiting_for_decision`).
 
 On the client, render it with the rest of the kit. The block's props only
 have ids; the [chat's view](./client) has each decision the block asks for,
-with its preview and how it was decided, and its renderer gets them as
-`decisions`. (A parked call's params and the model's reading of it stay on
-the server.) `Decision.answerAll` is the answer an Approve or Decline button
+with its call (`tool` and `params`) and how it was decided, and its renderer
+gets them as `decisions`. `Decision.answerAll` is the answer an Approve or Decline button
 sends. On the server, [`Decision.fromEntries`](/api/Decision#fromentries) folds the
 same from a log.
 
@@ -122,7 +102,7 @@ const render = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
   decision: ({ props, decisions, open, respond }) => (
     <>
       {decisions.map((decision) => (
-        <Preview key={decision.id} value={decision.preview} />
+        <CallSummary key={decision.id} tool={decision.tool} params={decision.params} />
       ))}
       <button disabled={!open} onClick={() => respond(Decision.answerAll(props, "approved"))}>
         {props.approveLabel ?? "Approve"}
@@ -163,7 +143,7 @@ tool that needs a decision either: keep those in the toolkit itself.
 
 | Event               | Meaning                                                                                                         |
 | ------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `DecisionRequested` | A decision's `id`, the parked call it's for (`origin`: its tool and params), and its `preview`.                 |
+| `DecisionRequested` | A decision's `id`, and the parked call it's for (`origin`: its tool and params).                                |
 | `BlockAnswer`       | The user's answer: `{ decisions: { [id]: "approved" \| "declined" } }`, on the message with the decision block. |
 | `DecisionResolved`  | A decision made: its `outcome`, and the answer that made it.                                                    |
 

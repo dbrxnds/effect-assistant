@@ -53,7 +53,8 @@ history wired in.
 | Option         | What it is                                                                        |
 | -------------- | --------------------------------------------------------------------------------- |
 | `instructions` | The assistant's role and rules: text, or [resolved instructions](./instructions). |
-| `toolkit`      | Its [tools](./tools), next to its own: `AssistantLoop.fromToolkit(...)`.          |
+| `toolkit`      | Its [tools](./tools), next to its own: a native toolkit, handlers from the layer. |
+| `catalog`      | Tools the model [searches](./tools#many-tools-a-catalog) instead of seeing.       |
 | `skills`       | [Playbooks](./skills) it loads when a task matches.                               |
 | `maxSteps`     | Model calls per turn. Default 16.                                                 |
 
