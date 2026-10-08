@@ -33,10 +33,10 @@ type InputId = typeof InputId.Type
 
 ### make
 
-Creates a new random input id, with Effect's `Random`.
+Creates a new random input id, with Effect's `Random`: seed it in tests for the same ids every run.
 
 ```ts
-const make: Effect.Effect<InputId>
+const make: () => Effect.Effect<InputId>
 ```
 
 <small>Since 0.1.0</small>

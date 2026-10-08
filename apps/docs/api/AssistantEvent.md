@@ -76,11 +76,12 @@ const textWithAttachments: (text: string, attachments: ReadonlyArray<Attachment>
 
 ### UserMessage
 
-Text the user typed, and the files they attached.
+Text the user typed, and the files they attached. `id` defaults to a new
+one; pass the client's own to make a retried send store the message once.
 
 ```ts
 class UserMessage extends Schema.TaggedClass<UserMessage>()("UserMessage", {
-  id: InputId,
+  id: InputId.pipe(Schema.withConstructorDefault(makeInputId())),
   text: Schema.String,
   attachments: Schema.optional(Schema.Array(Attachment).check(Schema.isMaxLength(MAX_ATTACHMENTS)))
 })

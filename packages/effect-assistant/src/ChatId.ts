@@ -16,9 +16,5 @@ export const ChatId = Schema.TemplateLiteral(["chat:", Uuid.Uuid]).pipe(Schema.b
 /** A chat id. */
 export type ChatId = typeof ChatId.Type
 
-/** Creates a new random chat id, with Effect's `Random`. */
-export const make: Effect.Effect<ChatId> = Effect.gen(function* () {
-  const uuid = yield* Uuid.make
-
-  return ChatId.make(`chat:${uuid}`)
-})
+/** Creates a new random chat id, with Effect's `Random`: seed it in tests for the same ids every run. */
+export const make = (): Effect.Effect<ChatId> => Effect.map(Uuid.make, (uuid) => ChatId.make(`chat:${uuid}`))

@@ -13,7 +13,7 @@ pnpm add effect-assistant effect@^4.0.0 @effect/ai-anthropic@^4.0.0
 ```ts
 import * as AnthropicClient from "@effect/ai-anthropic/AnthropicClient"
 import * as AnthropicLanguageModel from "@effect/ai-anthropic/AnthropicLanguageModel"
-import { Assistant, AssistantEngine, AssistantEvent, ChatId, ChatLog, InputId } from "effect-assistant"
+import { Assistant, AssistantEngine, AssistantEvent, ChatId, ChatLog } from "effect-assistant"
 import * as Tool from "effect/ai/Tool"
 import * as Toolkit from "effect/ai/Toolkit"
 import * as Config from "effect/Config"
@@ -56,12 +56,9 @@ const AppLive = MyAssistantLive.pipe(
 
 const program = Effect.gen(function* () {
   const assistant = yield* MyAssistant
-  const chatId = yield* ChatId.make
+  const chatId = yield* ChatId.make()
 
-  yield* assistant.submit(
-    chatId,
-    AssistantEvent.UserMessage.make({ id: yield* InputId.make, text: "Weather in Oslo?" })
-  )
+  yield* assistant.submit(chatId, AssistantEvent.UserMessage.make({ text: "Weather in Oslo?" }))
 
   yield* assistant.subscribe(chatId).pipe(
     Stream.takeUntil(({ event }) => Predicate.isTagged(event, "TurnCompleted")),

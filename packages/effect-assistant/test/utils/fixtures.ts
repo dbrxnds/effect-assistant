@@ -110,10 +110,10 @@ export const updatingAssistant = (
 ) => runMemory(Updating.toLayer(handler), model)
 
 /** A new chat's id. */
-export const newChat = ChatId.make
+export const newChat = ChatId.make()
 
 /** A new input id, for events built outside an Effect. */
-const inputId = () => Effect.runSync(InputId.make)
+const inputId = () => Effect.runSync(InputId.make())
 
 export const say = (text: string) => AssistantEvent.UserMessage.make({ id: inputId(), text })
 

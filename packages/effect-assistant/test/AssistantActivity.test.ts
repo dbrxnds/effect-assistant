@@ -5,7 +5,7 @@ import { say, storedUpdate } from "./utils/fixtures.ts"
 
 const { SpecialistFinished, SpecialistStarted, TurnCompleted, TurnFailed, TurnStarted } = AssistantEvent
 
-const chatId = Effect.runSync(ChatId.make)
+const chatId = Effect.runSync(ChatId.make())
 
 const entries = (events: ReadonlyArray<AssistantEvent.AssistantEvent>) =>
   events.map((event, i) => AssistantEvent.Entry.make({ chatId, seq: i + 1, at: (i + 1) * 1000, event }))

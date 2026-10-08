@@ -655,7 +655,7 @@ describe("decisions across a restart", () => {
   it.live("runs a call parked before the restart once the user approves it, with its id and params", () =>
     Effect.gen(function* () {
       const log = yield* ChatLog.ChatLog
-      const chat = yield* ChatId.make
+      const chat = yield* ChatId.make()
       const ran = yield* Deferred.make<Ran>()
 
       yield* log.append(chat, parkedLog)
@@ -672,7 +672,7 @@ describe("decisions across a restart", () => {
   it.live("resolves an answer the restart cut off before it was resolved, then runs the call", () =>
     Effect.gen(function* () {
       const log = yield* ChatLog.ChatLog
-      const chat = yield* ChatId.make
+      const chat = yield* ChatId.make()
       const ran = yield* Deferred.make<Ran>()
 
       // The answer was stored, and the process stopped before its decision was resolved.
@@ -691,7 +691,7 @@ describe("decisions across a restart", () => {
   it.live("runs an approved call a restart cut off while it ran again, with the same key", () =>
     Effect.gen(function* () {
       const log = yield* ChatLog.ChatLog
-      const chat = yield* ChatId.make
+      const chat = yield* ChatId.make()
       const ran = yield* Deferred.make<Ran>()
 
       yield* log.append(chat, [

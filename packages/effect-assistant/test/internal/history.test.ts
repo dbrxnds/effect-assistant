@@ -9,7 +9,7 @@ import { say } from "../utils/fixtures.ts"
 
 const { ModelOutput, ToolResult, ToolStarted, TurnStarted } = AssistantEvent
 
-const chatId = Effect.runSync(ChatId.make)
+const chatId = Effect.runSync(ChatId.make())
 
 const entries = (events: ReadonlyArray<AssistantEvent.AssistantEvent>) =>
   events.map((event, i) => AssistantEvent.Entry.make({ chatId, seq: i + 1, at: 0, event }))

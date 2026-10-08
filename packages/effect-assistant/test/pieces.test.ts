@@ -85,7 +85,7 @@ describe("the app's own events", () => {
 
   it.effect("MyAssistant.Entry takes an entry with an app event through JSON and back, for an RPC", () =>
     Effect.gen(function* () {
-      const entry = { chatId: yield* ChatId.make, seq: 3, at: 0, event: summary }
+      const entry = { chatId: yield* ChatId.make(), seq: 3, at: 0, event: summary }
       const json = yield* Schema.encodeEffect(Compacting.Entry)(entry)
       const back = yield* Schema.decodeUnknownEffect(Compacting.Entry)(JSON.parse(JSON.stringify(json)))
 

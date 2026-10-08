@@ -70,7 +70,7 @@ describe("Compaction", () => {
   )
 
   it("keeps what is still open after the summary: a decision waiting for the user", () => {
-    const chatId = Effect.runSync(ChatId.make)
+    const chatId = Effect.runSync(ChatId.make())
     const callId = "toolu_order_1"
     const decisionId = DecisionId.fromCallId(callId)
 

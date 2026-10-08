@@ -73,19 +73,16 @@ its user sees it: the messages, and whether the assistant is working.
 **Example** (Submit, then read the reply)
 
 ```ts
-import { AssistantEvent, ChatId, ChatView, InputId } from "effect-assistant"
+import { AssistantEvent, ChatId, ChatView } from "effect-assistant"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 
 const program = Effect.gen(function* () {
   const assistant = yield* MyAssistant // its toLayer provides it
-  const chatId = yield* ChatId.make
+  const chatId = yield* ChatId.make()
 
-  yield* assistant.submit(
-    chatId,
-    AssistantEvent.UserMessage.make({ id: yield* InputId.make, text: "Hi! What can you do?" })
-  )
+  yield* assistant.submit(chatId, AssistantEvent.UserMessage.make({ text: "Hi! What can you do?" }))
 
   const view = yield* assistant.subscribeView(chatId).pipe(
     Stream.scan(() => ChatView.empty, ChatView.apply),

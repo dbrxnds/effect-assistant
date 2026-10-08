@@ -28,7 +28,7 @@ const owners = new Map<ChatId.ChatId, User>()
 /** A new chat for the user, as the app would create it. */
 const chatFor = (user: User) =>
   Effect.sync(() => {
-    const chatId = Effect.runSync(ChatId.make)
+    const chatId = Effect.runSync(ChatId.make())
     owners.set(chatId, user)
 
     return chatId

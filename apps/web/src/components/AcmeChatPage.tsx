@@ -157,7 +157,7 @@ export function AcmeChatPage() {
                           key={text}
                           type="button"
                           onClick={() =>
-                            void send(AssistantEvent.UserMessage.make({ id: Effect.runSync(InputId.make), text }))
+                            void send(AssistantEvent.UserMessage.make({ id: Effect.runSync(InputId.make()), text }))
                           }
                         >
                           {text}

@@ -223,7 +223,7 @@ describe("with a real model", () => {
   it.live("runs a call a crash cut off again, then goes on", () =>
     Effect.gen(function* () {
       const log = yield* ChatLog.ChatLog
-      const chat = yield* ChatId.make
+      const chat = yield* ChatId.make()
       const ran = yield* Deferred.make<string>()
       const Resumer = Assistant.make("contract-resumer")
 

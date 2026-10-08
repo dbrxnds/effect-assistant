@@ -11,7 +11,7 @@ for (const [name, store] of Object.entries(stores)) {
     it.effect("stores and reads a chat's entries, in order", () =>
       Effect.gen(function* () {
         const log = yield* ChatLog.ChatLog
-        const chat = yield* ChatId.make
+        const chat = yield* ChatId.make()
         yield* log.append(chat, [say("one"), AssistantEvent.TurnStarted.make({ assistant: "test" })])
 
         expect((yield* log.read(chat)).map(({ seq, event }) => [seq, event._tag])).toEqual([
@@ -27,7 +27,7 @@ describe("ChatLog.layerMemory", () => {
   it.effect("numbers entries per chat from 1", () =>
     Effect.gen(function* () {
       const log = yield* ChatLog.ChatLog
-      const [a, b] = yield* Effect.all([ChatId.make, ChatId.make])
+      const [a, b] = yield* Effect.all([ChatId.make(), ChatId.make()])
       yield* log.append(a, [say("one"), say("two")])
       yield* log.append(b, [say("other")])
       const [third] = yield* log.append(a, [AssistantEvent.TurnStarted.make({ assistant: "test" })])
@@ -42,7 +42,7 @@ describe("ChatLog.layerMemory", () => {
   it.effect("lists the chats whose last entry doesn't end a turn", () =>
     Effect.gen(function* () {
       const log = yield* ChatLog.ChatLog
-      const [done, midTurn, waiting] = yield* Effect.all([ChatId.make, ChatId.make, ChatId.make])
+      const [done, midTurn, waiting] = yield* Effect.all([ChatId.make(), ChatId.make(), ChatId.make()])
       yield* log.append(done, [
         say("hi"),
         AssistantEvent.TurnStarted.make({ assistant: "test" }),
@@ -58,7 +58,7 @@ describe("ChatLog.layerMemory", () => {
   it.effect("reads the entries after a seq", () =>
     Effect.gen(function* () {
       const log = yield* ChatLog.ChatLog
-      const chat = yield* ChatId.make
+      const chat = yield* ChatId.make()
       yield* log.append(chat, [say("one"), say("two"), say("three")])
 
       expect((yield* log.read(chat, { after: 1 })).map((entry) => entry.seq)).toEqual([2, 3])
