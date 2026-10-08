@@ -6,14 +6,15 @@
 import { InputId } from "effect-assistant"
 ```
 
-The `InputId` module defines the id of one input to an assistant: a user message,
-a block answer, or one of the app's events (in its `id` field).
+This module provides the id of an input to an assistant. An input is a user message, a block
+answer, or one of the app's events, and the id is stored in its `id` field.
 
 ## Constructors
 
 ### make
 
-Creates a new random input id, with Effect's `Random`: seed it in tests for the same ids every run.
+Creates a new random input id using Effect's `Random`. Seed `Random` in tests to get the same ids
+on every run.
 
 ```ts
 const make: () => Effect.Effect<InputId>
@@ -23,8 +24,8 @@ const make: () => Effect.Effect<InputId>
 
 ### fromKey
 
-Creates the input id for a key, like `${runId}:order_placed`: the same key
-gives the same id, so sending the input again stores it once.
+Creates the input id for a key, such as `${runId}:order_placed`. The same key always gives the
+same id, so an input that is sent again is stored only once.
 
 ```ts
 const fromKey: (key: string) => InputId
@@ -36,7 +37,7 @@ const fromKey: (key: string) => InputId
 
 ### InputId
 
-An input id.
+Represents an input id.
 
 ```ts
 type InputId = typeof InputId.Type
@@ -48,7 +49,7 @@ type InputId = typeof InputId.Type
 
 ### InputId
 
-Schema for input ids: any string, branded.
+Schema for input ids. Any string is a valid input id, and the schema brands it.
 
 ```ts
 const InputId = Schema.String.pipe(Schema.brand("effect-assistant/InputId"))

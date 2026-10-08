@@ -1,8 +1,11 @@
 /**
- * The `Decision` module is how the user approves or declines a tool call the
- * assistant can't make on its own, like placing an order or publishing a
- * post: a tool with Effect's `needsApproval` is parked when the model calls
- * it, and the user's answer to the decision block runs it or declines it.
+ * Lets the user approve or decline a tool call the assistant can't make on its own, such as
+ * placing an order or publishing a post.
+ *
+ * When the model calls a tool marked with Effect's `needsApproval`, the call is parked instead of
+ * run. The model asks the user with the decision {@link block}, and the user's answer to that
+ * block runs the call or declines it. {@link fromEntries} computes where every decision in a
+ * chat's log stands.
  *
  * @since 0.1.0
  */
@@ -15,7 +18,7 @@ import * as DecisionId from "./DecisionId.ts"
 import type { InputId } from "./InputId.ts"
 
 /**
- * The decision block's kind.
+ * The kind of the decision block.
  *
  * @category utils
  * @since 0.1.0
@@ -23,15 +26,15 @@ import type { InputId } from "./InputId.ts"
 export const kind = "decision"
 
 /**
- * Schema for the decision block's props: which decisions it asks for, and
- * optionally its buttons' labels.
+ * Schema for the decision block's props, which list the decisions it asks for and, optionally,
+ * its buttons' labels.
  *
  * @category schemas
  * @since 0.1.0
  */
 export const Props = Schema.Struct({
-  // Plain strings: a strict tool schema with the id's pattern is too much for some providers; the ids are checked
-  // against the decisions waiting when the message is sent.
+  // Plain strings: a strict tool schema with the id's pattern is too much for some providers; the
+  // ids are checked against the decisions waiting when the message is sent.
   decisionIds: Schema.Array(Schema.String).check(Schema.isMinLength(1)).annotate({
     description:
       "The decisions to ask for: each waiting call's decisionId. Several go in one block when the user decides them together."
@@ -45,7 +48,7 @@ export const Props = Schema.Struct({
 })
 
 /**
- * The decision block's props.
+ * Represents the decision block's props.
  *
  * @category models
  * @since 0.1.0
@@ -53,8 +56,8 @@ export const Props = Schema.Struct({
 export type Props = typeof Props.Type
 
 /**
- * Schema for the decision block's answer: an outcome for every decision the
- * block asks for, by id.
+ * Schema for the decision block's answer, which holds an outcome for every decision the block
+ * asks for, by id.
  *
  * @category schemas
  * @since 0.1.0
@@ -64,7 +67,7 @@ export const Answer = Schema.Struct({
 })
 
 /**
- * The decision block's answer.
+ * Represents the decision block's answer.
  *
  * @category models
  * @since 0.1.0
@@ -72,10 +75,44 @@ export const Answer = Schema.Struct({
 export type Answer = typeof Answer.Type
 
 /**
- * The decision block: approve / decline for decisions waiting for the user.
- * Put it in the assistant's `BlockKit`; an assistant with a tool that needs
- * a decision must have it. The client renders it like any block, with the
- * calls from {@link fromEntries}: their tool and params.
+ * Block with approve and decline buttons for the decisions waiting for the user.
+ *
+ * **Details**
+ *
+ * Put it in the assistant's `BlockKit`. An assistant with a tool that needs a decision must have
+ * it. The client renders it like any other block, with the calls from {@link fromEntries} (their
+ * tool and params).
+ *
+ * **Example** (Asking the user before placing an order)
+ *
+ * ```ts
+ * import { Assistant, BlockKit, Decision } from "effect-assistant"
+ * import * as Tool from "effect/ai/Tool"
+ * import * as Toolkit from "effect/ai/Toolkit"
+ * import * as Effect from "effect/Effect"
+ * import * as Layer from "effect/Layer"
+ * import * as Schema from "effect/Schema"
+ *
+ * export const Shop = Assistant.make("shop", { blocks: BlockKit.make([Decision.block]) })
+ *
+ * const OrderTools = Toolkit.make(
+ *   Tool.make("place_order", {
+ *     description: "Places an order.",
+ *     parameters: Schema.Struct({ sku: Schema.String, quantity: Schema.Int }),
+ *     success: Schema.Struct({ reference: Schema.String }),
+ *     needsApproval: true
+ *   })
+ * )
+ *
+ * const OrderToolsLive = OrderTools.toLayer({
+ *   place_order: () => Effect.succeed({ reference: "R-1042" })
+ * })
+ *
+ * // The call waits until the user answers the decision block.
+ * const ShopLive = Shop.toLayer((turn) =>
+ *   turn.loop({ instructions: "You place orders for the team.", toolkit: OrderTools })
+ * ).pipe(Layer.provide(OrderToolsLive))
+ * ```
  *
  * @category constructors
  * @since 0.1.0
@@ -88,8 +125,9 @@ export const block = Block.make(kind, {
 })
 
 /**
- * The answer that gives every decision the block asks for the same outcome:
- * what an "Approve" or "Decline" button sends.
+ * Creates an answer that gives every decision the block asks for the same outcome.
+ *
+ * This is what an "Approve" or "Decline" button sends.
  *
  * @category constructors
  * @since 0.1.0
@@ -99,20 +137,20 @@ export const answerAll = (props: Props, outcome: AssistantEvent.DecisionOutcome)
 })
 
 /**
- * Where a decision stands.
+ * Represents the state of a decision.
  *
  * @category models
  * @since 0.1.0
  */
 export interface State {
   readonly request: AssistantEvent.DecisionRequested
-  /** How the user decided; `undefined` while it waits. */
+  /** How the user decided, or `undefined` while the decision waits. */
   readonly outcome: AssistantEvent.DecisionOutcome | undefined
-  /** The answer that decided it. */
+  /** The id of the answer that decided it. */
   readonly answer: InputId | undefined
-  /** Whether its `DecisionResolved` is stored: a workflow's decision is passed on by then. */
+  /** Whether its `DecisionResolved` is stored. A workflow's decision has been passed on by then. */
   readonly resolved: boolean
-  /** An approved call's result, once it ran. */
+  /** The approved call's result, once the call has run. */
   readonly result: AssistantEvent.ToolResult | undefined
 }
 
@@ -157,7 +195,8 @@ export const apply = (
     }))
   }
 
-  // A stored decision answer was checked against its block when it was submitted: the first one for a decision decides it.
+  // A stored decision answer was checked against its block when it was submitted: the first one
+  // for a decision decides it.
   if (Predicate.isTagged(event, "BlockAnswer") && event.kind === kind) {
     return Option.match(decodeAnswer(event.value), {
       onNone: () => states,

@@ -6,8 +6,12 @@
 import { BlockKit } from "effect-assistant"
 ```
 
-The `BlockKit` module groups the blocks an assistant may put in its messages, and
-renders them on the client.
+Groups the blocks an assistant may put in its messages, and renders them on the client.
+
+A kit is created with `make` and passed to `Assistant.make`. `blockStates` computes
+the state of every message's block from a chat's log, `closeStale` closes the blocks the
+user moved on from, and `toClient` creates a client-side renderer with one function per
+block kind.
 
 ## Constructors
 
@@ -25,7 +29,7 @@ const make: <const Blocks extends ReadonlyArray<Block.Any>>(blocks: Blocks) => B
 
 ### BlockKit
 
-A catalog of blocks.
+Represents a catalog of blocks, with a lookup by kind.
 
 ```ts
 interface BlockKit<Blocks extends Block.Any = Block.Any> {
@@ -38,13 +42,104 @@ interface BlockKit<Blocks extends Block.Any = Block.Any> {
 
 ### BlockState
 
-Where a message's block stands.
+Represents the state of a message's block.
 
 ```ts
 interface BlockState {
   readonly open: boolean
-  /** Its answer, if the user used it. */
+  /** The user's answer, if they used the block. */
   readonly answer: AssistantEvent.BlockAnswer | undefined
+}
+
+/**
+ * Returns the block states after one more event.
+ *
+ * @category utils
+ * @since 0.1.0
+ */
+export const nextBlockStates = (
+  states: ReadonlyMap<string, BlockState>,
+  event: { readonly _tag: string }
+): ReadonlyMap<string, BlockState> => {
+  if (!AssistantEvent.isLibraryEvent(event)) return states
+
+  const close = (ids: ReadonlyArray<string>) => {
+    const open = ids.filter((id) => states.get(id)?.open === true)
+
+    if (open.length === 0) return states
+
+    const next = new Map(states)
+
+    for (const id of open) next.set(id, { open: false, answer: undefined })
+
+    return next
+  }
+
+  if (Predicate.isTagged(event, "BlocksClosed")) return close(event.messageIds)
+
+  if (Predicate.isTagged(event, "AssistantMessage")) {
+    const closed = close(event.closes ?? [])
+
+    return event.block === undefined ? closed : new Map(closed).set(event.id, { open: true, answer: undefined })
+  }
+
+  if (!Predicate.isTagged(event, "BlockAnswer") || states.get(event.messageId)?.open !== true) return states
+
+  return new Map(states).set(event.messageId, { open: false, answer: event })
+}
+
+/**
+ * Returns the state of every message's block, by message id.
+ *
+ * @category utils
+ * @since 0.1.0
+ */
+export const blockStates = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): ReadonlyMap<string, BlockState> => {
+  let states: ReadonlyMap<string, BlockState> = new Map()
+
+  for (const entry of entries) states = nextBlockStates(states, entry.event)
+
+  return states
+}
+
+/**
+ * Returns the ids of the messages whose blocks are still open after the user typed the given
+ * number of messages without using them.
+ *
+ * **Details**
+ *
+ * These are the blocks {@link closeStale} closes. Decision blocks never go stale, since work waits
+ * on them and closing one would leave it waiting.
+ *
+ * @category utils
+ * @since 0.1.0
+ */
+export const staleBlocks = (
+  entries: ReadonlyArray<AssistantEvent.AnyEntry>,
+  options: { readonly messages: number }
+): ReadonlyArray<string> => {
+  const open = [...blockStates(entries)].flatMap(([id, state]) => (state.open ? [id] : []))
+
+  return open.filter((id) => {
+    const shown = entries.findIndex(
+      ({ event }) =>
+        AssistantEvent.isLibraryEvent(event) && Predicate.isTagged(event, "AssistantMessage") && event.id === id
+    )
+
+    const message = entries[shown]?.event
+
+    if (
+      message === undefined ||
+      (AssistantEvent.isLibraryEvent(message) &&
+        Predicate.isTagged(message, "AssistantMessage") &&
+        message.block?.kind === Decision.kind)
+    )
+      return false
+
+    const typed = entries.slice(shown + 1).filter(({ event }) => Predicate.isTagged(event, "UserMessage")).length
+
+    return typed >= options.messages
+  })
 }
 ```
 
@@ -52,23 +147,138 @@ interface BlockState {
 
 ### RenderArgs
 
-What a renderer gets for one block.
+Represents what a renderer receives for one block.
 
 ```ts
 interface RenderArgs<B> {
   readonly text: string
   readonly props: PropsOf<B>
-  /** False once it's answered, with the block or in words: show it read-only then. */
+  /**
+   * Whether the block is open. It is `false` once the block is answered, with the block or in
+   * words; show it read-only then.
+   */
   readonly open: boolean
   /** The user's answer, if they used the block. */
   readonly answer: AnswerOf<B> | undefined
   /**
-   * For the decision block: the call each decision is for (its tool and params), and how it was decided. Empty
-   * otherwise.
+   * For the decision block, the call each decision is for (its tool and params) and how it was
+   * decided. Empty for other blocks.
    */
   readonly decisions: ReadonlyArray<ChatView.Decision>
   /** Sends an answer. Only call it while `open`. */
   readonly respond: (answer: AnswerOf<B>) => void
+}
+
+/**
+ * Represents a renderer for every kind in a kit.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Renderers<Kit extends BlockKit, Out> = {
+  readonly [K in KindOf<Kit["blocks"][number]>]: (args: RenderArgs<BlockOf<Kit, K>>) => Out
+}
+
+/**
+ * Represents the options for rendering one message's block.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface RenderOptions {
+  /** Submits an answer, for example over RPC. */
+  readonly respond: (answer: AssistantEvent.BlockAnswer) => void
+}
+
+/**
+ * Creates a client-side renderer for the blocks on a chat view's messages
+ * (`ChatView.AssistantMessage`).
+ *
+ * **Details**
+ *
+ * The renderers are type-checked, so every kind in the kit needs one, and each receives typed
+ * `props` and `answer`. A renderer's `respond` builds a `BlockAnswer` input, with the answer
+ * encoded by the block's answer schema, and passes it to the `respond` option to submit.
+ *
+ * The returned function returns `undefined` for a message without a block, or with a block it
+ * can't decode or has no renderer for.
+ *
+ * **Example** (Rendering blocks with React)
+ *
+ * ```tsx
+ * import { BlockKit, Decision } from "effect-assistant"
+ * import type { ReactNode } from "react"
+ *
+ * const Blocks = BlockKit.make([PickOne, Decision.block])
+ *
+ * const renderBlock = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
+ *   pick_one: ({ props, open, respond }) =>
+ *     props.options.map((option) => (
+ *       <button key={option} disabled={!open} onClick={() => respond({ picked: option })}>
+ *         {option}
+ *       </button>
+ *     )),
+ *   decision: ({ props, open, respond }) => (
+ *     <button disabled={!open} onClick={() => respond(Decision.answerAll(props, "approved"))}>
+ *       {props.approveLabel ?? "Approve"}
+ *     </button>
+ *   )
+ * })
+ *
+ * // For each AssistantMessage in the chat's view:
+ * renderBlock(message, { respond: (answer) => submit(answer) })
+ * ```
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export function toClient<Kit extends BlockKit, Out>(
+  kit: Kit,
+  renderers: Renderers<Kit, Out>
+): (message: ChatView.AssistantMessage, options: RenderOptions) => Out | undefined
+// The overload above checks that every kind has a renderer; here each one takes any block's
+// arguments.
+export function toClient<Out>(
+  kit: BlockKit,
+  renderers: Readonly<Record<string, (args: RenderArgs<Block.Any>) => Out>>
+): (message: ChatView.AssistantMessage, options: RenderOptions) => Out | undefined {
+  return (message, options) => {
+    if (message.block === undefined) return undefined
+
+    const { kind } = message.block
+    const block = kit.byKind.get(kind)
+    const render = renderers[kind]
+
+    if (block === undefined || render === undefined) return undefined
+
+    const props = Schema.decodeUnknownOption(block.props)(message.block.props)
+
+    if (Option.isNone(props)) return undefined
+
+    const given = message.block.answer
+    const answerCodec = block.answer === undefined ? undefined : Schema.toCodecJson(block.answer)
+
+    const answer =
+      given === undefined || answerCodec === undefined ? Option.none() : Schema.decodeUnknownOption(answerCodec)(given)
+
+    return render({
+      text: message.text,
+      props: props.value,
+      open: message.block.status === "open",
+      answer: Option.getOrUndefined(answer),
+      decisions: message.block.decisions ?? [],
+      respond: (value) =>
+        options.respond(
+          AssistantEvent.BlockAnswer.make({
+            // A block takes one answer: the same id every time, so a second click is stored once.
+            id: InputId.fromKey(`${message.id}:answer`),
+            messageId: message.id,
+            kind,
+            value: answerCodec === undefined ? value : Schema.encodeUnknownSync(answerCodec)(value)
+          })
+        )
+    })
+  }
 }
 ```
 
@@ -76,7 +286,7 @@ interface RenderArgs<B> {
 
 ### Renderers
 
-A renderer for every kind in a kit.
+Represents a renderer for every kind in a kit.
 
 ```ts
 type Renderers<Kit extends BlockKit, Out> = {
@@ -88,7 +298,7 @@ type Renderers<Kit extends BlockKit, Out> = {
 
 ### RenderOptions
 
-Options for rendering one message's block.
+Represents the options for rendering one message's block.
 
 ```ts
 interface RenderOptions {
@@ -126,9 +336,13 @@ const blockStates: (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => Readonly
 
 ### staleBlocks
 
-Returns the blocks still open after the user typed this many messages
-without using them: the ones `closeStale` closes. Decision blocks
-never go stale: work waits on them, and closing one would leave it waiting.
+Returns the ids of the messages whose blocks are still open after the user typed the given
+number of messages without using them.
+
+**Details**
+
+These are the blocks `closeStale` closes. Decision blocks never go stale, since work waits
+on them and closing one would leave it waiting.
 
 ```ts
 const staleBlocks: (
@@ -141,9 +355,13 @@ const staleBlocks: (
 
 ### closeStale
 
-Closes the blocks the user moved on from: still open after this many typed
-messages. Run it from a turn, before or after its loop; it records a
-`BlocksClosed` event, so every client folds them closed.
+Closes the blocks the user moved on from, which are still open after the given number of typed
+messages.
+
+**Details**
+
+Run it from a turn, before or after its loop. It records a `BlocksClosed` event, so every
+client folds the blocks closed.
 
 ```ts
 const closeStale = Effect.fnUntraced(function* (options: { readonly messages: number }) { …

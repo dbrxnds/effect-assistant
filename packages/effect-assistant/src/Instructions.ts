@@ -1,6 +1,9 @@
 /**
- * The `Instructions` module defines what an assistant, specialist, or skill is
- * told to do: text, optionally with span attributes (a {@link Resolved}).
+ * Defines the instructions that tell an assistant, specialist, or skill what to do.
+ *
+ * Instructions are text, or an Effect that produces text, optionally with span attributes
+ * (a {@link Resolved}). {@link resolve} turns them into a `Resolved`, and {@link protocol} is the
+ * text a turn's loop needs the model to know.
  *
  * @since 0.1.0
  */
@@ -8,13 +11,17 @@ import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 
 /**
- * What the model has to know for a turn's loop to work: every step is a tool
- * call, `wait` (or a last message with `wait: true`) ends the turn, and
- * messages can arrive mid-turn. The rest (the user sees only
- * `send_user_message`, what a `<specialist>` or an app's event is) is in the
- * tools' descriptions and in the history itself.
- * `turn.instructions(text)` puts it before the text; a custom loop on
- * `AssistantLoop.run` can use it too.
+ * The text the model has to know for a turn's loop to work.
+ *
+ * **Details**
+ *
+ * It tells the model that every step is a tool call, that `wait` (or a last message with
+ * `wait: true`) ends the turn, that the user sees only what it sends with `send_user_message`, and
+ * that messages can arrive mid-turn. The rest, such as what a `<specialist>` block or an app's
+ * event is, is in the tools' descriptions and in the history itself.
+ *
+ * `turn.instructions(text)` puts it before the text, and a custom loop on `AssistantLoop.run` can
+ * use it too.
  *
  * @category utils
  * @since 0.1.0
@@ -24,7 +31,7 @@ The user sees only the text of what you send with send_user_message: anything el
 Messages and updates can arrive while you work: handle the newest one, and don't repeat what you already told the user.`
 
 /**
- * Span attributes added to every model call made with a prompt.
+ * Represents the span attributes added to every model call made with a prompt.
  *
  * @category models
  * @since 0.1.0
@@ -32,7 +39,7 @@ Messages and updates can arrive while you work: handle the newest one, and don't
 export type SpanAttributes = Readonly<Record<string, string | number | boolean>>
 
 /**
- * Instructions with the span attributes to record them under.
+ * Represents instructions resolved to text, with the span attributes to record them under.
  *
  * @category models
  * @since 0.1.0
@@ -43,7 +50,8 @@ export interface Resolved {
 }
 
 /**
- * Text, or an Effect that produces it (optionally with span attributes).
+ * Represents instructions as text, or as an Effect that produces the text (optionally with span
+ * attributes).
  *
  * @category models
  * @since 0.1.0
@@ -51,7 +59,7 @@ export interface Resolved {
 export type Instructions<R = never> = string | Effect.Effect<string | Resolved, never, R>
 
 /**
- * Resolves instructions to text and span attributes.
+ * Resolves instructions to their text and span attributes.
  *
  * @category utils
  * @since 0.1.0

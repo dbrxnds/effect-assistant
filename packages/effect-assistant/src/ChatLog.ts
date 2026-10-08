@@ -1,6 +1,10 @@
 /**
- * The `ChatLog` module stores each chat as an append-only list of
+ * This module provides the `ChatLog` service, which stores each chat as an append-only list of
  * `AssistantEvent`s.
+ *
+ * A log is built on a {@link Storage}. {@link layerMemory} keeps every chat in memory, for tests
+ * and local runs, and {@link layerSql} stores chats in a SQL table so they survive restarts. To
+ * use another store, implement a `Storage` and pass it to {@link make}.
  *
  * @since 0.1.0
  */
@@ -16,7 +20,7 @@ import * as AssistantEvent from "./AssistantEvent.ts"
 import { ChatId } from "./ChatId.ts"
 
 /**
- * Service that stores each chat's events.
+ * Service that stores each chat's events as an ordered list of entries.
  *
  * @category services
  * @since 0.1.0
@@ -29,30 +33,33 @@ export class ChatLog extends Context.Service<
       chatId: ChatId,
       events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>
     ) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
-    /** Reads a chat's stored entries, in order: all of them, or those after a `seq`. */
+    /** Reads a chat's stored entries in order, either all of them or only those after a `seq`. */
     readonly read: (chatId: ChatId, options?: ReadOptions) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
     /**
-     * Chats whose last entry doesn't end a turn or the chat: the ones that may still owe a turn, after a restart.
+     * Returns the chats whose last entry ends neither a turn nor the chat. After a restart, these
+     * are the chats that may still owe a turn.
      */
     readonly unfinished: Effect.Effect<ReadonlyArray<ChatId>>
   }
 >()("effect-assistant/ChatLog") {}
 
 /**
- * Which of a chat's entries to read.
+ * Represents the options that select which of a chat's entries to read.
  *
  * @category models
  * @since 0.1.0
  */
 export interface ReadOptions {
-  /** Only the entries after this `seq`. */
+  /** Reads only the entries after this `seq`. */
   readonly after?: number | undefined
 }
 
 /**
- * The storage a `ChatLog` is built on: read a chat, find its last `seq`,
- * write new entries, and find every chat's last entry. Entries are never
- * removed: a deleted chat keeps its log, ending in `ChatDeleted`.
+ * Represents the storage that a `ChatLog` is built on.
+ *
+ * A storage reads a chat's entries, finds a chat's last `seq`, writes new entries, and finds every
+ * chat's last entry. Entries are never removed, so a deleted chat keeps its log, which ends in
+ * `ChatDeleted`.
  *
  * @category models
  * @since 0.1.0
@@ -61,12 +68,13 @@ export interface Storage {
   readonly read: (chatId: ChatId, options?: ReadOptions) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
   readonly lastSeq: (chatId: ChatId) => Effect.Effect<number>
   readonly write: (chatId: ChatId, entries: ReadonlyArray<AssistantEvent.Entry>) => Effect.Effect<void>
-  /** Every chat's last entry. */
+  /** Returns the last entry of every chat. */
   readonly lastEntries: Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
 }
 
 /**
- * Creates a `ChatLog` from a {@link Storage}.
+ * Creates a `ChatLog` from a {@link Storage}. `append` numbers new entries after the chat's last
+ * `seq` and stamps them with the current time.
  *
  * @category constructors
  * @since 0.1.0
@@ -99,7 +107,7 @@ export const make = (storage: Storage): ChatLog["Service"] =>
   })
 
 /**
- * Layer that keeps every chat in memory.
+ * Layer that keeps every chat in memory. The log is lost when the process stops.
  *
  * @category layers
  * @since 0.1.0
@@ -141,8 +149,37 @@ const Row = Schema.Struct({ chat_id: ChatId, seq: SqlNumber, at: SqlNumber, even
 const decodeLastSeq = Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ seq: Schema.NullOr(SqlNumber) })))
 
 /**
- * Layer that stores chats in a SQL table, `chat_log` (`chat_id`, `seq`, `at`,
- * `event`; primary key `chat_id, seq`), which must exist.
+ * Layer that stores chats in a SQL table named `chat_log`.
+ *
+ * **Details**
+ *
+ * The table must already exist. It has the columns `chat_id`, `seq`, `at`, and `event`, with the
+ * primary key `(chat_id, seq)`. The layer requires a `SqlClient`.
+ *
+ * **Example** (Storing chats in Postgres)
+ *
+ * ```ts
+ * import * as PgClient from "@effect/sql-pg/PgClient"
+ * import { ChatLog } from "effect-assistant"
+ * import * as Config from "effect/Config"
+ * import * as Layer from "effect/Layer"
+ *
+ * const ChatLogLive = ChatLog.layerSql.pipe(
+ *   Layer.provide(PgClient.layerConfig({ url: Config.Redacted("DATABASE_URL") }))
+ * )
+ * ```
+ *
+ * The table, in Postgres:
+ *
+ * ```sql
+ * CREATE TABLE chat_log (
+ *   chat_id TEXT NOT NULL,
+ *   seq INTEGER NOT NULL,
+ *   at DOUBLE PRECISION NOT NULL,
+ *   event TEXT NOT NULL,
+ *   PRIMARY KEY (chat_id, seq)
+ * );
+ * ```
  *
  * @category layers
  * @since 0.1.0

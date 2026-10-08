@@ -6,19 +6,44 @@
 import { ToolDiscovery } from "effect-assistant"
 ```
 
-The `ToolDiscovery` module turns a catalog toolkit into two tools, so the
-prompt doesn't carry every definition: `search_tools` finds tools by what the
-model needs to do (name, description, input schema), and `execute_tool`
-validates an input and runs one.
+Turns a catalog toolkit into two tools, so the prompt doesn't carry every tool definition.
+
+`search_tools` finds tools by what the model needs to do and returns their names, descriptions,
+and input schemas. `execute_tool` validates an input and runs one of them.
 
 ## Constructors
 
 ### make
 
-`search_tools` and `execute_tool` over a catalog toolkit, as a native
-toolkit and its handlers' layer. Merge the toolkit into the loop's, and
-provide the layer, which needs the catalog's handlers. A catalog tool's
-services are `execute_tool`'s: the turn provides them, as for any tool.
+Creates the `search_tools` and `execute_tool` tools over a catalog toolkit.
+
+**Details**
+
+It returns a native `toolkit` and its handlers' `layer`. Merge the toolkit into the loop's, and
+provide the layer, which needs the catalog's handlers. A catalog tool's services are
+`execute_tool`'s, so the turn provides them as it does for any tool.
+
+`execute_tool` doesn't run a tool that needs the user's decision; keep such tools in the loop's
+toolkit directly.
+
+**Example** (Finding rarely used tools when needed)
+
+```ts
+import { ToolDiscovery } from "effect-assistant"
+import * as Toolkit from "effect/ai/Toolkit"
+import * as Layer from "effect/Layer"
+
+// OfficeTools is a big toolkit, found when needed. CommonTools stays in the prompt.
+const OfficeDiscovery = ToolDiscovery.make(OfficeTools)
+const OfficeDiscoveryLive = OfficeDiscovery.layer.pipe(Layer.provide(OfficeToolsLive))
+
+const MyAssistantLive = MyAssistant.toLayer((turn) =>
+  turn.loop({
+    instructions,
+    toolkit: Toolkit.merge(CommonTools, OfficeDiscovery.toolkit)
+  })
+).pipe(Layer.provide([CommonToolsLive, OfficeDiscoveryLive]))
+```
 
 ```ts
 const make: <T extends Record<string, Tool.Any>>(catalog: Toolkit.Toolkit<T>) => …

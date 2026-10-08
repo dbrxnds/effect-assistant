@@ -6,18 +6,50 @@
 import { AppEvent } from "effect-assistant"
 ```
 
-The `AppEvent` module registers the app's own events with an assistant: a
-workflow's progress, a webhook, a summary for compaction, the draft the
-user opened. Each is a tagged schema, registered with two choices:
-whether storing it wakes a turn, and how the model reads it (`render`).
+Registers an application's own events with an assistant.
+
+An app event is a tagged schema for something the application reports into a chat, such as a
+workflow's progress, a webhook, a summary for compaction, or the draft the user opened.
+`make` registers one with two choices: whether storing it wakes a turn (`wakes`), and
+how the model reads it (`render`).
 
 ## Constructors
 
 ### make
 
-Registers one of the app's events: whether storing it wakes a turn
-(default: no), and how the model reads it (default: as JSON when it
-wakes a turn, not at all otherwise).
+Registers one of the application's events with an assistant.
+
+**Details**
+
+Storing the event wakes a turn only when `wakes` is `true`; it defaults to `false`. `render`
+defaults to `"json"` for an event that wakes a turn. An event that doesn't wake a turn and has
+no `render` isn't read by the model.
+
+The schema must be a tagged struct or class whose `_tag` is a string literal; `make` throws
+otherwise.
+
+**Example** (Registering an event that wakes a turn)
+
+```ts
+import { AppEvent, Assistant, InputId } from "effect-assistant"
+import * as Schema from "effect/Schema"
+
+class OrderShipped extends Schema.TaggedClass<OrderShipped>()("OrderShipped", {
+  id: InputId.InputId,
+  orderId: Schema.String,
+  carrier: Schema.String
+}) {}
+
+export const MyAssistant = Assistant.make("my-assistant", {
+  events: [
+    AppEvent.make(OrderShipped, {
+      wakes: true,
+      render: (shipped) =>
+        `Order ${shipped.orderId} shipped with ${shipped.carrier}. Tell the user if it matters.`
+    })
+  ]
+})
+```
 
 ```ts
 const make: <S extends EventSchema>(
@@ -45,8 +77,10 @@ const make: <S extends EventSchema>(
 
 ### EventSchema
 
-A schema for one of the app's own events: a tagged struct or class
-(`Schema.TaggedStruct`, `Schema.TaggedClass`) that needs no services.
+Schema for one of the application's own events.
+
+It is a tagged struct or class (`Schema.TaggedStruct`, `Schema.TaggedClass`) that needs no
+services.
 
 ```ts
 type EventSchema = Schema.Codec<{ readonly _tag: string }, { readonly _tag: string }> & {
@@ -58,8 +92,10 @@ type EventSchema = Schema.Codec<{ readonly _tag: string }, { readonly _tag: stri
 
 ### Render
 
-How the model reads an event: its tag and fields in JSON (`"json"`), or
-the text a function of the event returns.
+Describes how the model reads an event.
+
+`"json"` shows the event's tag and fields as JSON. A function shows the text it returns for the
+event.
 
 ```ts
 type Render<A> = "json" | ((event: A) => string)
@@ -69,8 +105,10 @@ type Render<A> = "json" | ((event: A) => string)
 
 ### AppEvent
 
-One of the app's events, registered: its schema and tag, whether it wakes a
-turn, and how the model reads it (`undefined`: it doesn't).
+Represents one of the application's events, registered with an assistant.
+
+It holds the event's schema and tag, whether storing it wakes a turn, and how the model reads
+it. A `render` of `undefined` means the model doesn't read it.
 
 ```ts
 interface AppEvent<S extends EventSchema = EventSchema> {
@@ -87,7 +125,7 @@ interface AppEvent<S extends EventSchema = EventSchema> {
 
 ### Any
 
-Any registered event, for generic constraints.
+Represents any registered event, for generic constraints.
 
 ```ts
 type Any = AppEvent<any>
@@ -97,7 +135,7 @@ type Any = AppEvent<any>
 
 ### Type
 
-The type of a registered event's values.
+Extracts the type of a registered event's values.
 
 ```ts
 type Type<E extends Any> = E["schema"]["Type"]

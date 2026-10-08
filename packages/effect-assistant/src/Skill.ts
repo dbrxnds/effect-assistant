@@ -1,13 +1,18 @@
 /**
- * The `Skill` module defines playbooks: step-by-step instructions for a kind
- * of task.
+ * Defines skills, which are playbooks with step-by-step instructions for a kind of task.
+ *
+ * A loop lists its skills as a catalog in the prompt, with each skill's name and description
+ * ({@link withCatalog}). The model loads a skill's instructions with the `load_skill` tool when a
+ * task matches.
  *
  * @since 0.1.0
  */
 import type * as Instructions from "./Instructions.ts"
 
 /**
- * A skill. `R` is what its instructions need when they're loaded.
+ * Represents a skill.
+ *
+ * `R` is the services its instructions need when they're loaded.
  *
  * @category models
  * @since 0.1.0
@@ -23,13 +28,37 @@ export interface Skill<R = never> {
 /**
  * Creates a skill.
  *
+ * **Details**
+ *
+ * Write the description as a trigger ("Use when…"), since it's all the model sees until it loads
+ * the skill. The instructions are text, or an Effect that is resolved each time the skill is
+ * loaded.
+ *
+ * **Example** (Defining a playbook for ordering campaigns)
+ *
+ * ```ts
+ * import { Skill } from "effect-assistant"
+ *
+ * const orderingCampaigns = Skill.make({
+ *   name: "Ordering a campaign",
+ *   description: "Use when the user wants to order or start a campaign.",
+ *   instructions: `1. Pick the product with list_campaign_products.
+ * 2. You need who it should reach and a budget. Ask for what's missing, one question at a time.
+ * 3. When you have both, call start_campaign.`
+ * })
+ *
+ * const MyAssistantLive = MyAssistant.toLayer((turn) =>
+ *   turn.loop({ instructions, skills: [orderingCampaigns] })
+ * )
+ * ```
+ *
  * @category constructors
  * @since 0.1.0
  */
 export const make = <R = never>(skill: Skill<R>): Skill<R> => skill
 
 /**
- * Returns what skills need when they're loaded.
+ * Extracts the services that skills need when they're loaded.
  *
  * @category utility types
  * @since 0.1.0
@@ -37,8 +66,8 @@ export const make = <R = never>(skill: Skill<R>): Skill<R> => skill
 export type Services<S> = S extends Skill<infer R> ? R : never
 
 /**
- * Returns the prompt with the skills' catalog appended, or the prompt as is
- * when there are none.
+ * Returns the prompt with the skills' catalog appended, or the prompt unchanged when there are no
+ * skills.
  *
  * @category utils
  * @since 0.1.0

@@ -6,14 +6,22 @@
 import { ChatView } from "effect-assistant"
 ```
 
-The `ChatView` module is a chat as its user sees it: what a chat client
-gets, and all it gets.
+This module provides the view of a chat as its user sees it. A chat client receives this view
+and nothing else.
+
+A `View` holds the chat's messages with their blocks and decisions, the chat's
+`Activity`, and whether the last turn failed or the chat was deleted. It never contains
+the model's output, tool calls or results, what the model read, the app's own events, or why a
+turn failed. The server streams `Update`s with `MyAssistant.subscribeView`, which is built
+on `updates`, and the client folds them with `apply`, starting from `empty`.
+On the server, `fromEntries` builds a whole view from a chat's log.
 
 ## Constructors
 
 ### empty
 
-A chat before anything happened in it: no messages, and nothing working.
+The view of a chat before anything has happened in it, with no messages and nothing working.
+Use it as the starting point when folding updates with `apply`.
 
 ```ts
 const empty: View
@@ -23,9 +31,24 @@ const empty: View
 
 ### fromEntries
 
-Returns a chat's view from its log's entries, for server-side code: a
-client gets it from `MyAssistant.subscribeView`, which knows the
-assistant's events.
+Returns a chat's view, built from the entries of its log.
+
+**When to use**
+
+Use it in server-side code, for example to return a whole chat at once. A client gets the view
+from `MyAssistant.subscribeView` instead, which knows the assistant's events.
+
+**Example** (Building a chat's view from its log)
+
+```ts
+import { type ChatId, ChatLog, ChatView } from "effect-assistant"
+import * as Effect from "effect/Effect"
+
+const viewOf = (chatId: ChatId.ChatId) =>
+  ChatLog.ChatLog.use((log) => log.read(chatId)).pipe(
+    Effect.map((entries) => ChatView.fromEntries(entries))
+  )
+```
 
 ```ts
 const fromEntries: (entries: ReadonlyArray<AssistantEvent.AnyEntry>, options?: Options) => View
@@ -37,8 +60,14 @@ const fromEntries: (entries: ReadonlyArray<AssistantEvent.AnyEntry>, options?: O
 
 ### apply
 
-Returns the view after an update: its messages replace the ones with
-their ids, in place, and the new ones go after the rest.
+Returns the view after applying an update.
+
+**Details**
+
+Each message in the update replaces the message with the same id, in place, and new messages
+are added after the rest. The update's activity, `failed`, and `deleted` replace the view's.
+Applying an update twice changes nothing, so a client that resubscribes from the start can fold
+again and get the same view.
 
 ```ts
 const apply: (view: View, update: Update) => View
@@ -50,7 +79,7 @@ const apply: (view: View, update: Update) => View
 
 ### Decision
 
-A decision as the user sees it.
+Represents a decision as the user sees it.
 
 ```ts
 type Decision = typeof Decision.Type
@@ -60,7 +89,7 @@ type Decision = typeof Decision.Type
 
 ### BlockStatus
 
-Where a block stands.
+The status of a block.
 
 ```ts
 type BlockStatus = typeof BlockStatus.Type
@@ -70,7 +99,7 @@ type BlockStatus = typeof BlockStatus.Type
 
 ### Block
 
-A block on an assistant's message.
+Represents a block on an assistant's message.
 
 ```ts
 type Block = typeof Block.Type
@@ -80,7 +109,7 @@ type Block = typeof Block.Type
 
 ### UserMessage
 
-A message the user sent.
+Represents a message the user sent.
 
 ```ts
 type UserMessage = typeof UserMessage.Type
@@ -90,7 +119,7 @@ type UserMessage = typeof UserMessage.Type
 
 ### AssistantMessage
 
-A message the assistant sent the user.
+Represents a message the assistant sent the user.
 
 ```ts
 type AssistantMessage = typeof AssistantMessage.Type
@@ -100,7 +129,7 @@ type AssistantMessage = typeof AssistantMessage.Type
 
 ### Message
 
-A message in the chat.
+Represents a message in the chat.
 
 ```ts
 type Message = typeof Message.Type
@@ -110,7 +139,7 @@ type Message = typeof Message.Type
 
 ### SpecialistWorking
 
-A specialist that works for the assistant.
+Represents a specialist that is working for the assistant.
 
 ```ts
 type SpecialistWorking = typeof SpecialistWorking.Type
@@ -120,7 +149,7 @@ type SpecialistWorking = typeof SpecialistWorking.Type
 
 ### Activity
 
-What works in the chat.
+Represents what is working in the chat.
 
 ```ts
 type Activity = typeof Activity.Type
@@ -130,7 +159,7 @@ type Activity = typeof Activity.Type
 
 ### View
 
-A chat as its user sees it.
+Represents a chat as its user sees it.
 
 ```ts
 type View = typeof View.Type
@@ -140,7 +169,7 @@ type View = typeof View.Type
 
 ### Update
 
-A change to a chat's view.
+Represents a change to a chat's view.
 
 ```ts
 type Update = typeof Update.Type
@@ -150,273 +179,42 @@ type Update = typeof Update.Type
 
 ### Options
 
-Options for a view of a chat's log.
+Represents the options for building a view from a chat's log.
 
 ```ts
 interface Options {
   /**
-   * The tags of the app's events that wake a turn: a turn is about to start after one. Default: none.
+   * The tags of the app's events that wake a turn. After such an event, the view shows a turn as
+   * about to start. Defaults to none.
    */
   readonly wakes?: ReadonlySet<string> | undefined
 }
 
 /**
- * Returns a chat's view from its log's entries, for server-side code: a
- * client gets it from `MyAssistant.subscribeView`, which knows the
- * assistant's events.
+ * Returns a chat's view, built from the entries of its log.
+ *
+ * **When to use**
+ *
+ * Use it in server-side code, for example to return a whole chat at once. A client gets the view
+ * from `MyAssistant.subscribeView` instead, which knows the assistant's events.
+ *
+ * **Example** (Building a chat's view from its log)
+ *
+ * ```ts
+ * import { type ChatId, ChatLog, ChatView } from "effect-assistant"
+ * import * as Effect from "effect/Effect"
+ *
+ * const viewOf = (chatId: ChatId.ChatId) =>
+ *   ChatLog.ChatLog.use((log) => log.read(chatId)).pipe(
+ *     Effect.map((entries) => ChatView.fromEntries(entries))
+ *   )
+ * ```
+ *
+ * @see {@link updates} for a stream of changes instead of a whole view
  *
  * @category constructors
  * @since 0.1.0
  */
-export const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, options?: Options): View => {
-  const fold = folding(options?.wakes ?? new Set())
-
-  for (const entry of entries) fold.step(entry)
-
-  return fold.view
-}
-
-interface Folding {
-  readonly step: (entry: AssistantEvent.AnyEntry) => Update | undefined
-  readonly view: View
-}
-
-const decodeProps = Schema.decodeUnknownOption(Decisions.Props)
-
-const decodeAnswer = Schema.decodeUnknownOption(Decisions.Answer)
-
-const activityOf = (activity: AssistantActivity.Activity): Activity => ({
-  working: activity.turnSince !== undefined || activity.queued,
-  specialists: [...activity.specialists.values()].map((run) => ({
-    specialist: run.specialist,
-    since: run.since
-  }))
-})
-
-const sameActivity = (a: Activity, b: Activity) =>
-  a.working === b.working &&
-  a.specialists.length === b.specialists.length &&
-  a.specialists.every((run, i) => {
-    const other = b.specialists[i]
-
-    return other !== undefined && run.specialist === other.specialist && run.since === other.since
-  })
-
-const decisionIds = (block: AssistantEvent.MessageBlock): ReadonlyArray<string> =>
-  block.kind === Decisions.kind
-    ? Option.match(decodeProps(block.props), {
-        onNone: () => [],
-        onSome: (props) => props.decisionIds
-      })
-    : []
-
-const folding = (wakes: ReadonlySet<string>): Folding => {
-  let seq = 0
-  let failed = false
-  let deleted = false
-  let activity = AssistantActivity.empty
-  let blocks: ReadonlyMap<string, BlockKit.BlockState> = new Map()
-  let decisions: ReadonlyMap<string, Decisions.State> = new Map()
-  // The messages in order, and the assistant's as stored: their blocks change as the chat goes on.
-  const messages = new Map<string, Message>()
-  const sent = new Map<string, AssistantEvent.AssistantMessage>()
-  // Which messages ask for a decision, so a decision's outcome updates the block that asked for it.
-  const asking = new Map<string, Array<string>>()
-
-  const blockOf = (message: AssistantEvent.AssistantMessage): Block | undefined => {
-    if (message.block === undefined) return undefined
-
-    const state = blocks.get(message.id)
-    const status = state === undefined || state.open ? "open" : state.answer === undefined ? "closed" : "answered"
-    const ids = decisionIds(message.block)
-
-    const shown = ids.flatMap((id) => {
-      const decision = decisions.get(id)
-
-      if (decision === undefined) return []
-
-      const { tool, params } = decision.request.origin
-      const shown = { id: decision.request.id, tool, params }
-
-      return [decision.outcome === undefined ? shown : { ...shown, outcome: decision.outcome }]
-    })
-
-    const block: Block = { kind: message.block.kind, props: toJson(message.block.props), status }
-    const answered = state?.answer === undefined ? block : { ...block, answer: toJson(state.answer.value) }
-
-    return message.block.kind === Decisions.kind ? { ...answered, decisions: shown } : answered
-  }
-
-  const viewOf = (message: AssistantEvent.AssistantMessage, at: number): AssistantMessage => {
-    const block = blockOf(message)
-
-    return block === undefined
-      ? AssistantMessage.make({ id: message.id, text: message.text, at })
-      : AssistantMessage.make({ id: message.id, text: message.text, at, block })
-  }
-
-  const touched = (event: AssistantEvent.AssistantEvent, at: number): ReadonlyArray<string> =>
-    Match.value(event).pipe(
-      Match.tagsExhaustive({
-        UserMessage: (message) => {
-          messages.set(
-            message.id,
-            message.attachments === undefined
-              ? UserMessage.make({ id: message.id, text: message.text, at })
-              : UserMessage.make({
-                  id: message.id,
-                  text: message.text,
-                  attachments: message.attachments,
-                  at
-                })
-          )
-          failed = false
-
-          return [message.id]
-        },
-        AssistantMessage: (message) => {
-          sent.set(message.id, message)
-          messages.set(message.id, viewOf(message, at))
-          failed = false
-
-          if (message.block !== undefined) {
-            for (const id of decisionIds(message.block)) asking.set(id, [...(asking.get(id) ?? []), message.id])
-          }
-
-          return [message.id, ...(message.closes ?? [])]
-        },
-        BlockAnswer: (answer) => {
-          failed = false
-
-          const decided =
-            answer.kind === Decisions.kind
-              ? Option.match(decodeAnswer(answer.value), {
-                  onNone: () => [],
-                  onSome: ({ decisions }) => Object.keys(decisions).flatMap((id) => asking.get(id) ?? [])
-                })
-              : []
-
-          return [answer.messageId, ...decided]
-        },
-        BlocksClosed: (closed) => closed.messageIds,
-        DecisionResolved: (resolved) => asking.get(resolved.id) ?? [],
-        TurnFailed: () => {
-          failed = true
-
-          return []
-        },
-        ModelOutput: () => [],
-        ToolStarted: () => [],
-        ToolResult: () => [],
-        TurnStarted: () => [],
-        TurnCompleted: () => [],
-        SpecialistStarted: () => [],
-        SpecialistFinished: () => [],
-        DecisionRequested: () => [],
-        ChatDeleted: () => {
-          deleted = true
-
-          return []
-        }
-      })
-    )
-
-  const step = (entry: AssistantEvent.AnyEntry): Update | undefined => {
-    const before = { activity: activityOf(activity), failed, deleted }
-    const { event } = entry
-
-    seq = entry.seq
-    activity = AssistantActivity.apply(activity, entry, { wakes })
-
-    if (!AssistantEvent.isLibraryEvent(event)) {
-      const now = activityOf(activity)
-
-      return sameActivity(before.activity, now) ? undefined : { seq, messages: [], activity: now, failed, deleted }
-    }
-
-    blocks = BlockKit.nextBlockStates(blocks, event)
-    decisions = Decisions.apply(decisions, event)
-
-    const changed = [...new Set(touched(event, entry.at))].flatMap((id) => {
-      const message = sent.get(id)
-      const current = messages.get(id)
-
-      if (message === undefined || current === undefined) return current === undefined ? [] : [current]
-
-      const next = viewOf(message, current.at)
-      messages.set(id, next)
-
-      return [next]
-    })
-
-    const now = activityOf(activity)
-
-    return changed.length === 0 &&
-      failed === before.failed &&
-      deleted === before.deleted &&
-      sameActivity(before.activity, now)
-      ? undefined
-      : { seq, messages: changed, activity: now, failed, deleted }
-  }
-
-  return {
-    step,
-    get view() {
-      return { seq, messages: [...messages.values()], activity: activityOf(activity), failed, deleted }
-    }
-  }
-}
-
-const merge = (updates: ReadonlyArray<Update>): Update | undefined => {
-  const last = updates.at(-1)
-
-  if (last === undefined) return undefined
-
-  const messages = new Map<string, Message>()
-
-  for (const update of updates) for (const message of update.messages) messages.set(message.id, message)
-
-  return {
-    seq: last.seq,
-    messages: [...messages.values()],
-    activity: last.activity,
-    failed: last.failed,
-    deleted: last.deleted
-  }
-}
-
-/**
- * Returns the updates a chat's entries make, streamed from the start of its
- * log (as `MyAssistant.subscribe` streams them): the ones after `after`, each
- * chunk of entries (like the stored ones, which come at once) as one update.
- * `MyAssistant.subscribeView` is this over the assistant's log.
- *
- * @category utils
- * @since 0.1.0
- */
-export const updates = <E, R>(
-  entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
-  options?: Options & { readonly after?: number | undefined }
-): Stream.Stream<Update, E, R> => {
-  const after = options?.after ?? 0
-
-  return entries.pipe(
-    Stream.mapAccumArray(
-      () => folding(options?.wakes ?? new Set()),
-      (fold, chunk) => {
-        const changed = chunk.flatMap((entry) => {
-          const update = fold.step(entry)
-
-          return update === undefined || entry.seq <= after ? [] : [update]
-        })
-
-        const merged = merge(changed)
-
-        return [fold, merged === undefined ? [] : [merged]]
-      }
-    )
-  )
-}
 ```
 
 <small>Since 0.1.0</small>
@@ -425,9 +223,9 @@ export const updates = <E, R>(
 
 ### Decision
 
-Schema for a decision as the user sees it on a decision block: the call
-it's for (its tool and params, which the app shows as it likes), and how
-they decided, once they did.
+Schema for a decision as the user sees it on a decision block. It holds the call the decision is
+for (its tool and params, which the app can display as it likes) and, once the user has
+decided, the outcome.
 
 ```ts
 const Decision = Schema.Struct({ …
@@ -437,9 +235,9 @@ const Decision = Schema.Struct({ …
 
 ### BlockStatus
 
-Schema for where a block stands: `"open"` while it takes an answer,
-`"answered"` once the user used it, `"closed"` when it closed without an
-answer (the user answered in words, or moved on).
+Schema for the status of a block. A block is `"open"` while it accepts an answer, `"answered"`
+once the user has used it, and `"closed"` when it closed without an answer because the user
+answered in words or moved on.
 
 ```ts
 const BlockStatus = Schema.Literals(["open", "answered", "closed"])
@@ -449,10 +247,9 @@ const BlockStatus = Schema.Literals(["open", "answered", "closed"])
 
 ### Block
 
-Schema for a block on an assistant's message: its kind and props (in JSON,
-as the block's props schema encodes them), where it stands, the user's
-answer (in JSON, as its answer schema encodes it), and, for a decision
-block, its decisions.
+Schema for a block on an assistant's message. It holds the block's kind, its props (JSON, as
+the block's props schema encodes them), its status, the user's answer (JSON, as the block's
+answer schema encodes it), and, for a decision block, its decisions.
 
 ```ts
 const Block = Schema.Struct({ …
@@ -473,8 +270,7 @@ const UserMessage = Schema.TaggedStruct("UserMessage", { …
 
 ### AssistantMessage
 
-Schema for a message the assistant sent the user, with its block, if it
-has one.
+Schema for a message the assistant sent the user, including its block if it has one.
 
 ```ts
 const AssistantMessage = Schema.TaggedStruct("AssistantMessage", { …
@@ -484,7 +280,7 @@ const AssistantMessage = Schema.TaggedStruct("AssistantMessage", { …
 
 ### Message
 
-Schema for a message in the chat: the user's or the assistant's.
+Schema for a message in the chat, sent by either the user or the assistant.
 
 ```ts
 const Message = Schema.Union([UserMessage, AssistantMessage])
@@ -494,8 +290,8 @@ const Message = Schema.Union([UserMessage, AssistantMessage])
 
 ### SpecialistWorking
 
-Schema for a specialist that works for the assistant: which one, and
-since when (epoch milliseconds).
+Schema for a specialist that is working for the assistant. It holds the specialist's name and
+when it started, in epoch milliseconds.
 
 ```ts
 const SpecialistWorking = Schema.Struct({ …
@@ -505,9 +301,11 @@ const SpecialistWorking = Schema.Struct({ …
 
 ### Activity
 
-Schema for what works in the chat: the assistant (a turn, or one about to
-start, for something that arrived), and its specialists. Nothing works
-when the chat is idle, even if a workflow waits on a timer or a decision.
+Schema for what is working in the chat.
+
+`working` is true while the assistant runs a turn, or when a turn is about to start for
+something that arrived. `specialists` lists the specialists that are working. When the chat is
+idle, nothing is working, even if a workflow is waiting on a timer or a decision.
 
 ```ts
 const Activity = Schema.Struct({ …
@@ -517,9 +315,9 @@ const Activity = Schema.Struct({ …
 
 ### View
 
-Schema for a chat as its user sees it: its messages, what works in it,
-whether the last turn failed, and whether the chat was deleted. `seq` is
-how far into the chat's log it is.
+Schema for a chat as its user sees it. It holds the chat's messages, what is working in it,
+whether the last turn failed, and whether the chat was deleted. `seq` is the position in the
+chat's log that the view is up to.
 
 ```ts
 const View = Schema.Struct({ …
@@ -529,10 +327,12 @@ const View = Schema.Struct({ …
 
 ### Update
 
-Schema for a change to a chat's view: the messages that are new or
-changed (a block answered or closed, a decision decided), whole, and what
-works in the chat, whether the last turn failed, and whether the chat was
-deleted, now. `seq` is how far into the log it is.
+Schema for a change to a chat's view.
+
+An update holds each message that is new or changed (for example, a block answered or closed,
+or a decision made), in full. It also holds the current activity, whether the last turn failed,
+and whether the chat was deleted. `seq` is the position in the chat's log that the update is up
+to.
 
 ```ts
 const Update = Schema.Struct({ …
@@ -544,7 +344,8 @@ const Update = Schema.Struct({ …
 
 ### isIdle
 
-Returns whether nothing works in the chat: no turn, and no specialist.
+Returns whether nothing is working in the chat: no turn is running or about to start, and no
+specialist is working.
 
 ```ts
 const isIdle: (view: View) => boolean
@@ -556,10 +357,32 @@ const isIdle: (view: View) => boolean
 
 ### updates
 
-Returns the updates a chat's entries make, streamed from the start of its
-log (as `MyAssistant.subscribe` streams them): the ones after `after`, each
-chunk of entries (like the stored ones, which come at once) as one update.
-`MyAssistant.subscribeView` is this over the assistant's log.
+Returns the stream of updates that a chat's entries produce.
+
+**Details**
+
+`entries` must stream from the start of the chat's log, as `MyAssistant.subscribe` does. The
+result contains only the updates after `after`, and each chunk of entries becomes one update;
+the stored entries, for example, arrive as one chunk. `MyAssistant.subscribeView` is this
+function applied to the assistant's log.
+
+**Example** (Folding a chat's log into its view)
+
+```ts
+import { Assistant, type ChatId, ChatView } from "effect-assistant"
+import * as Stream from "effect/Stream"
+
+const MyAssistant = Assistant.make("my-assistant")
+
+const watch = (chatId: ChatId.ChatId) =>
+  Stream.unwrap(
+    MyAssistant.useSync((assistant) =>
+      ChatView.updates(assistant.subscribe(chatId)).pipe(
+        Stream.scan(() => ChatView.empty, ChatView.apply)
+      )
+    )
+  )
+```
 
 ```ts
 const updates: <E, R>(

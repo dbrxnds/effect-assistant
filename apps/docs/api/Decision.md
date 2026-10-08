@@ -6,19 +6,56 @@
 import { Decision } from "effect-assistant"
 ```
 
-The `Decision` module is how the user approves or declines a tool call the
-assistant can't make on its own, like placing an order or publishing a
-post: a tool with Effect's `needsApproval` is parked when the model calls
-it, and the user's answer to the decision block runs it or declines it.
+Lets the user approve or decline a tool call the assistant can't make on its own, such as
+placing an order or publishing a post.
+
+When the model calls a tool marked with Effect's `needsApproval`, the call is parked instead of
+run. The model asks the user with the decision `block`, and the user's answer to that
+block runs the call or declines it. `fromEntries` computes where every decision in a
+chat's log stands.
 
 ## Constructors
 
 ### block
 
-The decision block: approve / decline for decisions waiting for the user.
-Put it in the assistant's `BlockKit`; an assistant with a tool that needs
-a decision must have it. The client renders it like any block, with the
-calls from `fromEntries`: their tool and params.
+Block with approve and decline buttons for the decisions waiting for the user.
+
+**Details**
+
+Put it in the assistant's `BlockKit`. An assistant with a tool that needs a decision must have
+it. The client renders it like any other block, with the calls from `fromEntries` (their
+tool and params).
+
+**Example** (Asking the user before placing an order)
+
+```ts
+import { Assistant, BlockKit, Decision } from "effect-assistant"
+import * as Tool from "effect/ai/Tool"
+import * as Toolkit from "effect/ai/Toolkit"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
+
+export const Shop = Assistant.make("shop", { blocks: BlockKit.make([Decision.block]) })
+
+const OrderTools = Toolkit.make(
+  Tool.make("place_order", {
+    description: "Places an order.",
+    parameters: Schema.Struct({ sku: Schema.String, quantity: Schema.Int }),
+    success: Schema.Struct({ reference: Schema.String }),
+    needsApproval: true
+  })
+)
+
+const OrderToolsLive = OrderTools.toLayer({
+  place_order: () => Effect.succeed({ reference: "R-1042" })
+})
+
+// The call waits until the user answers the decision block.
+const ShopLive = Shop.toLayer((turn) =>
+  turn.loop({ instructions: "You place orders for the team.", toolkit: OrderTools })
+).pipe(Layer.provide(OrderToolsLive))
+```
 
 ```ts
 const block = Block.make(kind, { …
@@ -28,8 +65,9 @@ const block = Block.make(kind, { …
 
 ### answerAll
 
-The answer that gives every decision the block asks for the same outcome:
-what an "Approve" or "Decline" button sends.
+Creates an answer that gives every decision the block asks for the same outcome.
+
+This is what an "Approve" or "Decline" button sends.
 
 ```ts
 const answerAll: (props: Props, outcome: AssistantEvent.DecisionOutcome) => Answer
@@ -41,7 +79,7 @@ const answerAll: (props: Props, outcome: AssistantEvent.DecisionOutcome) => Answ
 
 ### Props
 
-The decision block's props.
+Represents the decision block's props.
 
 ```ts
 type Props = typeof Props.Type
@@ -51,7 +89,7 @@ type Props = typeof Props.Type
 
 ### Answer
 
-The decision block's answer.
+Represents the decision block's answer.
 
 ```ts
 type Answer = typeof Answer.Type
@@ -61,18 +99,18 @@ type Answer = typeof Answer.Type
 
 ### State
 
-Where a decision stands.
+Represents the state of a decision.
 
 ```ts
 interface State {
   readonly request: AssistantEvent.DecisionRequested
-  /** How the user decided; `undefined` while it waits. */
+  /** How the user decided, or `undefined` while the decision waits. */
   readonly outcome: AssistantEvent.DecisionOutcome | undefined
-  /** The answer that decided it. */
+  /** The id of the answer that decided it. */
   readonly answer: InputId | undefined
-  /** Whether its `DecisionResolved` is stored: a workflow's decision is passed on by then. */
+  /** Whether its `DecisionResolved` is stored. A workflow's decision has been passed on by then. */
   readonly resolved: boolean
-  /** An approved call's result, once it ran. */
+  /** The approved call's result, once the call has run. */
   readonly result: AssistantEvent.ToolResult | undefined
 }
 ```
@@ -83,8 +121,8 @@ interface State {
 
 ### Props
 
-Schema for the decision block's props: which decisions it asks for, and
-optionally its buttons' labels.
+Schema for the decision block's props, which list the decisions it asks for and, optionally,
+its buttons' labels.
 
 ```ts
 const Props = Schema.Struct({ …
@@ -94,8 +132,8 @@ const Props = Schema.Struct({ …
 
 ### Answer
 
-Schema for the decision block's answer: an outcome for every decision the
-block asks for, by id.
+Schema for the decision block's answer, which holds an outcome for every decision the block
+asks for, by id.
 
 ```ts
 const Answer = Schema.Struct({ …
@@ -107,7 +145,7 @@ const Answer = Schema.Struct({ …
 
 ### kind
 
-The decision block's kind.
+The kind of the decision block.
 
 ```ts
 const kind = "decision" …

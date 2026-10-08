@@ -6,19 +6,44 @@
 import { AssistantEngine } from "effect-assistant"
 ```
 
-The `AssistantEngine` module runs assistants' chats. An assistant's
-`toLayer` registers it with the engine, and its `submit` and
-`subscribe` go through it. Pick one engine for the app, like a workflow
-engine: `layerMemory` runs chats in the process, for tests and one
-process; `layerCluster` runs each chat as a cluster entity, so a turn
-cut off by a crash resumes.
+This module provides the `AssistantEngine` service, which runs assistants' chats, and its two
+implementations.
+
+An assistant's `toLayer` registers the assistant with the engine, and the assistant's `submit`
+and `subscribe` go through it. Pick one engine for the app, as with a workflow engine.
+`layerMemory` runs chats in the process, for tests and single-process apps.
+`layerCluster` runs each chat as a cluster entity, so a turn cut off by a crash resumes.
 
 ## Layers
 
 ### layerMemory
 
-Layer that runs chats in the process. Each chat's turns are fibers, one at
-a time.
+Layer that runs chats in the current process. Each chat's turns run as fibers, one at a time.
+
+**Details**
+
+With `ChatLog.layerSql`, the engine resumes chats at startup. When an assistant registers, the
+engine finds the chats that assistant was working on when the process stopped (a turn cut off
+partway, or an input that no turn read) and runs a turn for each. Run this engine in one process
+only, because two processes would run the same chat and write its log at the same time.
+
+**Example** (Running chats in memory)
+
+```ts
+import { Assistant, AssistantEngine, ChatLog } from "effect-assistant"
+import type * as LanguageModel from "effect/ai/LanguageModel"
+import * as Layer from "effect/Layer"
+
+declare const ModelLive: Layer.Layer<LanguageModel.LanguageModel>
+
+const MyAssistant = Assistant.make("my-assistant")
+
+const AppLive = MyAssistant.toLayer((turn) => turn.loop({ instructions: "Be brief." })).pipe(
+  Layer.provide(ModelLive),
+  Layer.provideMerge(AssistantEngine.layerMemory),
+  Layer.provideMerge(ChatLog.layerMemory)
+)
+```
 
 ```ts
 const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog>
@@ -28,9 +53,40 @@ const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog>
 
 ### layerCluster
 
-Layer that runs chats as cluster entities, one per chat, keyed by chat id.
-Needs `Sharding`: a `SingleRunner` for one process with SQL storage, a
-runner of the app's cluster, or `TestRunner` in tests.
+Layer that runs chats as cluster entities, one entity per chat, keyed by chat id.
+
+**Details**
+
+The layer requires `Sharding`. Use a `SingleRunner` for one process with SQL storage, a runner
+of the app's cluster, or `TestRunner` in tests.
+
+**Example** (Running chats on a single runner with Postgres)
+
+```ts
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import * as PgClient from "@effect/sql-pg/PgClient"
+import { Assistant, AssistantEngine, ChatLog } from "effect-assistant"
+import type * as LanguageModel from "effect/ai/LanguageModel"
+import * as SingleRunner from "effect/cluster/SingleRunner"
+import * as Config from "effect/Config"
+import * as Layer from "effect/Layer"
+
+declare const ModelLive: Layer.Layer<LanguageModel.LanguageModel>
+
+const MyAssistant = Assistant.make("my-assistant")
+
+const AppLive = MyAssistant.toLayer((turn) => turn.loop({ instructions: "Be brief." })).pipe(
+  Layer.provide(ModelLive),
+  Layer.provideMerge(AssistantEngine.layerCluster),
+  Layer.provideMerge(
+    Layer.merge(
+      ChatLog.layerSql,
+      SingleRunner.layer({ runnerStorage: "sql" }).pipe(Layer.provide(NodeCrypto.layer))
+    )
+  ),
+  Layer.provide(PgClient.layerConfig({ url: Config.Redacted("DATABASE_URL") }))
+)
+```
 
 ```ts
 const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Sharding.Sharding>
@@ -42,24 +98,30 @@ const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Sharding.Shard
 
 ### AssistantEngine
 
-Service that runs assistants' chats. `toLayer` registers an assistant with
-it; the assistant's `submit` and `subscribe` use it.
+Service that runs assistants' chats. An assistant's `toLayer` registers the assistant with it,
+and the assistant's `submit` and `subscribe` use it.
 
 ```ts
 class AssistantEngine extends Context.Service<
   AssistantEngine,
   {
-    /** Registers an assistant, for as long as the scope is open. */
+    /** Registers an assistant for as long as the scope is open. */
     readonly register: (registration: Turns.Registration) => Effect.Effect<void, never, Scope.Scope>
-    /** Stores an input in a chat of the assistant, which works on it in the background. */
+    /**
+     * Stores an input in one of the assistant's chats. The assistant works on it in the
+     * background.
+     */
     readonly submit: (
       assistant: string,
       chatId: ChatId,
       input: AssistantEvent.Input | AssistantEvent.StoredAppEvent
     ) => Effect.Effect<void>
-    /** Streams the chat's stored events after `after`, then live ones. */
+    /** Streams the chat's stored entries after the `after` seq, then live ones. */
     readonly subscribe: (assistant: string, chatId: ChatId, after: number) => Stream.Stream<AssistantEvent.Entry>
-    /** Deletes a chat of the assistant: its log, and what works in it. */
+    /**
+     * Deletes one of the assistant's chats. The chat's log records the deletion, and everything
+     * that works in the chat stops.
+     */
     readonly delete: (assistant: string, chatId: ChatId) => Effect.Effect<void>
   }
 >()("effect-assistant/AssistantEngine")

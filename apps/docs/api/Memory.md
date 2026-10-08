@@ -6,18 +6,20 @@
 import { Memory } from "effect-assistant"
 ```
 
-The `Memory` module is what an assistant remembers across chats: facts the
-model keeps with `remember`, finds with `recall`, and drops with `forget`.
-Where they're stored and who shares them is the app's: it implements
-`MemoryStore`, whose every method gets the chat it's for. Show the
-facts in a turn's instructions with `render`.
+Keeps facts an assistant remembers across chats.
+
+The model keeps facts with the `remember` tool, finds them with `recall`, and drops them with
+`forget` (`Tools`). Where facts are stored and who shares them is up to the application,
+which implements `MemoryStore`; every method receives the chat it's for. `render`
+shows the facts in a turn's instructions.
 
 ## Layers
 
 ### layerMemory
 
-A store in memory, for tests and local runs: one set of facts that every
-chat shares.
+Layer that provides a `MemoryStore` in memory, for tests and local runs.
+
+Every chat shares one set of facts.
 
 ```ts
 const layerMemory: Layer.Layer<MemoryStore>
@@ -27,7 +29,9 @@ const layerMemory: Layer.Layer<MemoryStore>
 
 ### layerTools
 
-Layer for the `Tools`' handlers: the `MemoryStore`, for the chat they run in.
+Layer that provides the handlers of `Tools`.
+
+The handlers call the `MemoryStore` with the chat they run in.
 
 ```ts
 const layerTools = Tools.toLayer({ …
@@ -39,20 +43,25 @@ const layerTools = Tools.toLayer({ …
 
 ### MemoryStore
 
-Where facts are kept: the app's. Every method gets the chat it's for, and
-the app decides whose facts that means (the chat's user, their team, ...).
+Service that keeps facts, implemented by the application.
+
+Every method receives the chat it's for, and the application decides whose facts that means
+(the chat's user, their team, ...).
 
 ```ts
 class MemoryStore extends Context.Service<
   MemoryStore,
   {
-    /** The facts a chat should know, unexpired. */
+    /** Returns the unexpired facts a chat should know. */
     readonly facts: (chatId: ChatId) => Effect.Effect<ReadonlyArray<Fact>>
     /** Keeps a fact for the chat's owner, and returns its id. */
     readonly remember: (chatId: ChatId, fact: NewFact) => Effect.Effect<string>
-    /** Drops a fact; fails, for the model to read, when the chat's owner has no fact with that id. */
+    /**
+     * Drops a fact. Fails with a message for the model when the chat's owner has no fact with
+     * that id.
+     */
     readonly forget: (chatId: ChatId, id: string) => Effect.Effect<void, ToolFailure.ToolFailure>
-    /** The chat owner's facts that match a query, best first. */
+    /** Returns the chat owner's facts that match a query, best first. */
     readonly recall: (chatId: ChatId, query: string) => Effect.Effect<ReadonlyArray<Fact>>
   }
 >()("effect-assistant/Memory/MemoryStore")
@@ -64,7 +73,7 @@ class MemoryStore extends Context.Service<
 
 ### NewFact
 
-A fact to keep, as the `remember` tool hands it to the store.
+Represents a fact to keep, as the `remember` tool hands it to the store.
 
 ```ts
 interface NewFact {
@@ -81,7 +90,9 @@ interface NewFact {
 
 ### Fact
 
-A fact the assistant remembers: its id, one short sentence, and when it stops mattering, if it does.
+Represents a fact the assistant remembers.
+
+It holds the fact's id, one short sentence, and when the fact stops mattering, if it does.
 
 ```ts
 class Fact extends Schema.Class<Fact>("effect-assistant/Memory/Fact")({
@@ -97,8 +108,39 @@ class Fact extends Schema.Class<Fact>("effect-assistant/Memory/Fact")({
 
 ### Tools
 
-The `remember`, `forget` and `recall` tools. Merge them into the loop's
-toolkit, and provide `layerTools` and a `MemoryStore`.
+Toolkit with the `remember`, `forget`, and `recall` tools.
+
+**Details**
+
+Merge it into the loop's toolkit, and provide `layerTools` and a `MemoryStore`. Show
+the facts in the turn's instructions with `render`.
+
+**Example** (Giving an assistant memory)
+
+```ts
+import { Assistant, Memory } from "effect-assistant"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Stream from "effect/Stream"
+
+export const MyAssistant = Assistant.make("my-assistant")
+
+const MyAssistantLive = MyAssistant.toLayer(
+  Effect.gen(function* () {
+    const memory = yield* Memory.MemoryStore
+
+    return (turn) =>
+      Stream.unwrap(
+        Effect.map(memory.facts(turn.chatId), (facts) =>
+          turn.loop({
+            instructions: `You help a small team.\n\n${Memory.render(facts)}`,
+            toolkit: Memory.Tools
+          })
+        )
+      ).pipe(Stream.provideService(Memory.MemoryStore, memory))
+  })
+).pipe(Layer.provide(Memory.layerTools), Layer.provide(Memory.layerMemory))
+```
 
 ```ts
 const Tools = Toolkit.make(Remember, Forget, Recall)
@@ -110,8 +152,10 @@ const Tools = Toolkit.make(Remember, Forget, Recall)
 
 ### render
 
-The facts as the model reads them, for a turn's instructions: each with
-its id, so it can replace or forget one. Empty when there are none.
+Renders facts as the model reads them, for a turn's instructions.
+
+Each fact is listed with its id, so the model can replace or forget it. The result is an empty
+string when there are no facts.
 
 ```ts
 const render: (facts: ReadonlyArray<Fact>) => string
