@@ -141,9 +141,9 @@ for (const [name, engine] of Object.entries(engines)) {
         const seen = yield* Queue.unbounded<Seen>()
 
         yield* Effect.gen(function* () {
-          yield* Helper.submit(yield* chatFor(alice), say("hi"))
+          yield* (yield* Helper).submit(yield* chatFor(alice), say("hi"))
           const first = yield* Queue.take(seen)
-          yield* Helper.submit(yield* chatFor(bob), say("hi"))
+          yield* (yield* Helper).submit(yield* chatFor(bob), say("hi"))
           const second = yield* Queue.take(seen)
 
           expect(first.instructions).toContain("You help Alice.")
@@ -160,7 +160,7 @@ for (const [name, engine] of Object.entries(engines)) {
         const seen = yield* Queue.unbounded<Seen>()
 
         yield* Effect.gen(function* () {
-          yield* Helper.submit(yield* chatFor(bob), say("file it"))
+          yield* (yield* Helper).submit(yield* chatFor(bob), say("file it"))
           yield* Queue.take(seen)
 
           expect(yield* Queue.take(seen)).toEqual({
@@ -179,7 +179,7 @@ for (const [name, engine] of Object.entries(engines)) {
         const seen = yield* Queue.unbounded<Seen>()
 
         yield* Effect.gen(function* () {
-          yield* Helper.submit(yield* chatFor(bob), update("workflow:Export", { status: "done" }))
+          yield* (yield* Helper).submit(yield* chatFor(bob), update("workflow:Export", { status: "done" }))
 
           expect((yield* Queue.take(seen)).instructions).toContain("You help Bob.")
         }).pipe(Effect.provide(engine(seen)))

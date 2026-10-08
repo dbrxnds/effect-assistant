@@ -46,7 +46,7 @@ const hang = (signal: Signals) =>
 
 const slowLive = (signal: Signals) => Slow.toLayer(() => Stream.fromEffect(hang(signal)).pipe(Stream.drain))
 
-const logOf = (chat: Parameters<typeof Deleting.delete>[0]) => ChatLog.ChatLog.use((log) => log.read(chat))
+const logOf = (chat: ChatId.ChatId) => ChatLog.ChatLog.use((log) => log.read(chat))
 
 const tags = (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => entries.map(({ event }) => event._tag)
 
@@ -87,18 +87,18 @@ for (const [name, run] of Object.entries(engines)) {
 
         const { after, streamed } = yield* Effect.gen(function* () {
           const chat = yield* newChat
-          yield* Deleting.submit(chat, say("hi"))
+          yield* (yield* Deleting).submit(chat, say("hi"))
           yield* collectUntil(Deleting, chat, (es) => turnsDone(es) >= 1)
 
-          yield* Deleting.delete(chat)
-          yield* Deleting.delete(chat)
-          yield* Deleting.submit(chat, say("are you there?"))
-          yield* Deleting.submit(chat, update("workflow:Export", { status: "done" }))
+          yield* (yield* Deleting).delete(chat)
+          yield* (yield* Deleting).delete(chat)
+          yield* (yield* Deleting).submit(chat, say("are you there?"))
+          yield* (yield* Deleting).submit(chat, update("workflow:Export", { status: "done" }))
           yield* Effect.sleep("200 millis")
 
           return {
             after: yield* logOf(chat),
-            streamed: yield* Deleting.subscribe(chat).pipe(Stream.runCollect, Effect.timeout("5 seconds"))
+            streamed: yield* (yield* Deleting).subscribe(chat).pipe(Stream.runCollect, Effect.timeout("5 seconds"))
           }
         }).pipe(Effect.provide(layer))
 
@@ -125,11 +125,11 @@ for (const [name, run] of Object.entries(engines)) {
 
         const after = yield* Effect.gen(function* () {
           const chat = yield* newChat
-          const subscriber = yield* Effect.forkChild(Deleting.subscribe(chat).pipe(Stream.runCollect))
-          yield* Deleting.submit(chat, say("hi"))
+          const subscriber = yield* Effect.forkChild((yield* Deleting).subscribe(chat).pipe(Stream.runCollect))
+          yield* (yield* Deleting).submit(chat, say("hi"))
           yield* Deferred.await(signal.started)
 
-          yield* Deleting.delete(chat)
+          yield* (yield* Deleting).delete(chat)
           yield* Deferred.await(signal.interrupted).pipe(Effect.timeout("5 seconds"))
           const streamed = yield* Fiber.join(subscriber).pipe(Effect.timeout("5 seconds"))
 
@@ -157,10 +157,10 @@ for (const [name, run] of Object.entries(engines)) {
 
         const after = yield* Effect.gen(function* () {
           const chat = yield* newChat
-          yield* Deleting.submit(chat, update("workflow:Research", { status: "started" }))
+          yield* (yield* Deleting).submit(chat, update("workflow:Research", { status: "started" }))
           yield* Deferred.await(signal.started)
 
-          yield* Deleting.delete(chat)
+          yield* (yield* Deleting).delete(chat)
           yield* Deferred.await(signal.interrupted).pipe(Effect.timeout("5 seconds"))
           yield* Effect.sleep("100 millis")
 
@@ -186,12 +186,12 @@ for (const [name, run] of Object.entries(engines)) {
 
         const { unknown, deleted, log } = yield* Effect.gen(function* () {
           const chat = yield* newChat
-          const unknown = yield* Effect.flip(Deleting.submit(chat, say("hi")))
+          const unknown = yield* Effect.flip((yield* Deleting).submit(chat, say("hi")))
 
           yield* chats.create(chat)
           yield* chats.remove(chat)
 
-          const deleted = yield* Effect.flip(Deleting.submit(chat, say("hi")))
+          const deleted = yield* Effect.flip((yield* Deleting).submit(chat, say("hi")))
 
           return { unknown, deleted, log: yield* logOf(chat) }
         }).pipe(Effect.provide(layer))
@@ -232,7 +232,7 @@ for (const [name, run] of Object.entries(engines)) {
           const chat = yield* newChat
           yield* Ref.set(chatRef, chat)
           yield* chats.create(chat)
-          yield* Deleting.submit(chat, say("close it"))
+          yield* (yield* Deleting).submit(chat, say("close it"))
 
           return yield* collectUntil(Deleting, chat, (es) => tags(es).includes("ChatDeleted"), "10 seconds")
         }).pipe(Effect.provide(layer))

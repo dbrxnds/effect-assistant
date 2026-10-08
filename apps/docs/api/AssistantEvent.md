@@ -517,7 +517,7 @@ const AppTag = Schema.String.pipe(Schema.brand("effect-assistant/AppTag"))
 
 Schema for one of the app's own events, as it's stored: its `_tag` and its
 fields in JSON. An assistant made with `events: [AppEvent.make(Summary)]`
-decodes it to a `Summary` in `turn.entries` and in its `subscribe`.
+decodes it to a `Summary` in `AssistantChat`'s `entries` and in its `subscribe`.
 
 ```ts
 const StoredAppEvent = Schema.StructWithRest(Schema.Struct({ _tag: AppTag }), [ …

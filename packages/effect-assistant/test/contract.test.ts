@@ -70,7 +70,7 @@ describe("with a real model", () => {
   it.live("replies through send_user_message, and ends the turn", () =>
     Effect.gen(function* () {
       const chat = yield* newChat
-      yield* TestAssistant.submit(chat, say("Say hi in one short message."))
+      yield* (yield* TestAssistant).submit(chat, say("Say hi in one short message."))
       const entries = yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
@@ -81,7 +81,7 @@ describe("with a real model", () => {
   it.live("uses a tool, and tells the user what it found", () =>
     Effect.gen(function* () {
       const chat = yield* newChat
-      yield* TestAssistant.submit(chat, say("What's the weather in Oslo right now?"))
+      yield* (yield* TestAssistant).submit(chat, say("What's the weather in Oslo right now?"))
       const entries = yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
@@ -102,7 +102,7 @@ describe("with a real model", () => {
   it.live("replies in the reply pass, which forces send_user_message", () =>
     Effect.gen(function* () {
       const chat = yield* newChat
-      yield* TestAssistant.submit(chat, say("Thanks, that's all I needed."))
+      yield* (yield* TestAssistant).submit(chat, say("Thanks, that's all I needed."))
       const entries = yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
@@ -124,7 +124,7 @@ describe("with a real model", () => {
 
     return Effect.gen(function* () {
       const chat = yield* newChat
-      yield* ResearchAssistant.submit(chat, say("Ask the research specialist what the capital of Canada is."))
+      yield* (yield* ResearchAssistant).submit(chat, say("Ask the research specialist what the capital of Canada is."))
 
       const entries = yield* collectUntil(
         ResearchAssistant,
@@ -149,7 +149,7 @@ describe("with a real model", () => {
 
     return Effect.gen(function* () {
       const chat = yield* newChat
-      yield* Blocks.submit(chat, say("Should the banner be red or blue? Give me buttons to pick."))
+      yield* (yield* Blocks).submit(chat, say("Should the banner be red or blue? Give me buttons to pick."))
       const entries = yield* collectUntil(Blocks, chat, (es) => turnsDone(es) >= 1)
 
       const block = entries.flatMap(({ event }) =>
@@ -183,7 +183,7 @@ describe("with a real model", () => {
 
       yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* Deciding.submit(chat, say("Order 300 tote bags."))
+        yield* (yield* Deciding).submit(chat, say("Order 300 tote bags."))
         const first = yield* collectUntil(Deciding, chat, (es) => turnsDone(es) >= 1)
 
         const requested = first.flatMap(({ event }) =>
@@ -207,7 +207,7 @@ describe("with a real model", () => {
           { respond: (answer) => answers.push(answer) }
         )
 
-        yield* Deciding.submit(chat, answers[0]!)
+        yield* (yield* Deciding).submit(chat, answers[0]!)
 
         expect(yield* Deferred.await(ran)).toBe("300 tote bags")
 

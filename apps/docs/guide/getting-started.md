@@ -79,14 +79,15 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 
 const program = Effect.gen(function* () {
+  const assistant = yield* MyAssistant // its toLayer provides it
   const chatId = yield* ChatId.make
 
-  yield* MyAssistant.submit(
+  yield* assistant.submit(
     chatId,
     AssistantEvent.UserMessage.make({ id: yield* InputId.make, text: "Hi! What can you do?" })
   )
 
-  const view = yield* MyAssistant.subscribeView(chatId).pipe(
+  const view = yield* assistant.subscribeView(chatId).pipe(
     Stream.scan(() => ChatView.empty, ChatView.apply),
     Stream.takeUntil((view) => view.messages.length > 1 && ChatView.isIdle(view)),
     Stream.runLast
@@ -110,10 +111,14 @@ assistant stored, for server-side code and tests:
 
 ```ts
 const printLog = (chatId: ChatId.ChatId) =>
-  MyAssistant.subscribe(chatId).pipe(
-    Stream.takeUntil(({ event }) => Predicate.isTagged(event, "TurnCompleted")),
-    Stream.runForEach(({ seq, event }) => Console.log(seq, event._tag))
-  )
+  Effect.gen(function* () {
+    const assistant = yield* MyAssistant
+
+    yield* assistant.subscribe(chatId).pipe(
+      Stream.takeUntil(({ event }) => Predicate.isTagged(event, "TurnCompleted")),
+      Stream.runForEach(({ seq, event }) => Console.log(seq, event._tag))
+    )
+  })
 // 1 UserMessage
 // 2 TurnStarted
 // 3 ModelOutput

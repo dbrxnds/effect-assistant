@@ -103,7 +103,7 @@ summary, and what it says are your app's:
   tokens, to decide when the prompt is big enough to compact.
 
 ```ts
-import { AppEvent, Compaction } from "effect-assistant"
+import { AppEvent, AssistantChat, Compaction } from "effect-assistant"
 import * as LanguageModel from "effect/ai/LanguageModel"
 
 class Summary extends Schema.TaggedClass<Summary>()("Summary", {
@@ -117,7 +117,8 @@ const sinceSummary = Compaction.since(Schema.is(Summary))
 
 const MyAssistantHandlers = MyAssistant.toLayer((turn) => {
   const compact = Effect.gen(function* () {
-    const entries = yield* turn.entries
+    const chat = yield* AssistantChat.AssistantChat
+    const entries = yield* chat.entries
 
     if (Compaction.inputTokens(entries) < 100_000) return
 
@@ -125,7 +126,7 @@ const MyAssistantHandlers = MyAssistant.toLayer((turn) => {
       prompt: `Summarize this chat for whoever picks it up:\n\n${transcript(entries)}` // transcript: yours
     })
 
-    yield* turn.append(Summary.make({ text: response.text, throughSeq: entries.at(-1)?.seq ?? 0 }))
+    yield* chat.append(Summary.make({ text: response.text, throughSeq: entries.at(-1)?.seq ?? 0 }))
   }).pipe(Effect.catchCause((cause) => Effect.logWarning("compaction failed", cause)))
 
   // After the reply, so the user doesn't wait for it; the next turn reads the summary.

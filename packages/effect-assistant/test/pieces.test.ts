@@ -50,18 +50,20 @@ describe("the app's own events", () => {
     Effect.gen(function* () {
       let seen: ReadonlyArray<Summary> = []
 
-      const handlers = Compacting.toLayer((turn) =>
+      const handlers = Compacting.toLayer(() =>
         Stream.fromEffect(
           Effect.gen(function* () {
-            yield* turn.append(summary)
-            seen = (yield* turn.entries).flatMap(({ event }) => (event instanceof Summary ? [event] : []))
+            yield* (yield* AssistantChat.AssistantChat).append(summary)
+            seen = (yield* (yield* AssistantChat.AssistantChat).entries).flatMap(({ event }) =>
+              event instanceof Summary ? [event] : []
+            )
           })
         ).pipe(Stream.drain)
       )
 
       const { entries, stored } = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* Compacting.submit(chat, say("hi"))
+        yield* (yield* Compacting).submit(chat, say("hi"))
         const entries = yield* collectUntil(Compacting, chat, (es) => turnsDone(es) >= 1)
 
         return { entries, stored: yield* ChatLog.ChatLog.use((log) => log.read(chat)) }
@@ -94,8 +96,8 @@ describe("the app's own events", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* Compacting.submit(chat, upload)
-        yield* Compacting.submit(chat, upload)
+        yield* (yield* Compacting).submit(chat, upload)
+        yield* (yield* Compacting).submit(chat, upload)
 
         return yield* collectUntil(Compacting, chat, (es) => turnsDone(es) >= 1)
       }).pipe(
@@ -120,8 +122,8 @@ describe("the app's own events", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* Drafting.submit(chat, DraftOpened.make({ draftId: "d1" }))
-        yield* Drafting.submit(chat, say("finish it"))
+        yield* (yield* Drafting).submit(chat, DraftOpened.make({ draftId: "d1" }))
+        yield* (yield* Drafting).submit(chat, say("finish it"))
 
         return yield* collectUntil(Drafting, chat, (es) => turnsDone(es) >= 1)
       }).pipe(
@@ -145,12 +147,12 @@ describe("the app's own events", () => {
       const other = yield* Schema.decodeUnknownEffect(AssistantEvent.StoredAppEvent)(Unknown.make({ n: 1 }))
 
       const handlers = Drafting.toLayer(() =>
-        Stream.fromEffect(AssistantChat.AssistantChat.use((chat) => chat.append([other]))).pipe(Stream.drain)
+        Stream.fromEffect(AssistantChat.AssistantChat.use((chat) => chat.append(other))).pipe(Stream.drain)
       )
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* Drafting.submit(chat, say("hi"))
+        yield* (yield* Drafting).submit(chat, say("hi"))
         yield* collectUntil(Drafting, chat, (es) => turnsDone(es) >= 1)
 
         return yield* ChatLog.ChatLog.use((log) => log.read(chat))
@@ -180,7 +182,8 @@ describe("the app's own events", () => {
         Stream.unwrap(
           Effect.gen(function* () {
             // The first turn writes the summary; the second reads through the view.
-            if ((yield* turn.entries).every(({ event }) => !(event instanceof Summary))) yield* turn.append(summary)
+            if ((yield* (yield* AssistantChat.AssistantChat).entries).every(({ event }) => !(event instanceof Summary)))
+              yield* (yield* AssistantChat.AssistantChat).append(summary)
 
             return turn.loop({ instructions: "Be brief.", history: sinceSummary })
           })
@@ -189,9 +192,9 @@ describe("the app's own events", () => {
 
       yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* Compacting.submit(chat, say("pens?"))
+        yield* (yield* Compacting).submit(chat, say("pens?"))
         yield* collectUntil(Compacting, chat, (es) => turnsDone(es) >= 1)
-        yield* Compacting.submit(chat, say("and now?"))
+        yield* (yield* Compacting).submit(chat, say("and now?"))
         yield* collectUntil(Compacting, chat, (es) => turnsDone(es) >= 2)
       }).pipe(Effect.provide(runMemory(handlers, model.layer)))
 
@@ -223,7 +226,7 @@ describe("a loop of your own", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* Own.submit(chat, say("Say hi in one short message."))
+        yield* (yield* Own).submit(chat, say("Say hi in one short message."))
 
         return yield* collectUntil(Own, chat, (es) => turnsDone(es) >= 1)
       }).pipe(
@@ -248,13 +251,13 @@ describe("a history built from turn.entries", () => {
     Effect.gen(function* () {
       const Own = Assistant.make("entries-read")
 
-      const handlers = Own.toLayer((turn) =>
+      const handlers = Own.toLayer(() =>
         Stream.fromEffect(
           Effect.gen(function* () {
             // Reads the chat only through entries, then replies.
-            yield* turn.entries
+            yield* (yield* AssistantChat.AssistantChat).entries
             yield* AssistantChat.AssistantChat.use((chat) =>
-              chat.append([AssistantEvent.AssistantMessage.make({ id: "r1", text: "Hi." })])
+              chat.append(AssistantEvent.AssistantMessage.make({ id: "r1", text: "Hi." }))
             )
           })
         ).pipe(Stream.drain)
@@ -262,7 +265,7 @@ describe("a history built from turn.entries", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* Own.submit(chat, say("hello"))
+        yield* (yield* Own).submit(chat, say("hello"))
 
         return yield* collectUntil(Own, chat, (es) => turnsDone(es) >= 1)
       }).pipe(

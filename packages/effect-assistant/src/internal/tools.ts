@@ -58,7 +58,7 @@ const append = Effect.fnUntraced(function* (message: AssistantEvent.AssistantMes
       AssistantEvent.isLibraryEvent(event) && Predicate.isTagged(event, "AssistantMessage") && event.id === message.id
   )
 
-  if (!sent) yield* chat.append([message])
+  if (!sent) yield* chat.append(message)
 })
 
 const PlainMessage = Tool.make(sendUserMessageName, {

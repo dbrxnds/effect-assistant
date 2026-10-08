@@ -69,13 +69,13 @@ describe("AssistantEngine.layerCluster", () => {
         Layer.provide(Scripted.layer(() => Scripted.reply("Hi!")))
       )
 
-      const client = Layer.fresh(AssistantEngine.layerCluster)
+      const client = Greeter.layerClient.pipe(Layer.provide(Layer.fresh(AssistantEngine.layerCluster)))
 
       const entries = yield* Effect.scoped(
         Layer.build(runner).pipe(
           Effect.andThen(
             Effect.gen(function* () {
-              yield* Greeter.submit(chat, say("hello"))
+              yield* (yield* Greeter).submit(chat, say("hello"))
 
               return yield* collectUntil(Greeter, chat, (es) => turnsDone(es) >= 1)
             }).pipe(Effect.provide(client))
@@ -174,7 +174,7 @@ describe("a chat's log", () => {
           Effect.gen(function* () {
             // The chat's appends take its lock.
             const chat = yield* AssistantChat.AssistantChat
-            yield* Effect.all([chat.append([say("a")]), chat.append([say("b"), say("c")])], {
+            yield* Effect.all([chat.append(say("a")), chat.append(say("b"), say("c"))], {
               concurrency: "unbounded"
             })
           })
@@ -183,9 +183,9 @@ describe("a chat's log", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* ChatId.make
-        yield* Resumer.submit(chat, say("go"))
+        yield* (yield* Resumer).submit(chat, say("go"))
 
-        return yield* Resumer.subscribe(chat).pipe(
+        return yield* (yield* Resumer).subscribe(chat).pipe(
           Stream.takeUntil(({ event }) => AssistantEvent.isTurnEnd(event)),
           Stream.runCollect
         )
@@ -205,7 +205,9 @@ describe("a chat's log", () => {
       // Both submits return once their input is stored, or found stored.
       const entries = yield* Effect.gen(function* () {
         const chat = yield* ChatId.make
-        yield* Effect.all([Resumer.submit(chat, input), Resumer.submit(chat, input)], {
+        const resumer = yield* Resumer
+
+        yield* Effect.all([resumer.submit(chat, input), resumer.submit(chat, input)], {
           concurrency: "unbounded"
         })
 
@@ -245,9 +247,9 @@ describe("a chat's log", () => {
 
       yield* Effect.gen(function* () {
         const chat = yield* ChatId.make
-        yield* Resumer.submit(chat, say("one"))
+        yield* (yield* Resumer).submit(chat, say("one"))
         yield* collectUntil(Resumer, chat, (es) => turnsDone(es) >= 1)
-        yield* Resumer.submit(chat, say("two"))
+        yield* (yield* Resumer).submit(chat, say("two"))
         yield* collectUntil(Resumer, chat, (es) => turnsDone(es) >= 2)
       }).pipe(
         Effect.provide(
@@ -269,10 +271,10 @@ describe("a chat's log", () => {
 
       const seqs = yield* Effect.gen(function* () {
         const chat = yield* ChatId.make
-        yield* Resumer.submit(chat, say("one"))
-        yield* Resumer.submit(chat, say("two"))
+        yield* (yield* Resumer).submit(chat, say("one"))
+        yield* (yield* Resumer).submit(chat, say("two"))
 
-        return yield* Resumer.subscribe(chat, { after: 1 }).pipe(
+        return yield* (yield* Resumer).subscribe(chat, { after: 1 }).pipe(
           Stream.filter(({ event }) => Predicate.isTagged(event, "UserMessage")),
           Stream.take(1),
           Stream.runCollect,
@@ -294,9 +296,9 @@ describe("a chat's log", () => {
 
       const texts = yield* Effect.gen(function* () {
         const [chat, other] = yield* Effect.all([ChatId.make, ChatId.make])
-        yield* Resumer.submit(chat, say("stored"))
+        yield* (yield* Resumer).submit(chat, say("stored"))
 
-        const collected = yield* Resumer.subscribe(chat).pipe(
+        const collected = yield* (yield* Resumer).subscribe(chat).pipe(
           Stream.filter(({ event }) => Predicate.isTagged(event, "UserMessage")),
           Stream.take(3),
           Stream.runCollect,
@@ -304,9 +306,9 @@ describe("a chat's log", () => {
         )
 
         yield* Effect.sleep("50 millis")
-        yield* Resumer.submit(other, say("another chat"))
-        yield* Resumer.submit(chat, say("live 1"))
-        yield* Resumer.submit(chat, say("live 2"))
+        yield* (yield* Resumer).submit(other, say("another chat"))
+        yield* (yield* Resumer).submit(chat, say("live 1"))
+        yield* (yield* Resumer).submit(chat, say("live 2"))
 
         return (yield* Fiber.join(collected)).flatMap(({ event }) =>
           Predicate.isTagged(event, "UserMessage") ? [event.text] : []
@@ -339,17 +341,17 @@ describe("a handler's build", () => {
 
       yield* Effect.gen(function* () {
         const turnsIn = (chatId: ChatId.ChatId, count: number) =>
-          Resumer.subscribe(chatId).pipe(
+          Stream.unwrap(Resumer.useSync((resumer) => resumer.subscribe(chatId))).pipe(
             Stream.filter(({ event }) => AssistantEvent.isTurnEnd(event)),
             Stream.take(count),
             Stream.runDrain
           )
 
-        yield* Resumer.submit(chat, say("one"))
+        yield* (yield* Resumer).submit(chat, say("one"))
         yield* turnsIn(chat, 1)
-        yield* Resumer.submit(chat, say("two"))
+        yield* (yield* Resumer).submit(chat, say("two"))
         yield* turnsIn(chat, 2)
-        yield* Resumer.submit(other, say("hi"))
+        yield* (yield* Resumer).submit(other, say("hi"))
         yield* turnsIn(other, 1)
       }).pipe(
         Effect.provide(handler.pipe(Layer.provideMerge(AssistantEngine.layerMemory), Layer.provide(Scripted.unused))),

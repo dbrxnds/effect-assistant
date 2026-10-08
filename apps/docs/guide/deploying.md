@@ -22,8 +22,9 @@ const AppLive = Server.layer.pipe(
 )
 ```
 
-`Server.layer` is your RPC or HTTP server: it calls `submit` and
-`subscribe`, so the engine is merged in where it can reach it. The
+`Server.layer` is your RPC or HTTP server: it gets the assistant with
+`yield* MyAssistant` and calls `submit` and `subscribeView`, so the
+assistant's layer is merged in where it can reach it. The
 [engines](./engines) page explains what each engine does, and what survives
 a restart.
 

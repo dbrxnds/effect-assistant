@@ -29,6 +29,7 @@ import * as AppEvents from "./events.ts"
 import * as History from "./history.ts"
 import * as Specialists from "./specialists.ts"
 import * as Turns from "./turns.ts"
+import type { Writer } from "./writer.ts"
 
 /** An input's id: the library's inputs have one, and the app's may. */
 const idOf = (event: { readonly _tag: string }): string | undefined =>
@@ -181,10 +182,27 @@ export const make = Effect.fnUntraced(function* (options: {
     return stored
   }, Effect.uninterruptible)
 
-  const chat = AssistantChat.of({
+  const chat: Writer = {
     chatId,
     entries: Ref.get(entries),
     append: (events) => Semaphore.withPermit(writes)(write(events))
+  }
+
+  /** An event as the log stores it: the library's as it is, the assistant's own encoded. */
+  const toStored = (event: {
+    readonly _tag: string
+  }): Effect.Effect<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent> =>
+    AssistantEvent.isLibraryEvent(event)
+      ? Effect.succeed(event)
+      : AppEvents.isRegistered(app, event)
+        ? AppEvents.encode(app, event)
+        : Effect.die(`${event._tag} isn't one of the ${registration.definition.name} assistant's events.`)
+
+  // The chat as handlers, tools, and runs get it: the assistant's own events decoded, and encoded when appended.
+  const handle = AssistantChat.of({
+    chatId,
+    entries: Effect.map(chat.entries, (all) => AppEvents.decodeEntries(app, all)),
+    append: (...events) => Effect.asVoid(Effect.flatMap(Effect.forEach(events, toStored), chat.append))
   })
 
   /** Records what an answer decided: an approved call runs at the turn's next step. */
@@ -262,12 +280,12 @@ export const make = Effect.fnUntraced(function* (options: {
 
   // The handlers' builds run now, in the chat's working scope: what they set up lives until the chat closes or is
   // deleted.
-  const handler = yield* inWorking(Effect.provideService(registration.open, AssistantChat, chat))
+  const handler = yield* inWorking(Effect.provideService(registration.open, AssistantChat, handle))
 
   const specialists = yield* Effect.forEach(
     registration.specialists,
     Effect.fnUntraced(function* ({ specialist, built }) {
-      const handler = yield* inWorking(Effect.provideService(built.open, AssistantChat, chat))
+      const handler = yield* inWorking(Effect.provideService(built.open, AssistantChat, handle))
 
       return { specialist, handler }
     })
@@ -297,6 +315,7 @@ export const make = Effect.fnUntraced(function* (options: {
   const runner = yield* inWorking(
     Specialists.makeRunner({
       chat,
+      handle,
       specialists,
       model: registration.model,
       holding,
@@ -307,7 +326,7 @@ export const make = Effect.fnUntraced(function* (options: {
     })
   )
 
-  const services = Context.make(AssistantChat, chat).pipe(
+  const services = Context.make(AssistantChat, handle).pipe(
     Context.add(SpecialistService.Runner, runner),
     Context.add(
       Decisions.TurnDecisions,

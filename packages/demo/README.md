@@ -25,9 +25,9 @@ ask for reports.
 - `api/src/Steps.ts`: what the workflows share: reporting a step to the chat, and durable waits at
   demo pace.
 - `api/src/LiveOrders.ts`: orders placed through Acme, kept up to date by the workflows.
-- `api/src/Chats.ts`: the thread list. Deleting a thread deletes its chat (`AcmeAssistant.delete`).
+- `api/src/Chats.ts`: the thread list. Deleting a thread deletes its chat (the assistant's `delete`).
 - `api/src/Server.ts`: `/health`, `/rpc`, and the web app. `Subscribe` streams the chat's view
-  (`AcmeAssistant.subscribeView`): what the user sees, never the assistant's own work.
+  (the assistant's `subscribeView`): what the user sees, never the assistant's own work.
 - `api/src/main.ts`: wires it together on Postgres (`DATABASE_URL`) or in memory.
 - `api/scripts/smoke.ts`: an end-to-end check against a running server. It deletes the chats it
   creates.

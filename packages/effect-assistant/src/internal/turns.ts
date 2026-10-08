@@ -34,6 +34,7 @@ import { toJsonText } from "./schema.ts"
 import * as Specialists from "./specialists.ts"
 import * as Telemetry from "./telemetry.ts"
 import * as Toolkits from "./toolkit.ts"
+import type { Writer } from "./writer.ts"
 import * as Tools from "./tools.ts"
 
 /** Host-visible failure when a turn handled the user's input but never spoke. */
@@ -181,7 +182,7 @@ const isEntry = (item: Assistant.Entry<any> | Prompt.Message): item is Assistant
  * interrupted turn (a shutdown) leaves them open: the next turn runs them
  * again.
  */
-const closeOpenCalls = Effect.fnUntraced(function* (chat: AssistantChat["Service"], startSeq: number) {
+const closeOpenCalls = Effect.fnUntraced(function* (chat: Writer, startSeq: number) {
   const entries = (yield* chat.entries).filter(({ seq }) => seq > startSeq)
 
   const started = new Set(
@@ -231,11 +232,7 @@ const handledThrough = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, startSe
  * input got no reply; an input that arrived after what its model read gets
  * the next turn, which replies.
  */
-const finishTurn = Effect.fnUntraced(function* (
-  chat: AssistantChat["Service"],
-  read: number,
-  wakes: ReadonlySet<string>
-) {
+const finishTurn = Effect.fnUntraced(function* (chat: Writer, read: number, wakes: ReadonlySet<string>) {
   const entries = yield* chat.entries
 
   const end =
@@ -249,7 +246,7 @@ const finishTurn = Effect.fnUntraced(function* (
 /**
  * Ends a turn whose handler failed. Everything stored so far counts as read, so a failing input isn't retried forever.
  */
-const failTurn = Effect.fnUntraced(function* (chat: AssistantChat["Service"], cause: Cause.Cause<unknown>) {
+const failTurn = Effect.fnUntraced(function* (chat: Writer, cause: Cause.Cause<unknown>) {
   yield* Effect.logError("assistant turn failed", cause)
 
   const last = lastSeq(yield* chat.entries, 0)
@@ -262,16 +259,12 @@ const failTurn = Effect.fnUntraced(function* (chat: AssistantChat["Service"], ca
  */
 const makeTurnApi = (
   registration: Registration,
-  chat: AssistantChat["Service"],
+  chat: Writer,
   startSeq: number,
   checkOpen: Effect.Effect<void>
 ): Assistant.Turn<any> => {
   const { definition, builtins } = registration
   const { app } = definition
-
-  const entries = Effect.gen(function* () {
-    return AppEvents.decodeEntries(app, yield* chat.entries)
-  })
 
   // With how far into the chat it goes: the step records it on the model's output.
   // Read before every model call: a chat the app deleted meanwhile stops here.
@@ -352,10 +345,6 @@ const makeTurnApi = (
       nudge: options.nudge
     })
 
-  const append = Effect.fnUntraced(function* (...events: ReadonlyArray<{ readonly _tag: string }>) {
-    yield* chat.append(yield* Effect.forEach(events, (event) => AppEvents.encode(app, event)))
-  })
-
   // What the loop sends for these options: its system prompt, its tools, and which entries it reads.
   const prepare = <T extends Record<string, Tool.Any>, RS>(options: Assistant.LoopOptions<T, RS, any>) => {
     const skills = options.skills ?? []
@@ -373,8 +362,6 @@ const makeTurnApi = (
   return {
     chatId: chat.chatId,
     history,
-    entries,
-    append,
     instructions,
     replyIfOwed,
     loop: (options) => {
@@ -412,7 +399,7 @@ export const run = Effect.fnUntraced(
   function* (options: {
     readonly registration: Registration
     readonly handler: TurnHandler
-    readonly chat: AssistantChat["Service"]
+    readonly chat: Writer
     /** What a turn provides to its handler's stream. */
     readonly services: Context.Context<Assistant.TurnServices | LanguageModel.LanguageModel>
     /** Whether the app still has the chat: one it deleted is deleted, and the turn stops. */

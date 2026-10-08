@@ -50,7 +50,7 @@ const run = (script: Scripted.Script) =>
 const chat = (text: string) =>
   Effect.gen(function* () {
     const chatId = yield* newChat
-    yield* TestAssistant.submit(chatId, say(text))
+    yield* (yield* TestAssistant).submit(chatId, say(text))
 
     return yield* collectUntil(TestAssistant, chatId, (entries) => turnsDone(entries) >= 1)
   })

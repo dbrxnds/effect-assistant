@@ -123,7 +123,7 @@ export const closeStale = Effect.fn(function* (options: { readonly messages: num
   const chat = yield* AssistantChat
   const stale = staleBlocks(yield* chat.entries, options)
 
-  if (stale.length > 0) yield* chat.append([AssistantEvent.BlocksClosed.make({ messageIds: stale })])
+  if (stale.length > 0) yield* chat.append(AssistantEvent.BlocksClosed.make({ messageIds: stale }))
 })
 
 /** What a renderer gets for one block. */
