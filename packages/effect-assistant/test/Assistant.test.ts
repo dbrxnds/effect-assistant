@@ -23,6 +23,7 @@ import {
   Instructions,
   Skill,
   Specialist,
+  ToolDiscovery,
   ToolFailure
 } from "../src/index.ts"
 import { toJsonText } from "../src/internal/schema.ts"
@@ -45,7 +46,6 @@ import {
   traceEntries,
   turnsDone,
   viewedMessages,
-  withCatalog,
   withHandlers,
   withTools
 } from "./utils/fixtures.ts"
@@ -625,6 +625,8 @@ describe("tools found on demand, and skills", () => {
     invoice_lookup: () => Effect.succeed("not relevant")
   })
 
+  const officeToolsDiscovery = ToolDiscovery.make(officeTools.toolkit)
+
   it.live("finds a tool with search_tools and runs it with execute_tool", () =>
     Effect.gen(function* () {
       const script: Scripted.Script = (request) => {
@@ -653,7 +655,16 @@ describe("tools found on demand, and skills", () => {
 
         return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
       }).pipe(
-        Effect.provide(memoryAssistant(withCatalog({ instructions, catalog: officeTools }), Scripted.layer(script)))
+        Effect.provide(
+          runMemory(
+            TestAssistant.toLayer((turn) => turn.loop({ instructions, toolkit: officeToolsDiscovery.toolkit })).pipe(
+              Layer.provide(
+                officeToolsDiscovery.layer.pipe(Layer.provide(officeTools.toolkit.toLayer(officeTools.handlers)))
+              )
+            ),
+            Scripted.layer(script)
+          )
+        )
       )
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
@@ -674,6 +685,8 @@ describe("tools found on demand, and skills", () => {
         broken_printer: () => ToolFailure.fail("Out of paper.")
       })
 
+      const brokenDiscovery = ToolDiscovery.make(broken.toolkit)
+
       const model = yield* Scripted.make((request) =>
         Option.isSome(Scripted.result(request, "execute_tool"))
           ? Scripted.wait()
@@ -685,7 +698,16 @@ describe("tools found on demand, and skills", () => {
         yield* TestAssistant.submit(chat, say("Print it."))
 
         return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
-      }).pipe(Effect.provide(memoryAssistant(withCatalog({ instructions, catalog: broken }), model.layer)))
+      }).pipe(
+        Effect.provide(
+          runMemory(
+            TestAssistant.toLayer((turn) => turn.loop({ instructions, toolkit: brokenDiscovery.toolkit })).pipe(
+              Layer.provide(brokenDiscovery.layer.pipe(Layer.provide(broken.toolkit.toLayer(broken.handlers))))
+            ),
+            model.layer
+          )
+        )
+      )
 
       // The model got another step to read the failure, stored as the tool's.
       expect(yield* model.requests).toHaveLength(2)

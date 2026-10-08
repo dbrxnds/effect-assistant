@@ -200,23 +200,32 @@ Turn it off on the model, `AnthropicLanguageModel.model(name, { strictJsonSchema
 or per tool with `tool.annotate(Tool.Strict, false)`: params that don't fit are then
 a failure the model reads and corrects.
 
-## Many tools: a catalog
+## Many tools: discovery
 
 Every tool definition goes into the prompt on every call. For catalogs that
-are big, or that change at runtime (MCP servers, plugins), pass them to the
-loop as `catalog`: the model gets two tools instead, `search_tools`, which
-finds tools by what it needs to do, and `execute_tool`, which runs one with a
-validated input.
+are big, or that change at runtime (MCP servers, plugins),
+[`ToolDiscovery.make`](/api/ToolDiscovery#make) turns a toolkit into two
+tools: `search_tools` finds tools by what the model needs to do, and
+`execute_tool` runs one with a validated input. It returns a native toolkit,
+and its handlers' layer, which needs the catalog's handlers:
 
 ```ts
+import { ToolDiscovery } from "effect-assistant"
+
+const OfficeDiscovery = ToolDiscovery.make(OfficeTools) // rare: found when needed
+
 const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
   turn.loop({
     instructions,
-    toolkit: CommonTools, // common: always in the prompt
-    catalog: OfficeTools // rare: found when needed
+    toolkit: Toolkit.merge(CommonTools, OfficeDiscovery.toolkit) // common: always in the prompt
   })
-).pipe(Layer.provide([CommonToolsLive, OfficeToolsLive]))
+).pipe(Layer.provide([CommonToolsLive, OfficeDiscovery.layer.pipe(Layer.provide(OfficeToolsLive))]))
 ```
+
+What the catalog's tools use at call time (their `dependencies`, like a
+`CurrentUser`) is `execute_tool`'s, so the turn provides it as for any tool.
+A tool run through `execute_tool` gets a call id made from that call's, so
+it's the same when a crash runs the call again.
 
 Keep the tools an assistant uses often in the toolkit directly; discovery
 costs an extra step. `execute_tool` doesn't run a tool that needs the user's

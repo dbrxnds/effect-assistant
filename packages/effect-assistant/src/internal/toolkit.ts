@@ -203,12 +203,6 @@ export const fromToolkitOrEmpty = <T extends Record<string, Tool.Any>>(
   toolkit: Toolkit.Toolkit<T> | undefined
 ): Tools<ToolServices<T> | Tool.HandlersFor<T>> => (toolkit === undefined ? empty : fromToolkit(toolkit))
 
-/** `search_tools` and `execute_tool` over a catalog toolkit, or none. */
-export const catalogOf = <T extends Record<string, Tool.Any>>(
-  catalog: Toolkit.Toolkit<T> | undefined,
-  discover: <R>(tools: Tools<R>) => Tools<R>
-): Tools<ToolServices<T> | Tool.HandlersFor<T>> => (catalog === undefined ? empty : discover(fromToolkit(catalog)))
-
 /** No tools. */
 export const empty: Tools = {
   definitions: [],

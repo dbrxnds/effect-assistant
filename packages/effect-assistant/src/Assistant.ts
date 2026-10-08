@@ -32,24 +32,14 @@ import type * as Specialist from "./Specialist.ts"
 export type TurnServices = AssistantChat | Specialist.Runner
 
 /** Options for `turn.loop`. */
-export interface LoopOptions<
-  T extends Record<string, Tool.Any> = Record<never, never>,
-  RS = never,
-  Events = never,
-  C extends Record<string, Tool.Any> = Record<never, never>
-> {
+export interface LoopOptions<T extends Record<string, Tool.Any> = Record<never, never>, RS = never, Events = never> {
   /** The assistant's role and rules. `Instructions.protocol` goes before them. */
   readonly instructions: string | Instructions.Resolved
   /**
    * Its tools, next to its own: a native toolkit, with its handlers from the layer. Merge several with
-   * `Toolkit.merge`, like `Memory.Tools` or `ToolDiscovery.Tools` with yours.
+   * `Toolkit.merge`, like `Memory.Tools` or a `ToolDiscovery.make(...)` toolkit with yours.
    */
   readonly toolkit?: Toolkit.Toolkit<T> | undefined
-  /**
-   * Tools the model finds when it needs them, instead of in every prompt: it gets `search_tools` and `execute_tool`
-   * over this toolkit, whose handlers come from the layer too.
-   */
-  readonly catalog?: Toolkit.Toolkit<C> | undefined
   /** Playbooks: a catalog in the prompt, loaded with `load_skill` when a task matches. */
   readonly skills?: ReadonlyArray<Skill<RS>> | undefined
   /** Model calls per turn. Default 16. */
@@ -121,20 +111,12 @@ export interface Turn<Events = never> {
    * and these instructions, tools, and skills. Every step is a tool call. It
    * ends with `replyIfOwed`.
    */
-  readonly loop: <
-    T extends Record<string, Tool.Any> = Record<never, never>,
-    RS = never,
-    C extends Record<string, Tool.Any> = Record<never, never>
-  >(
-    options: LoopOptions<T, RS, Events, C>
+  readonly loop: <T extends Record<string, Tool.Any> = Record<never, never>, RS = never>(
+    options: LoopOptions<T, RS, Events>
   ) => Stream.Stream<
     AssistantLoop.Event,
     AiError.AiError,
-    | LanguageModel.LanguageModel
-    | TurnServices
-    | AssistantLoop.ToolkitServices<T>
-    | AssistantLoop.ToolkitServices<C>
-    | RS
+    LanguageModel.LanguageModel | TurnServices | AssistantLoop.ToolkitServices<T> | RS
   >
   /**
    * One more pass, when the turn would end without replying to the user's

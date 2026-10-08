@@ -366,12 +366,12 @@ its layer. See [specialists](./apps/docs/guide/specialists.md).
 
 A skill is a playbook. Only its name and a single line appear in the
 prompt, and the model loads the rest with `load_skill` when a task matches.
-A `catalog` is a large toolkit the model searches instead: it gets
-`search_tools` and `execute_tool` over it, so the prompt doesn't carry
-every tool definition.
+`ToolDiscovery.make(catalog)` turns a large toolkit into two tools,
+`search_tools` and `execute_tool`, so the prompt doesn't carry every tool
+definition.
 
 ```ts
-import { Skill } from "effect-assistant"
+import { Skill, ToolDiscovery } from "effect-assistant"
 
 const reorder = Skill.make({
   name: "reorder",
@@ -379,9 +379,12 @@ const reorder = Skill.make({
   instructions: "1. Find their last order of it. 2. Confirm quantity and address. 3. Place it."
 })
 
+// A native toolkit, and its handlers' layer, which needs the catalog's handlers.
+const Discovery = ToolDiscovery.make(AllOtherTools)
+
 MyAssistant.toLayer((turn) =>
-  turn.loop({ instructions, toolkit: CoreTools, catalog: AllOtherTools, skills: [reorder] })
-).pipe(Layer.provide([CoreToolsLive, AllOtherToolsLive]))
+  turn.loop({ instructions, toolkit: Toolkit.merge(CoreTools, Discovery.toolkit), skills: [reorder] })
+).pipe(Layer.provide([CoreToolsLive, Discovery.layer.pipe(Layer.provide(AllOtherToolsLive))]))
 ```
 
 A skill's `instructions` can be an Effect, resolved each time it loads, for

@@ -24,7 +24,6 @@ import type * as BlockKit from "../BlockKit.ts"
 import * as Decision from "../Decision.ts"
 import * as Instructions from "../Instructions.ts"
 import * as Skill from "../Skill.ts"
-import * as Discovery from "./discovery.ts"
 import * as Skills from "./skills.ts"
 import type * as Specialist from "../Specialist.ts"
 import * as Decisions from "./decisions.ts"
@@ -358,19 +357,14 @@ const makeTurnApi = (
   })
 
   // What the loop sends for these options: its system prompt, its tools, and which entries it reads.
-  const prepare = <T extends Record<string, Tool.Any>, RS, C extends Record<string, Tool.Any>>(
-    options: Assistant.LoopOptions<T, RS, any, C>
-  ) => {
+  const prepare = <T extends Record<string, Tool.Any>, RS>(options: Assistant.LoopOptions<T, RS, any>) => {
     const skills = options.skills ?? []
 
     return {
       system: mapText(instructions(options.instructions), (text) => Skill.withCatalog(text, skills)),
       toolkit: Toolkits.merge(
         Toolkits.merge(builtins, Skills.toTools(skills)),
-        Toolkits.merge(
-          Toolkits.fromToolkitOrEmpty(options.toolkit),
-          Toolkits.catalogOf(options.catalog, Discovery.make)
-        )
+        Toolkits.fromToolkitOrEmpty(options.toolkit)
       ),
       view: options.history ?? identity
     }

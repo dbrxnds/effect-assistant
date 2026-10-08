@@ -150,8 +150,8 @@ const MyAssistantLive = MyAssistant.toLayer(
 ```
 
 The model only sees the tools the turn got, so it can't call one the user
-may not use. A [catalog](./tools#many-tools-a-catalog) works the same
-way: pass the one for the tools the user may use. Still check
+may not use. [Discovery](./tools#many-tools-discovery) works the same way:
+build it over the tools the user may use. Still check
 permissions in the tool, or in the service it calls, if that's where the
 rest of your app enforces them.
 
