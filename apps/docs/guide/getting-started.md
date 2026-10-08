@@ -109,7 +109,7 @@ assistant stored, for server-side code and tests:
 **Example** (The log, for the server)
 
 ```ts
-yield *
+const printLog = (chatId: ChatId.ChatId) =>
   MyAssistant.subscribe(chatId).pipe(
     Stream.takeUntil(({ event }) => Predicate.isTagged(event, "TurnCompleted")),
     Stream.runForEach(({ seq, event }) => Console.log(seq, event._tag))

@@ -260,16 +260,18 @@ suspends until the user answers, across restarts. Provide a
 `WorkflowEngine`, such as `ClusterWorkflowEngine.layer`.
 
 ```ts
-const outcome =
-  yield *
-  Decision.durable(Shop, {
-    chatId,
-    name: "publish",
-    source: "workflow:Publish",
-    preview: post
-  })
+const publish = (chatId: ChatId.ChatId, post: Post) =>
+  Effect.gen(function* () {
+    const outcome = yield* Decision.durable(Shop, {
+      chatId,
+      name: "publish",
+      source: "workflow:Publish",
+      preview: post
+    })
 
-if (outcome === "declined") return
+    if (outcome === "declined") return
+    // ...publish it
+  })
 ```
 
 Outside a workflow, use `Decision.request` and then `Decision.outcome`. See
