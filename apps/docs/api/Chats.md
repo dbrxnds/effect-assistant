@@ -34,12 +34,17 @@ type Reason = typeof Reason.Type
 
 <small>Since 0.1.0</small>
 
-### ChatUnavailable
+### GetChatError
 
-The chat can't be used: an input for it isn't stored.
+What `get` fails with: the chat can't be used, and why. An input for it
+isn't stored.
 
 ```ts
-class ChatUnavailable extends Schema.TaggedError<ChatUnavailable>()("ChatUnavailable", {
+if (row === undefined) return yield* new GetChatError({ chatId, reason: "NotFound" })
+```
+
+```ts
+class GetChatError extends Schema.TaggedError<GetChatError>()("GetChatError", {
   chatId: ChatId,
   reason: Reason
 })
@@ -66,7 +71,7 @@ Where the app's chats are.
 ```ts
 interface Service {
   /** The chat, or why it can't be used. */
-  readonly get: (chatId: ChatId) => Effect.Effect<Chat, ChatUnavailable>
+  readonly get: (chatId: ChatId) => Effect.Effect<Chat, GetChatError>
 }
 
 /**

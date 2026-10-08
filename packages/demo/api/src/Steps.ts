@@ -74,7 +74,7 @@ export const report = (step: Step) =>
           details: step.details
         })
       )
-    ).pipe(Effect.catchTag("ChatUnavailable", () => Effect.void))
+    ).pipe(Effect.catchTag("GetChatError", () => Effect.void))
   })
 
 /**

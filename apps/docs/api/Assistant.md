@@ -197,7 +197,7 @@ interface Service<Events = never> {
    * know it, or deleted it.
    */
   // Method syntax: a service for these events is one for any (`Service<any>`), for helpers over assistants.
-  submit(chatId: ChatId, input: AssistantEvent.Input | Events): Effect.Effect<void, Chats.ChatUnavailable>
+  submit(chatId: ChatId, input: AssistantEvent.Input | Events): Effect.Effect<void, Chats.GetChatError>
   /**
    * Streams the chat's whole log (the entries after `after`, for a reader
    * that has the rest), then live ones, with the assistant's own events

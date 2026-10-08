@@ -218,7 +218,7 @@ export const make = Effect.fnUntraced(function* (options: {
    */
   const checkAvailable: Effect.Effect<boolean> = chats.get(chatId).pipe(
     Effect.as(true),
-    Effect.catchTag("ChatUnavailable", (unavailable) =>
+    Effect.catchTag("GetChatError", (unavailable) =>
       unavailable.reason === "Deleted"
         ? Effect.as(
             Effect.suspend(() => remove),

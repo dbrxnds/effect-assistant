@@ -40,7 +40,7 @@ export const Subscribe = Rpc.make("Subscribe", {
  */
 export const Submit = Rpc.make("Submit", {
   payload: { chatId: ChatId.ChatId, input: AssistantEvent.UserInput },
-  error: Chats.ChatUnavailable
+  error: Chats.GetChatError
 })
 
 /**

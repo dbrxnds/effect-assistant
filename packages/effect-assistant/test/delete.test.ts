@@ -62,7 +62,7 @@ const appChats = Effect.gen(function* () {
 
           return status === "open"
             ? Effect.succeed({ chatId })
-            : Effect.fail(Chats.ChatUnavailable.make({ chatId, reason: status === "deleted" ? "Deleted" : "NotFound" }))
+            : Effect.fail(new Chats.GetChatError({ chatId, reason: status === "deleted" ? "Deleted" : "NotFound" }))
         })
       )
   })

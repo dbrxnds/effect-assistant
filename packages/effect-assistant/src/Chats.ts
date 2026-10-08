@@ -16,8 +16,15 @@ export const Reason = Schema.Literals(["NotFound", "Deleted"])
 /** Why a chat can't be used. */
 export type Reason = typeof Reason.Type
 
-/** The chat can't be used: an input for it isn't stored. */
-export class ChatUnavailable extends Schema.TaggedError<ChatUnavailable>()("ChatUnavailable", {
+/**
+ * What `get` fails with: the chat can't be used, and why. An input for it
+ * isn't stored.
+ *
+ * ```ts
+ * if (row === undefined) return yield* new GetChatError({ chatId, reason: "NotFound" })
+ * ```
+ */
+export class GetChatError extends Schema.TaggedError<GetChatError>()("GetChatError", {
   chatId: ChatId,
   reason: Reason
 }) {}
@@ -30,7 +37,7 @@ export interface Chat {
 /** Where the app's chats are. */
 export interface Service {
   /** The chat, or why it can't be used. */
-  readonly get: (chatId: ChatId) => Effect.Effect<Chat, ChatUnavailable>
+  readonly get: (chatId: ChatId) => Effect.Effect<Chat, GetChatError>
 }
 
 /**

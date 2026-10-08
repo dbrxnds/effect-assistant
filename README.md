@@ -177,7 +177,7 @@ With several processes, use a multi-runner cluster in place of
 
 A chat's record (its owner, its title, whether it was deleted) is your
 app's. Tell the assistant which chats exist with `Chats`. Its `get` returns
-the chat, or fails with `ChatUnavailable` and a `reason` of `"NotFound"` or
+the chat, or fails with `GetChatError` and a `reason` of `"NotFound"` or
 `"Deleted"`. You decide when a chat is created: up front, or by creating it
 on its first message inside `get`. Without `Chats`, every chat exists from
 its first input.
@@ -198,8 +198,8 @@ const ChatsLive = Layer.effect(
           SELECT deleted_at FROM chats WHERE chat_id = ${chatId}
         `.pipe(Effect.orDie)
 
-        if (row === undefined) return yield* Chats.ChatUnavailable.make({ chatId, reason: "NotFound" })
-        if (row.deleted_at !== null) return yield* Chats.ChatUnavailable.make({ chatId, reason: "Deleted" })
+        if (row === undefined) return yield* new Chats.GetChatError({ chatId, reason: "NotFound" })
+        if (row.deleted_at !== null) return yield* new Chats.GetChatError({ chatId, reason: "Deleted" })
 
         return { chatId }
       })
@@ -213,7 +213,7 @@ Layer.mergeAll(ChatLog.layerSql, ChatsLive)
 
 The assistant asks `get` at three points:
 
-- **Before `submit` sends.** `submit` fails with `ChatUnavailable`, which
+- **Before `submit` sends.** `submit` fails with `GetChatError`, which
   your server can turn into a 404.
 - **When the chat stores an input.** A refused input is dropped quietly,
   for example a workflow's update.

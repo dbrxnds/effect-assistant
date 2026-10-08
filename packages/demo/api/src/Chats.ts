@@ -158,14 +158,15 @@ export const layerAssistantChats: Layer.Layer<never, never, Chats> = Layer.effec
     const chats = yield* Chats
 
     return {
-      get: (chatId) =>
-        chats.list.pipe(
-          Effect.flatMap((all) =>
-            all.some((chat) => chat.chatId === chatId)
-              ? Effect.succeed({ chatId })
-              : Effect.fail(AssistantChats.ChatUnavailable.make({ chatId, reason: "NotFound" }))
-          )
-        )
+      get: Effect.fn(function* (chatId: ChatId.ChatId) {
+        const all = yield* chats.list
+
+        if (!all.some((chat) => chat.chatId === chatId)) {
+          return yield* new AssistantChats.GetChatError({ chatId, reason: "NotFound" })
+        }
+
+        return { chatId }
+      })
     }
   })
 )
