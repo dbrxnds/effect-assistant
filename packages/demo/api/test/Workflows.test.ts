@@ -179,7 +179,7 @@ describe("PrintOrder", () => {
         )
 
         yield* waitFor(chatId, "confirmed")
-        yield* AcmeAssistant.delete(chatId)
+        yield* (yield* AcmeAssistant).delete(chatId)
 
         // The order still moves; the deleted chat just isn't told.
         yield* orders.get("ACM-TEST03").pipe(

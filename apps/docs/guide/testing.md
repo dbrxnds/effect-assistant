@@ -63,13 +63,14 @@ const AssistantTest = MyAssistant.toLayer((turn) => turn.loop({ instructions, to
 
 it.live("uses a tool and reports its result", () =>
   Effect.gen(function* () {
+    const assistant = yield* MyAssistant
     const chatId = yield* ChatId.make
-    yield* MyAssistant.submit(
+    yield* assistant.submit(
       chatId,
       AssistantEvent.UserMessage.make({ id: yield* InputId.make, text: "What's the weather in Oslo?" })
     )
 
-    const entries = yield* MyAssistant.subscribe(chatId).pipe(
+    const entries = yield* assistant.subscribe(chatId).pipe(
       Stream.takeUntil(({ event }) => Predicate.isTagged(event, "TurnCompleted")),
       Stream.runCollect
     )

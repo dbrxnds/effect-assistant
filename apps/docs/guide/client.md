@@ -6,7 +6,7 @@ assistant (or one of its specialists) is working. Never the model's output,
 tool calls or results, what the model read, the app's own events, or why a
 turn failed. That's [`ChatView`](/api/ChatView).
 
-`MyAssistant.subscribeView(chatId)` streams it as
+The assistant's `subscribeView(chatId)` (`yield* MyAssistant`) streams it as
 [`ChatView.Update`](/api/ChatView#update)s: each one has the messages that
 are new or changed since the last (whole), and the activity now. The client
 folds them with [`ChatView.apply`](/api/ChatView#apply), from `ChatView.empty`.
@@ -41,13 +41,11 @@ its view:
 ```ts
 const ChatRpcsLive = ChatRpcs.toLayer(
   Effect.gen(function* () {
-    const engine = yield* AssistantEngine.AssistantEngine
+    const assistant = yield* MyAssistant
 
     return ChatRpcs.of({
-      Subscribe: ({ chatId }) =>
-        MyAssistant.subscribeView(chatId).pipe(Stream.provideService(AssistantEngine.AssistantEngine, engine)),
-      Submit: ({ chatId, input }) =>
-        MyAssistant.submit(chatId, input).pipe(Effect.provideService(AssistantEngine.AssistantEngine, engine))
+      Subscribe: ({ chatId }) => assistant.subscribeView(chatId),
+      Submit: ({ chatId, input }) => assistant.submit(chatId, input)
     })
   })
 )
@@ -97,7 +95,7 @@ whether it's `open`, the user's `answer`, and, for the decision block, its
 
 ## The log is the server's
 
-`MyAssistant.subscribe(chatId)` streams the whole log: every event, the
+The assistant's `subscribe(chatId)` streams the whole log: every event, the
 assistant's own work included. It's for server-side code, tests, and
 debugging. Don't send it to a chat client, and don't filter it for one:
 `subscribeView` is that filter, and it knows the assistant's events.

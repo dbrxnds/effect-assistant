@@ -218,14 +218,14 @@ describe("subscribeView", () => {
 
       const { log, folded, since } = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* Updating.submit(chat, say("hi"))
+        yield* (yield* Updating).submit(chat, say("hi"))
         const first = yield* collectUntil(Updating, chat, (es) => turnsDone(es) >= 1)
-        yield* Updating.submit(chat, update("workflow:Order", { status: "shipped" }))
+        yield* (yield* Updating).submit(chat, update("workflow:Order", { status: "shipped" }))
         const log = yield* collectUntil(Updating, chat, (es) => turnsDone(es) >= 2)
 
         const wire = Schema.toCodecJson(ChatView.Update)
 
-        const folded = yield* Updating.subscribeView(chat).pipe(
+        const folded = yield* (yield* Updating).subscribeView(chat).pipe(
           Stream.map((update) =>
             Schema.decodeUnknownSync(wire)(JSON.parse(JSON.stringify(Schema.encodeSync(wire)(update))))
           ),
@@ -235,7 +235,7 @@ describe("subscribeView", () => {
           Effect.map(Option.getOrThrow)
         )
 
-        const since = yield* Updating.subscribeView(chat, { after: first.at(-1)!.seq }).pipe(
+        const since = yield* (yield* Updating).subscribeView(chat, { after: first.at(-1)!.seq }).pipe(
           Stream.takeUntil((changes) => changes.seq >= log.at(-1)!.seq),
           Stream.runCollect
         )

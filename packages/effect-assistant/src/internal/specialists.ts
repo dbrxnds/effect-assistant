@@ -35,6 +35,7 @@ import { toolMessage, userText } from "./history.ts"
 import { mapText } from "./instructions.ts"
 import * as Telemetry from "./telemetry.ts"
 import * as Toolkits from "./toolkit.ts"
+import type { Writer } from "./writer.ts"
 
 /** A specialist's handler once its build ran for the chat. */
 export type RunHandler = (run: Specialist.Run) => Stream.Stream<AssistantLoop.Event, unknown, Specialist.RunServices>
@@ -71,7 +72,7 @@ export const runBrief = Effect.fnUntraced(
       readonly brief: Specialist.Brief
       readonly history: Ref.Ref<ReadonlyArray<Prompt.Message>>
       readonly inbox: Queue.Queue<Prompt.Message>
-      readonly chatId: AssistantChat["Service"]["chatId"]
+      readonly chatId: Writer["chatId"]
     }
   ) {
     const { history, inbox } = options
@@ -251,7 +252,9 @@ interface Run {
 
 /** Creates a chat's specialist runner. */
 export const makeRunner = Effect.fnUntraced(function* (options: {
-  readonly chat: AssistantChat["Service"]
+  readonly chat: Writer
+  /** The chat as a run's handler and tools get it. */
+  readonly handle: AssistantChat["Service"]
   readonly specialists: ReadonlyArray<{
     readonly specialist: Specialist.Any
     readonly handler: RunHandler
@@ -421,7 +424,7 @@ export const makeRunner = Effect.fnUntraced(function* (options: {
   })
 
   // What a run's handler gets: its chat, this runner, and (merged in `once`) the model.
-  const services = Context.make(AssistantChat, chat).pipe(Context.add(Specialist.Runner, runner))
+  const services = Context.make(AssistantChat, options.handle).pipe(Context.add(Specialist.Runner, runner))
 
   return runner
 })

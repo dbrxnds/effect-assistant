@@ -5,7 +5,7 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { AppEvent, Assistant, AssistantEvent, ChatId, Compaction, DecisionId } from "../src/index.ts"
+import { AppEvent, Assistant, AssistantChat, AssistantEvent, ChatId, Compaction, DecisionId } from "../src/index.ts"
 import { collectUntil, newChat, runMemory, say, turnsDone } from "./utils/fixtures.ts"
 import * as Scripted from "./utils/scripted.ts"
 
@@ -25,12 +25,12 @@ const compacting = (turn: Assistant.Turn<Summary>) => {
   const options = { instructions: "Be brief.", history }
 
   const compact = Effect.gen(function* () {
-    const entries = yield* turn.entries
+    const entries = yield* (yield* AssistantChat.AssistantChat).entries
 
     if (entries.some(({ event }) => event instanceof Summary)) return
 
     const { text } = yield* LanguageModel.generateText({ prompt: summarizePrompt })
-    yield* turn.append(Summary.make({ text, throughSeq: entries.at(-1)?.seq ?? 0 }))
+    yield* (yield* AssistantChat.AssistantChat).append(Summary.make({ text, throughSeq: entries.at(-1)?.seq ?? 0 }))
   })
 
   return Stream.concat(turn.loop(options), Stream.drain(Stream.fromEffect(compact)))
@@ -51,9 +51,9 @@ describe("Compaction", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* Compacting.submit(chat, say("I want 300 totes, in blue."))
+        yield* (yield* Compacting).submit(chat, say("I want 300 totes, in blue."))
         yield* collectUntil(Compacting, chat, (es) => turnsDone(es) >= 1)
-        yield* Compacting.submit(chat, say("Make them red."))
+        yield* (yield* Compacting).submit(chat, say("Make them red."))
 
         return yield* collectUntil(Compacting, chat, (es) => turnsDone(es) >= 2)
       }).pipe(Effect.provide(runMemory(Compacting.toLayer(compacting), model.layer)))

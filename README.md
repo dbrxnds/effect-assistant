@@ -86,16 +86,17 @@ const AppLive = MyAssistantHandlers.pipe(
 )
 
 const program = Effect.gen(function* () {
+  const assistant = yield* MyAssistant // its toLayer provides it
   const chatId = yield* ChatId.make
 
   // Returns at once. The assistant works in the background.
-  yield* MyAssistant.submit(
+  yield* assistant.submit(
     chatId,
     AssistantEvent.UserMessage.make({ id: yield* InputId.make, text: "What's the weather in Oslo?" })
   )
 
   // The chat as its user sees it, until the assistant is done.
-  const view = yield* MyAssistant.subscribeView(chatId).pipe(
+  const view = yield* assistant.subscribeView(chatId).pipe(
     Stream.scan(() => ChatView.empty, ChatView.apply),
     Stream.takeUntil((view) => view.messages.length > 1 && ChatView.isIdle(view)),
     Stream.runLast
@@ -113,11 +114,11 @@ Effect.runPromise(program.pipe(Effect.provide(AppLive)))
 
 Every assistant has the same three parts:
 
-| Part           | What it is                                                                                |
-| -------------- | ----------------------------------------------------------------------------------------- |
-| **Definition** | `Assistant.make(name, options)`. Callers use its `submit`, `subscribeView`, and `delete`. |
-| **Handler**    | `MyAssistant.toLayer(...)`. It runs each turn, usually `turn.loop(...)`.                  |
-| **Engine**     | `AssistantEngine.layerMemory` or `layerCluster`, on top of a `ChatLog`.                   |
+| Part           | What it is                                                                                           |
+| -------------- | ---------------------------------------------------------------------------------------------------- |
+| **Definition** | `Assistant.make(name, options)`. `yield* MyAssistant` gives `submit`, `subscribeView`, and `delete`. |
+| **Handler**    | `MyAssistant.toLayer(...)`. It runs each turn, usually `turn.loop(...)`.                             |
+| **Engine**     | `AssistantEngine.layerMemory` or `layerCluster`, on top of a `ChatLog`.                              |
 
 `subscribeView` is what a chat client should get: messages, their blocks,
 and whether the assistant is working. `subscribe` streams the whole log,
@@ -219,7 +220,7 @@ The assistant asks `get` at three points:
 - **Before every model call.**
 
 To delete a chat, mark it deleted in your table, then call
-`MyAssistant.delete(chatId)`. That appends a `ChatDeleted` to the log and
+`delete(chatId)` on the assistant (`yield* MyAssistant`). That appends a `ChatDeleted` to the log and
 stops the running turn and specialists. Subscribers receive the event, and
 then their streams end. The client's view says `deleted: true`. If your
 app marks a chat deleted and never calls `delete`, the assistant deletes it
@@ -232,19 +233,23 @@ Whom a chat belongs to is your app's data. At the edge, check that the
 signed-in user may use the chat, then pass the call through:
 
 ```ts
+const assistant = yield * MyAssistant
+
 // The client makes the InputId, so a retried send is stored once.
 const send = (chatId: ChatId.ChatId, inputId: InputId.InputId, text: string) =>
-  MyAssistant.submit(chatId, AssistantEvent.UserMessage.make({ id: inputId, text }))
+  assistant.submit(chatId, AssistantEvent.UserMessage.make({ id: inputId, text }))
 
 // A client that already has the view up to some seq passes it as `after`.
-const watch = (chatId: ChatId.ChatId, after?: number) => MyAssistant.subscribeView(chatId, { after })
+const watch = (chatId: ChatId.ChatId, after?: number) => assistant.subscribeView(chatId, { after })
 ```
 
 On the client, fold the updates with `ChatView.apply` starting from
 `ChatView.empty`. Show a working indicator while `view.activity` says
 something is working, and close the chat when `view.deleted` is true. The
 demo serves all of this over an Effect RPC WebSocket
-(`packages/demo/shared/src/Rpc.ts`). See
+(`packages/demo/shared/src/Rpc.ts`). A process that only serves clients, in
+front of a cluster that runs the chats, provides `MyAssistant.layerClient`
+instead of the handler's layer. See
 [the chat client](./apps/docs/guide/client.md) and
 [chats and users](./apps/docs/guide/chats.md).
 
@@ -398,7 +403,7 @@ Register your own tagged schemas with the assistant. An event with
 `wakes: true` starts a turn, like a user message, and the model reads it as
 `render` describes. The user sees it only if the assistant tells them.
 Events that don't wake a turn are bookkeeping that a handler reads back
-with `turn.entries`.
+from the chat, `(yield* AssistantChat.AssistantChat).entries`.
 
 ```ts
 import { AppEvent, InputId } from "effect-assistant"
@@ -419,10 +424,11 @@ export const MyAssistant = Assistant.make("my-assistant", {
 })
 
 // From a webhook. The keyed id makes a redelivered webhook harmless.
-MyAssistant.submit(
-  chatId,
-  ShipmentUpdated.make({ id: InputId.fromKey(`shipment:${orderId}:${status}`), orderId, status })
-)
+yield *
+  (yield * MyAssistant).submit(
+    chatId,
+    ShipmentUpdated.make({ id: InputId.fromKey(`shipment:${orderId}:${status}`), orderId, status })
+  )
 ```
 
 See [your own events](./apps/docs/guide/app-events.md).
@@ -442,7 +448,7 @@ build prompts. The example below also adds two optional pieces:
   writes the summary. The library supplies the pieces.
 
 ```ts
-import { AppEvent, Compaction, Memory } from "effect-assistant"
+import { AppEvent, AssistantChat, Compaction, Memory } from "effect-assistant"
 import * as LanguageModel from "effect/ai/LanguageModel"
 
 class Summary extends Schema.TaggedClass<Summary>()("Summary", {
@@ -470,7 +476,8 @@ const MyAssistantHandlers = MyAssistant.toLayer(
           const remembered = Option.getOrElse(Memory.render(facts, scopes), () => "")
 
           const compact = Effect.gen(function* () {
-            const entries = yield* turn.entries
+            const chat = yield* AssistantChat.AssistantChat
+            const entries = yield* chat.entries
 
             if (Compaction.inputTokens(entries) < 100_000) return
 
@@ -478,7 +485,7 @@ const MyAssistantHandlers = MyAssistant.toLayer(
               prompt: `Summarize this chat for whoever picks it up:\n\n${transcript(entries)}`
             })
 
-            yield* turn.append(Summary.make({ text: response.text, throughSeq: entries.at(-1)?.seq ?? 0 }))
+            yield* chat.append(Summary.make({ text: response.text, throughSeq: entries.at(-1)?.seq ?? 0 }))
           }).pipe(Effect.catchCause((cause) => Effect.logWarning("compaction failed", cause)))
 
           return Stream.concat(

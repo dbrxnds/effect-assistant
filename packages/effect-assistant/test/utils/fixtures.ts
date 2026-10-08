@@ -48,11 +48,11 @@ export const layerStorage = ChatLog.layerMemory
 type Model = Layer.Layer<LanguageModel.LanguageModel>
 
 /** Runs these assistants' handlers on the in-memory engine, with their own storage and this model. */
-export const runMemory = <E, RIn>(handlers: Layer.Layer<never, E, RIn>, model: Model) =>
+export const runMemory = <A, E, RIn>(handlers: Layer.Layer<A, E, RIn>, model: Model) =>
   handlers.pipe(Layer.provideMerge(AssistantEngine.layerMemory), Layer.provideMerge(layerStorage), Layer.provide(model))
 
 /** Runs these assistants' handlers on the cluster engine, on the in-process cluster. */
-export const runEntity = <E, RIn>(handlers: Layer.Layer<never, E, RIn>, model: Model) =>
+export const runEntity = <A, E, RIn>(handlers: Layer.Layer<A, E, RIn>, model: Model) =>
   handlers.pipe(
     Layer.provideMerge(AssistantEngine.layerCluster),
     Layer.provideMerge(layerStorage),
@@ -146,8 +146,9 @@ export const traceEntries = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
     .join("\n")
 
 /** Collects a chat's events until `until` holds for them, or fails after `timeout` with what it saw. */
-export const collectUntil = (
-  assistant: Pick<Assistant.Any, "subscribe">,
+export const collectUntil = <I>(
+  // Any assistant's events: the tests read entries as the library's.
+  assistant: Effect.Effect<Assistant.Service<any>, never, I>,
   chatId: ChatId.ChatId,
   until: (entries: ReadonlyArray<AssistantEvent.Entry>) => boolean,
   timeout: Duration.Input = "90 seconds"
@@ -155,7 +156,7 @@ export const collectUntil = (
   Effect.gen(function* () {
     let seen: ReadonlyArray<AssistantEvent.Entry> = []
 
-    return yield* assistant.subscribe(chatId).pipe(
+    return yield* (yield* assistant).subscribe(chatId).pipe(
       Stream.scan(
         (): ReadonlyArray<AssistantEvent.Entry> => [],
         (acc, entry) => [...acc, entry]

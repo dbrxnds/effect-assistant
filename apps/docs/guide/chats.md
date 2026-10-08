@@ -46,7 +46,7 @@ const send = (userId: string, chatId: ChatId.ChatId, input: AssistantEvent.UserI
 
     if (chat?.ownerId !== userId) return yield* Effect.fail("not_found" as const)
 
-    yield* MyAssistant.submit(chatId, input)
+    yield* (yield* MyAssistant).submit(chatId, input)
   })
 ```
 
@@ -216,11 +216,11 @@ const deleteChat = (userId: string, chatId: ChatId.ChatId) =>
     if (chat?.ownerId !== userId) return yield* Effect.fail("not_found" as const)
 
     yield* chats.markDeleted(chatId)
-    yield* MyAssistant.delete(chatId)
+    yield* (yield* MyAssistant).delete(chatId)
   })
 ```
 
-`MyAssistant.delete` goes through the engine to the chat, which:
+The assistant's `delete` goes through the engine to the chat, which:
 
 - appends a `ChatDeleted` to its log, which stays;
 - stops what works in it: a turn, specialist runs, what the handler's build

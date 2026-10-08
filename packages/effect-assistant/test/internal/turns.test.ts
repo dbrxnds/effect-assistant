@@ -16,7 +16,6 @@ import {
   newChat,
   say,
   simple,
-  storedUpdate,
   TestAssistant,
   turnsDone,
   update,
@@ -64,7 +63,7 @@ const lateUpdate = () => {
 
     if (turns === 1) {
       yield* AssistantChat.AssistantChat.use((chat) =>
-        chat.append([storedUpdate("specialist:research", { answer: "Ontario" })])
+        chat.append(update("specialist:research", { answer: "Ontario" }))
       )
 
       return Stream.make(
@@ -79,7 +78,7 @@ const lateUpdate = () => {
     }
 
     yield* AssistantChat.AssistantChat.use((chat) =>
-      chat.append([AssistantEvent.AssistantMessage.make({ id: "answer", text: "It's in Ontario." })])
+      chat.append(AssistantEvent.AssistantMessage.make({ id: "answer", text: "It's in Ontario." }))
     )
 
     return Stream.empty
@@ -94,7 +93,7 @@ describe("turn completion", () => {
     Effect.gen(function* () {
       const assistant = TestAssistant
       const chat = yield* newChat
-      yield* assistant.submit(chat, say("hello?"))
+      yield* (yield* assistant).submit(chat, say("hello?"))
       const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 1)
 
       const end = lastTurnEnd(entries)
@@ -110,7 +109,7 @@ describe("turn completion", () => {
     Effect.gen(function* () {
       const assistant = Updating
       const chat = yield* newChat
-      yield* assistant.submit(
+      yield* (yield* assistant).submit(
         chat,
         update("workflow:InventorySync", {
           step: "3 of 10",
@@ -132,7 +131,7 @@ describe("turn completion", () => {
     Effect.gen(function* () {
       const assistant = TestAssistant
       const chat = yield* newChat
-      yield* assistant.submit(chat, say("hello?"))
+      yield* (yield* assistant).submit(chat, say("hello?"))
       const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 1)
       const results = entries.flatMap(({ event }) => (Predicate.isTagged(event, "ToolResult") ? [event] : []))
 
@@ -195,7 +194,7 @@ describe("turn completion", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* TestAssistant.submit(chat, say("send it"))
+        yield* (yield* TestAssistant).submit(chat, say("send it"))
 
         return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
       }).pipe(Effect.provide(stopsMidCall))
@@ -210,7 +209,7 @@ describe("turn completion", () => {
     Effect.gen(function* () {
       const assistant = Updating
       const chat = yield* newChat
-      yield* assistant.submit(chat, say("which province is Ottawa in?"))
+      yield* (yield* assistant).submit(chat, say("which province is Ottawa in?"))
       const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 2)
 
       expect(AssistantEvent.assistantTexts(entries)).toEqual(["It's in Ontario."])
@@ -232,15 +231,15 @@ describe("turn completion", () => {
 
         if (turns === 1) {
           yield* AssistantChat.AssistantChat.use((chat) =>
-            chat.append([storedUpdate("specialist:research", { answer: "Ontario" })])
+            chat.append(update("specialist:research", { answer: "Ontario" }))
           )
-          yield* turn.entries
+          yield* (yield* AssistantChat.AssistantChat).entries
 
           return waitOnly()
         }
 
         yield* AssistantChat.AssistantChat.use((chat) =>
-          chat.append([AssistantEvent.AssistantMessage.make({ id: "answer", text: "It's in Ontario." })])
+          chat.append(AssistantEvent.AssistantMessage.make({ id: "answer", text: "It's in Ontario." }))
         )
 
         return Stream.empty
@@ -248,7 +247,7 @@ describe("turn completion", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* Updating.submit(chat, say("which province is Ottawa in?"))
+        yield* (yield* Updating).submit(chat, say("which province is Ottawa in?"))
 
         return yield* collectUntil(Updating, chat, (es) => turnsDone(es) >= 2)
       }).pipe(Effect.provide(updatingAssistant(handler, Scripted.unused)))
@@ -269,7 +268,7 @@ describe("turn completion", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* TestAssistant.submit(chat, say("Thanks, that's all I needed."))
+        yield* (yield* TestAssistant).submit(chat, say("Thanks, that's all I needed."))
 
         return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
       }).pipe(Effect.provide(memoryAssistant(handler, model.layer)))
@@ -298,7 +297,7 @@ describe("the reply pass", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* TestAssistant.submit(chat, say("Thanks!"))
+        yield* (yield* TestAssistant).submit(chat, say("Thanks!"))
 
         return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
       }).pipe(Effect.provide(memoryAssistant(simple({ instructions: "Be brief." }), model.layer)))
@@ -332,7 +331,7 @@ describe("progress without a result", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* TestAssistant.submit(chat, say("What's still open?"))
+        yield* (yield* TestAssistant).submit(chat, say("What's still open?"))
 
         return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
       }).pipe(Effect.provide(memoryAssistant(simple({ instructions: "Be brief." }), model.layer)))
@@ -351,7 +350,7 @@ describe("progress without a result", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* TestAssistant.submit(chat, say("What's still open?"))
+        yield* (yield* TestAssistant).submit(chat, say("What's still open?"))
 
         return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
       }).pipe(Effect.provide(memoryAssistant(simple({ instructions: "Be brief." }), model.layer)))
@@ -368,7 +367,7 @@ describe("a turn's trace", () => {
 
   const oneTurn = Effect.gen(function* () {
     const chat = yield* newChat
-    yield* Updating.submit(chat, update("workflow:Export", { status: "done" }))
+    yield* (yield* Updating).submit(chat, update("workflow:Export", { status: "done" }))
 
     return yield* collectUntil(Updating, chat, (es) => turnsDone(es) >= 1)
   })
@@ -430,7 +429,7 @@ describe("BlockKit.closeStale", () => {
           }),
           say("hmm")
         ])
-        yield* TestAssistant.submit(chat, say("something else"))
+        yield* (yield* TestAssistant).submit(chat, say("something else"))
 
         return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
       }).pipe(Effect.provide(layer))

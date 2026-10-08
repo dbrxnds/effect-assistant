@@ -39,7 +39,7 @@ describe("AssistantLoop.run in a turn", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* Own.submit(chat, say("Look up 7."))
+        yield* (yield* Own).submit(chat, say("Look up 7."))
 
         return yield* collectUntil(Own, chat, (es) => turnsDone(es) >= 1, "10 seconds")
       }).pipe(Effect.provide(runMemory(handlers, model)))

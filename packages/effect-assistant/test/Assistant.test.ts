@@ -65,7 +65,7 @@ describe("a turn", () => {
 
       yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* TestAssistant.submit(chat, say("hi"))
+        yield* (yield* TestAssistant).submit(chat, say("hi"))
         yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
       }).pipe(Effect.provide(memoryAssistant(simple({ instructions }), model.layer)))
 
@@ -81,7 +81,7 @@ describe("a turn", () => {
     Effect.gen(function* () {
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* TestAssistant.submit(chat, say("hi"))
+        yield* (yield* TestAssistant).submit(chat, say("hi"))
 
         return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
       }).pipe(
@@ -136,11 +136,11 @@ describe("a turn", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* TestAssistant.submit(chat, say("Check order A-17."))
+        yield* (yield* TestAssistant).submit(chat, say("Check order A-17."))
         yield* collectUntil(TestAssistant, chat, (es) =>
           es.some(({ event }) => Predicate.isTagged(event, "ToolStarted"))
         )
-        yield* TestAssistant.submit(chat, say("Also, what's 12 times 12?"))
+        yield* (yield* TestAssistant).submit(chat, say("Also, what's 12 times 12?"))
 
         return yield* collectUntil(TestAssistant, chat, (es) => text(es).includes("144") && idle(es))
       }).pipe(Effect.provide(memoryAssistant(withTools({ instructions, toolkit: lookup }), Scripted.layer(script))))
@@ -197,7 +197,7 @@ describe("specialist runs", () => {
     Effect.gen(function* () {
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* ResearchAssistant.submit(chat, say("What's the capital of Canada?"))
+        yield* (yield* ResearchAssistant).submit(chat, say("What's the capital of Canada?"))
 
         return yield* collectUntil(ResearchAssistant, chat, (es) => text(es).includes("ottawa") && notWorking(es))
       }).pipe(Effect.provide(runMemory(researchHandlers, Scripted.layer(researchScript))))
@@ -214,9 +214,9 @@ describe("specialist runs", () => {
     Effect.gen(function* () {
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* ResearchAssistant.submit(chat, say("What's the capital of Canada?"))
+        yield* (yield* ResearchAssistant).submit(chat, say("What's the capital of Canada?"))
         yield* collectUntil(ResearchAssistant, chat, (es) => text(es).includes("ottawa") && notWorking(es))
-        yield* ResearchAssistant.submit(chat, say("Which province is it in?"))
+        yield* (yield* ResearchAssistant).submit(chat, say("Which province is it in?"))
 
         return yield* collectUntil(ResearchAssistant, chat, (es) => text(es).includes("ontario") && notWorking(es))
       }).pipe(Effect.provide(runMemory(researchHandlers, Scripted.layer(researchScript))))
@@ -300,9 +300,9 @@ describe("specialist runs", () => {
     Effect.gen(function* () {
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* ArchiveAssistant.submit(chat, say("Where was the 2024 offsite?"))
+        yield* (yield* ArchiveAssistant).submit(chat, say("Where was the 2024 offsite?"))
         yield* collectUntil(ArchiveAssistant, chat, (es) => statuses(es).includes("started"))
-        yield* ArchiveAssistant.submit(chat, say("And the 2025 one?"))
+        yield* (yield* ArchiveAssistant).submit(chat, say("And the 2025 one?"))
 
         return yield* collectUntil(ArchiveAssistant, chat, (es) => text(es).includes("porto") && notWorking(es))
       }).pipe(Effect.provide(runMemory(archiveHandlers, Scripted.layer(archiveScript("message_specialist")))))
@@ -318,9 +318,9 @@ describe("specialist runs", () => {
     Effect.gen(function* () {
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* ArchiveAssistant.submit(chat, say("Where was the 2024 offsite?"))
+        yield* (yield* ArchiveAssistant).submit(chat, say("Where was the 2024 offsite?"))
         yield* collectUntil(ArchiveAssistant, chat, (es) => statuses(es).includes("started"))
-        yield* ArchiveAssistant.submit(chat, say("Never mind, stop it."))
+        yield* (yield* ArchiveAssistant).submit(chat, say("Never mind, stop it."))
 
         return yield* collectUntil(ArchiveAssistant, chat, (es) => finished(es).length > 0 && notWorking(es))
       }).pipe(Effect.provide(runMemory(archiveHandlers, Scripted.layer(archiveScript("stop_specialist")))))
@@ -366,7 +366,7 @@ describe("specialist runs", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* ResearchAssistant.submit(chat, say("What's the capital of Canada?"))
+        yield* (yield* ResearchAssistant).submit(chat, say("What's the capital of Canada?"))
 
         return yield* collectUntil(ResearchAssistant, chat, (es) => text(es).includes("ontario") && notWorking(es))
       }).pipe(Effect.provide(runMemory(researchHandlers, Scripted.layer(script))))
@@ -401,7 +401,7 @@ describe("specialist runs", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* CrasherAssistant.submit(chat, say("Go."))
+        yield* (yield* CrasherAssistant).submit(chat, say("Go."))
 
         return yield* collectUntil(CrasherAssistant, chat, (es) => text(es).includes("broke") && notWorking(es))
       }).pipe(Effect.provide(runMemory(handlers, Scripted.layer(script))))
@@ -427,7 +427,7 @@ describe("specialist runs", () => {
           const context = yield* Layer.build(layer)
 
           yield* Effect.gen(function* () {
-            yield* ArchiveAssistant.submit(chat, say("Where was the 2024 offsite?"))
+            yield* (yield* ArchiveAssistant).submit(chat, say("Where was the 2024 offsite?"))
             yield* collectUntil(ArchiveAssistant, chat, (es) => statuses(es).includes("started"))
           }).pipe(Effect.provide(context))
         })
@@ -493,7 +493,7 @@ describe("UI blocks", () => {
   it.live("shows a block; its answer is an input, and closes it", () =>
     Effect.gen(function* () {
       const chat = yield* newChat
-      yield* BlockAssistant.submit(chat, say("Pick a banner color."))
+      yield* (yield* BlockAssistant).submit(chat, say("Pick a banner color."))
       const first = yield* collectUntil(BlockAssistant, chat, (es) => shown(es) !== undefined && idle(es))
       const message = shown(first)
 
@@ -510,7 +510,7 @@ describe("UI blocks", () => {
         viewedMessages(first).find(({ id }) => id === message!.id)!,
         { respond: (answer) => answers.push(answer) }
       )
-      yield* BlockAssistant.submit(chat, answers[0]!)
+      yield* (yield* BlockAssistant).submit(chat, answers[0]!)
 
       const entries = yield* collectUntil(BlockAssistant, chat, (es) => text(es).includes("blue it is") && idle(es))
       const state = BlockKit.blockStates(entries).get(message!.id)
@@ -524,9 +524,9 @@ describe("UI blocks", () => {
   it.live("closes a block the user answered by typing, through `closes`", () =>
     Effect.gen(function* () {
       const chat = yield* newChat
-      yield* BlockAssistant.submit(chat, say("Pick a banner color."))
+      yield* (yield* BlockAssistant).submit(chat, say("Pick a banner color."))
       const first = yield* collectUntil(BlockAssistant, chat, (es) => shown(es) !== undefined && idle(es))
-      yield* BlockAssistant.submit(chat, say("blue"))
+      yield* (yield* BlockAssistant).submit(chat, say("blue"))
 
       const entries = yield* collectUntil(BlockAssistant, chat, (es) => text(es).includes("blue it is") && idle(es))
       const state = BlockKit.blockStates(entries).get(shown(first)!.id)
@@ -552,7 +552,7 @@ describe("UI blocks", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* BlockAssistant.submit(chat, say("Pick a banner color."))
+        yield* (yield* BlockAssistant).submit(chat, say("Pick a banner color."))
 
         return yield* collectUntil(BlockAssistant, chat, idle)
       }).pipe(Effect.provide(runMemory(BlockAssistant.toLayer(simple({ instructions })), model.layer)))
@@ -573,7 +573,7 @@ describe("the cluster engine", () => {
   it.live("runs a chat as an entity", () =>
     Effect.gen(function* () {
       const chat = yield* newChat
-      yield* TestAssistant.submit(chat, say("hi"))
+      yield* (yield* TestAssistant).submit(chat, say("hi"))
       const entries = yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
@@ -591,7 +591,7 @@ describe("the cluster engine", () => {
   it.live("runs a specialist in the chat's entity, and relays its report once", () =>
     Effect.gen(function* () {
       const chat = yield* newChat
-      yield* ResearchAssistant.submit(chat, say("What's the capital of Canada?"))
+      yield* (yield* ResearchAssistant).submit(chat, say("What's the capital of Canada?"))
 
       const entries = yield* collectUntil(
         ResearchAssistant,
@@ -651,7 +651,7 @@ describe("tools found on demand, and skills", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* TestAssistant.submit(chat, say("Any parking free in Amsterdam?"))
+        yield* (yield* TestAssistant).submit(chat, say("Any parking free in Amsterdam?"))
 
         return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
       }).pipe(
@@ -695,7 +695,7 @@ describe("tools found on demand, and skills", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* TestAssistant.submit(chat, say("Print it."))
+        yield* (yield* TestAssistant).submit(chat, say("Print it."))
 
         return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
       }).pipe(
@@ -744,7 +744,7 @@ describe("tools found on demand, and skills", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* TestAssistant.submit(chat, say("Someone new starts Monday."))
+        yield* (yield* TestAssistant).submit(chat, say("Someone new starts Monday."))
 
         return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
       }).pipe(Effect.provide(memoryAssistant(simple({ instructions, skills }), model.layer)))

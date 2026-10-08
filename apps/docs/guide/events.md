@@ -10,7 +10,9 @@ model's history is rebuilt from it before every model call.
 import * as Console from "effect/Console"
 import * as Stream from "effect/Stream"
 
-MyAssistant.subscribe(chatId).pipe(Stream.runForEach(({ seq, event }) => Console.log(seq, event._tag)))
+const assistant = yield * MyAssistant
+
+yield * assistant.subscribe(chatId).pipe(Stream.runForEach(({ seq, event }) => Console.log(seq, event._tag)))
 // 1 UserMessage
 // 2 TurnStarted
 // 3 ModelOutput
@@ -65,9 +67,9 @@ InputId.fromKey(`${orderId}:shipped`)
 
 ## Reading a chat
 
-- `MyAssistant.subscribeView(chatId)` streams what the chat's user sees, for a
+- The assistant's `subscribeView(chatId)` streams what the chat's user sees, for a
   [chat client](./client). It never has the assistant's own work.
-- `MyAssistant.subscribe(chatId)` streams the whole log: stored entries, then
+- Its `subscribe(chatId)` streams the whole log: stored entries, then
   live ones, with your events decoded. It goes through the engine, so it
   works with the cluster engine too. It's for server-side code, tests, and
   debugging, not for a client. A reader that reconnects passes the last
@@ -138,8 +140,8 @@ event wakes it.
 An assistant stores events of its own in the chat, registered with
 `AppEvent.make(schema, { wakes, render })`: what background work reports,
 which wakes a turn, or the app's bookkeeping, which doesn't. Each is stored
-as itself, in its schema's JSON form, and `turn.entries` and
-`MyAssistant.subscribe` decode it to its type. See
+as itself, in its schema's JSON form, and `AssistantChat`'s `entries` and
+the assistant's `subscribe` decode it to its type. See
 [your own events](./app-events). For an RPC that streams the log to other
 server code, `MyAssistant.Entry` is the schema: it covers the assistant's
 own events too.

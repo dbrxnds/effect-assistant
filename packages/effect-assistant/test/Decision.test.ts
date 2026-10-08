@@ -209,14 +209,14 @@ describe("closing a block", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* Deciding.submit(chat, say("Order 300 totes."))
+        yield* (yield* Deciding).submit(chat, say("Order 300 totes."))
         const first = yield* collectUntil(Deciding, chat, waitingFor, "10 seconds")
 
-        yield* Deciding.submit(chat, say("What's new?"))
+        yield* (yield* Deciding).submit(chat, say("What's new?"))
         yield* collectUntil(Deciding, chat, (es) => text(es).includes("still waiting") && idle(es), "10 seconds")
 
         // The block still takes the user's answer, and it places the order.
-        yield* Deciding.submit(chat, answerWith(asked(first)!, "approved"))
+        yield* (yield* Deciding).submit(chat, answerWith(asked(first)!, "approved"))
 
         return yield* collectUntil(Deciding, chat, (es) => text(es).includes("placed") && idle(es), "10 seconds")
       }).pipe(Effect.provide(runMemory(Deciding.toLayer(withTools({ instructions, toolkit })), model.layer)))
@@ -242,12 +242,12 @@ describe("a call that needs the user's decision", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* Deciding.submit(chat, say("Order 300 totes."))
+        yield* (yield* Deciding).submit(chat, say("Order 300 totes."))
         const first = yield* collectUntil(Deciding, chat, waitingFor, "10 seconds")
 
         // Nothing ran yet: the call waits.
         expect(yield* ran).toEqual([])
-        yield* Deciding.submit(chat, answerWith(asked(first)!, "approved"))
+        yield* (yield* Deciding).submit(chat, answerWith(asked(first)!, "approved"))
 
         return yield* collectUntil(Deciding, chat, (es) => text(es).includes("placed") && idle(es), "10 seconds")
       }).pipe(Effect.provide(runMemory(Deciding.toLayer(withTools({ instructions, toolkit })), model.layer)))
@@ -302,9 +302,9 @@ describe("a call that needs the user's decision", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* Deciding.submit(chat, say("Order 300 totes."))
+        yield* (yield* Deciding).submit(chat, say("Order 300 totes."))
         const first = yield* collectUntil(Deciding, chat, waitingFor, "10 seconds")
-        yield* Deciding.submit(chat, answerWith(asked(first)!, "declined"))
+        yield* (yield* Deciding).submit(chat, answerWith(asked(first)!, "declined"))
 
         return yield* collectUntil(Deciding, chat, (es) => text(es).includes("cancelled") && idle(es), "10 seconds")
       }).pipe(
@@ -325,15 +325,15 @@ describe("a call that needs the user's decision", () => {
 
       yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* Deciding.submit(chat, say("Order 300 totes."))
+        yield* (yield* Deciding).submit(chat, say("Order 300 totes."))
         const message = asked(yield* collectUntil(Deciding, chat, waitingFor, "10 seconds"))!
         const [id] = events.DecisionRequested(yield* log.read(chat)).map((request) => request.id)
         const other = DecisionId.fromKey("another decision")
 
         // Decisions the block didn't ask about, one too many, and a message with no decision block: none is stored.
-        yield* Deciding.submit(chat, anotherAnswer(message, { [other]: "approved" }))
-        yield* Deciding.submit(chat, anotherAnswer(message, { [id!]: "approved", [other]: "approved" }))
-        yield* Deciding.submit(
+        yield* (yield* Deciding).submit(chat, anotherAnswer(message, { [other]: "approved" }))
+        yield* (yield* Deciding).submit(chat, anotherAnswer(message, { [id!]: "approved", [other]: "approved" }))
+        yield* (yield* Deciding).submit(
           chat,
           AssistantEvent.BlockAnswer.make({
             id: InputId.fromKey("no block"),
@@ -345,10 +345,10 @@ describe("a call that needs the user's decision", () => {
         expect(events.BlockAnswer(yield* log.read(chat))).toEqual([])
 
         const approve = answerWith(message, "approved")
-        yield* Deciding.submit(chat, approve)
+        yield* (yield* Deciding).submit(chat, approve)
         // The same answer again (a double click) is the same input, stored once; a different one is refused.
-        yield* Deciding.submit(chat, approve)
-        yield* Deciding.submit(chat, anotherAnswer(message, { [id!]: "declined" }))
+        yield* (yield* Deciding).submit(chat, approve)
+        yield* (yield* Deciding).submit(chat, anotherAnswer(message, { [id!]: "declined" }))
         yield* collectUntil(Deciding, chat, (es) => text(es).includes("placed") && idle(es), "10 seconds")
 
         const entries = yield* log.read(chat)
@@ -376,14 +376,16 @@ describe("a call that needs the user's decision", () => {
 
       yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* Deciding.submit(chat, say("Order 300 totes."))
+        yield* (yield* Deciding).submit(chat, say("Order 300 totes."))
         const message = asked(yield* collectUntil(Deciding, chat, waitingFor, "10 seconds"))!
         const [id] = events.DecisionRequested(yield* log.read(chat)).map((request) => request.id)
 
+        const deciding = yield* Deciding
+
         yield* Effect.all(
           [
-            Deciding.submit(chat, anotherAnswer(message, { [id!]: "approved" })),
-            Deciding.submit(chat, anotherAnswer(message, { [id!]: "declined" }))
+            deciding.submit(chat, anotherAnswer(message, { [id!]: "approved" })),
+            deciding.submit(chat, anotherAnswer(message, { [id!]: "declined" }))
           ],
           { concurrency: "unbounded" }
         )
@@ -432,7 +434,7 @@ describe("a call that needs the user's decision", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* Deciding.submit(chat, say("Refund both."))
+        yield* (yield* Deciding).submit(chat, say("Refund both."))
 
         return yield* collectUntil(Deciding, chat, idle, "10 seconds")
       }).pipe(Effect.provide(runMemory(Deciding.toLayer(withTools({ instructions, toolkit })), Scripted.layer(script))))
@@ -456,7 +458,7 @@ describe("a call that needs the user's decision", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* Deciding.submit(chat, say("Approve something."))
+        yield* (yield* Deciding).submit(chat, say("Approve something."))
 
         return yield* collectUntil(Deciding, chat, idle, "10 seconds")
       }).pipe(Effect.provide(runMemory(Deciding.toLayer(simple({ instructions })), model.layer)))
@@ -475,7 +477,7 @@ describe("a call that needs the user's decision", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* NoBlocks.submit(chat, say("Order 300 totes."))
+        yield* (yield* NoBlocks).submit(chat, say("Order 300 totes."))
 
         return yield* collectUntil(NoBlocks, chat, (es) => failures(es).length > 0, "10 seconds")
       }).pipe(Effect.provide(runMemory(NoBlocks.toLayer(withTools({ instructions, toolkit })), Scripted.unused)))
@@ -490,9 +492,9 @@ describe("a call that needs the user's decision", () => {
 
       yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* Deciding.submit(chat, say("Order 300 totes."))
+        yield* (yield* Deciding).submit(chat, say("Order 300 totes."))
         const first = yield* collectUntil(Deciding, chat, waitingFor, "10 seconds")
-        yield* Deciding.submit(chat, answerWith(asked(first)!, "approved"))
+        yield* (yield* Deciding).submit(chat, answerWith(asked(first)!, "approved"))
         yield* collectUntil(Deciding, chat, (es) => text(es).includes("placed") && idle(es), "10 seconds")
       }).pipe(
         Effect.provide(runEntity(Deciding.toLayer(withTools({ instructions, toolkit })), Scripted.layer(orderScript())))
@@ -539,7 +541,7 @@ describe("a specialist's call that needs a decision", () => {
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* WithBuyer.submit(chat, say("Have the buyer order 300 totes."))
+        yield* (yield* WithBuyer).submit(chat, say("Have the buyer order 300 totes."))
 
         return yield* collectUntil(
           WithBuyer,
@@ -658,7 +660,10 @@ describe("decisions across a restart", () => {
 
       yield* log.append(chat, parkedLog)
 
-      const run = yield* restart(ran, Deciding.submit(chat, approve))
+      const run = yield* restart(
+        ran,
+        Deciding.use((deciding) => deciding.submit(chat, approve))
+      )
 
       expect(run).toEqual({ callId, key: `tool-call:${callId}`, params })
     }).pipe(Effect.provide(layerStorage))

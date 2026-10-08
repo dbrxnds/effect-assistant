@@ -11,7 +11,6 @@ stream.
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | `turn.instructions(text)`                       | The full system prompt: `Instructions.protocol`, your text, and the specialist runs working now. |
 | `turn.history(view?)`                           | The model's history from the chat's entries: all of them, or what a view keeps.                  |
-| `turn.entries`                                  | The chat's entries, with the assistant's own events decoded.                                     |
 | [`AssistantLoop.step`](/api/AssistantLoop#step) | One step: call the model, run its tool calls.                                                    |
 | [`AssistantLoop.run`](/api/AssistantLoop#run)   | The whole loop, steps until the model is done.                                                   |
 | `turn.replyIfOwed(...)`                         | One more pass, reply-only, when the user's latest message has no reply.                          |

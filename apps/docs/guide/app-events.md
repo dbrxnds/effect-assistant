@@ -45,18 +45,22 @@ export const MyAssistant = Assistant.make("my-assistant", {
 })
 ```
 
-`MyAssistant.submit` stores them like a user's message, and a handler writes
-them with `turn.append`. Both take only the assistant's registered events:
-anything else is a type error, and the chat stores no event its assistant
-didn't register. `turn.entries`, history views, and `MyAssistant.subscribe`
-decode them to their types.
+The assistant's `submit` (`yield* MyAssistant`) stores them like a user's
+message, and code in the chat writes them with `AssistantChat`'s `append`.
+The chat stores no event its assistant didn't register: `submit` only takes
+the registered ones (anything else is a type error), and `append` fails the
+turn for one that isn't. `AssistantChat`'s `entries`, history views, and the
+assistant's `subscribe` decode them, so read them with `Schema.is(MyEvent)`
+or `instanceof`.
 
 ```ts
 import { type ChatId, InputId } from "effect-assistant"
 
 // A webhook: the order shipped.
 const shipped = (chatId: ChatId.ChatId, orderId: string) =>
-  MyAssistant.submit(chatId, OrderShipped.make({ id: InputId.fromKey(`${orderId}:shipped`), orderId, carrier: "DHL" }))
+  MyAssistant.use((assistant) =>
+    assistant.submit(chatId, OrderShipped.make({ id: InputId.fromKey(`${orderId}:shipped`), orderId, carrier: "DHL" }))
+  )
 ```
 
 An event with an `id` field (an `InputId`) is stored once per id: derive it
@@ -106,9 +110,11 @@ class CampaignStep extends Schema.TaggedClass<CampaignStep>()("CampaignStep", {
 const report = (payload: Payload, status: string) =>
   Activity.make({
     name: `Report:${status}`,
-    execute: MyAssistant.submit(
-      payload.chatId,
-      CampaignStep.make({ id: InputId.fromKey(`${payload.runId}:${status}`), runId: payload.runId, status })
+    execute: MyAssistant.use((assistant) =>
+      assistant.submit(
+        payload.chatId,
+        CampaignStep.make({ id: InputId.fromKey(`${payload.runId}:${status}`), runId: payload.runId, status })
+      )
     )
   })
 ```
@@ -147,5 +153,5 @@ schema:
   Keep the old one registered, with its `render`, so the chats that have it
   read as they did.
 - An event that doesn't decode, like one whose tag is no longer registered,
-  is left out: the model doesn't read it, `turn.entries` and `subscribe` skip
+  is left out: the model doesn't read it, `AssistantChat`'s `entries` and `subscribe` skip
   it, and it wakes nothing.

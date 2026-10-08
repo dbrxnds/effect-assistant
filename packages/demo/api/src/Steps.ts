@@ -63,15 +63,17 @@ export interface Step {
 export const report = (step: Step) =>
   Activity.make({
     name: `Report:${step.status}`,
-    execute: AcmeAssistant.submit(
-      step.chatId,
-      WorkflowStep.make({
-        id: InputId.fromKey(`${step.runId}:${step.status}`),
-        workflow: step.workflow,
-        runId: step.runId,
-        status: step.status,
-        details: step.details
-      })
+    execute: AcmeAssistant.use((acme) =>
+      acme.submit(
+        step.chatId,
+        WorkflowStep.make({
+          id: InputId.fromKey(`${step.runId}:${step.status}`),
+          workflow: step.workflow,
+          runId: step.runId,
+          status: step.status,
+          details: step.details
+        })
+      )
     ).pipe(Effect.catchTag("ChatUnavailable", () => Effect.void))
   })
 
