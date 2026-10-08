@@ -80,12 +80,36 @@ Effect.runPromise(program.pipe(Effect.provide(AppLive)))
 | `AssistantEngine`     | Runs the chats: `layerMemory` in one process, `layerCluster` with one entity per chat.                               |
 | `ChatLog`             | Stores each chat as an append-only log of events: `layerMemory`, or `layerSql`.                                      |
 
+## How a turn works
+
+1. **`submit` stores the input and returns.** The user's message is appended to the chat's log, and a turn
+   starts in the background.
+2. **The handler returns the turn as a stream.** `turn.loop(...)` is a `Stream` of what the loop does: a
+   `ModelOutput` per model call, then a `ToolStarted` and a `ToolResult` per tool call. The engine writes each
+   event to the log before it pulls the next, so a turn cut off by a crash picks up where it stopped.
+3. **Every model call reads the log.** The model's history is rebuilt from the log before each call, so a
+   message that arrives during a turn is read at its next step, or by a turn right after.
+4. **The model talks only through a tool.** Its plain text never reaches the user. It sends a message by
+   calling `send_user_message`, and ends its turn with `wait`. Tool output and the model's
+   working notes stay out of the chat; the user sees only what it chose to say.
+5. **Readers follow the log.** `subscribe` streams every event, for your server and tests. `subscribeView`
+   streams what the user sees: messages, blocks, and whether something is working.
+
+Because a turn is a stream, you change it with ordinary stream code: run something after the reply with
+`Stream.concat`, provide services with `Stream.provideService`. Don't buffer it: events would run ahead of the
+log.
+
+The [turns guide](./apps/docs/guide/turns.md) has the details.
+
 ## Recipes
 
 Each recipe changes the quick start. `MyAssistant`, `WeatherTools`, `WeatherToolsLive`, and `ModelLive` are as
 above, and `instructions` is a prompt.
 
 ### A chat UI
+
+Your server is the edge between users and chats: it checks the user may use a chat, then passes calls through.
+The client gets the chat's view, never its log.
 
 ```ts
 const send = (chatId: ChatId.ChatId, inputId: InputId.InputId, text: string) =>
@@ -103,6 +127,9 @@ const watch = (chatId: ChatId.ChatId, after?: number) =>
 The demo does this over an Effect RPC WebSocket: [`packages/demo/shared/src/Rpc.ts`](./packages/demo/shared/src/Rpc.ts).
 
 ### Postgres and a cluster
+
+For production: the log goes to SQL, and each chat runs as an Effect Cluster entity, so chats survive restarts
+and one process writes each chat.
 
 ```ts
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
@@ -134,6 +161,9 @@ CREATE TABLE chat_log (
   `AssistantEngine.layerCluster`. Its calls reach the runners that run the chats.
 
 ### Your chats, and deleting them
+
+A chat's record (its owner, its title, whether it was deleted) is your app's. `Chats` tells the assistant
+which chats exist: you decide whether a chat is created up front, or on its first message.
 
 ```ts
 import { Chats } from "effect-assistant"
@@ -173,6 +203,10 @@ const deleteChat = (chatId: ChatId.ChatId) =>
 
 ### Ask before acting
 
+Some things the assistant shouldn't do on its own, like placing an order. Mark the tool with Effect's
+`needsApproval`, and give the assistant the decision block: the model asks the user, and only their click
+runs the call.
+
 ```ts
 import { BlockKit, Decision } from "effect-assistant"
 
@@ -196,6 +230,10 @@ The call waits until the user answers the decision block. Approved, it runs exac
 declined, it never runs. The view gives the client the paused call's `tool` and `params`.
 
 ### UI blocks
+
+When a structured answer is easier than typing, the assistant can attach a block to a message: options, a
+small input. The model fills in its props; the user's click comes back as an input, typed by the block's
+`answer` schema. The user can always type instead.
 
 ```tsx
 const PickOne = Block.make("pick_one", {
@@ -225,6 +263,9 @@ const renderBlock = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
 
 ### Specialists
 
+A specialist is a focused agent the assistant hands slow work to, like a report. It runs in the background
+with its own instructions and tools, while the assistant keeps chatting.
+
 ```ts
 const Research = Specialist.make("research", { description: "Digs through past orders. Slow: runs in the background." })
 
@@ -239,9 +280,14 @@ const MyAssistantLive = MyAssistant.toLayer((turn) => turn.loop({ instructions, 
 )
 ```
 
-The assistant hands a brief to a specialist, keeps chatting, and reads its report when it arrives.
+The assistant writes the specialist a brief, and reads its report when it arrives, as an event that starts a
+turn. It decides what to tell the user, and can message or stop a run while it works.
 
 ### Skills and big tool catalogs
+
+Both keep the prompt small. A skill is a playbook: the model sees its name and one line, and loads the steps
+with `load_skill` when a task matches. `ToolDiscovery` turns a big toolkit into two tools, `search_tools` and
+`execute_tool`, so the model finds a tool when it needs one instead of reading every definition.
 
 ```ts
 const reorder = Skill.make({
@@ -258,6 +304,10 @@ const MyAssistantLive = MyAssistant.toLayer((turn) =>
 ```
 
 ### Your own events
+
+Background work reports into the chat with events of your own: a workflow's progress, a webhook. An event
+with `wakes: true` starts a turn, and the model reads it as `render` says. The user sees it only if the
+assistant tells them.
 
 ```ts
 class ShipmentUpdated extends Schema.TaggedClass<ShipmentUpdated>()("ShipmentUpdated", {
@@ -286,6 +336,9 @@ const onShipment = (chatId: ChatId.ChatId, orderId: string, status: string) =>
 ```
 
 ### Code in a chat
+
+Code outside a chat uses the assistant (`yield* MyAssistant`). Code inside one, the handler or a tool its
+turns run, uses the chat itself: its entries, and a way to add to them.
 
 ```ts
 class Note extends Schema.TaggedClass<Note>()("Note", { text: Schema.String }) {}
@@ -319,6 +372,11 @@ tool, uses `AssistantChat`: the same chat, untyped.
 
 ### Memory
 
+Facts the assistant keeps between chats, and through a long chat's summaries: preferences, standing
+decisions, something short-lived like "out of office until Friday". The model keeps them with three tools,
+`remember`, `forget`, and `recall`. Where they're stored, and who shares them, is your app's: you implement
+the store, and every method gets the chat it's for.
+
 ```ts
 // Yours: where facts live, and whose they are for a chat.
 const MemoryStoreLive = Layer.succeed(Memory.MemoryStore, {
@@ -345,9 +403,15 @@ const MyAssistantLive = MyAssistant.toLayer(
 ).pipe(Layer.provide([WeatherToolsLive, Memory.layerTools]), Layer.provide(MemoryStoreLive))
 ```
 
-`Memory.layerMemory` is an in-memory store for tests and local runs.
+The facts go in the turn's instructions, each with its id, so the model can update or forget one. A fact
+another chat keeps shows up from the next turn, and `recall` finds it right away. `Memory.layerMemory` is an
+in-memory store for tests and local runs.
 
 ### Long chats
+
+A long chat's prompt grows with every turn. Compaction stores a summary as one of your events, and the model
+reads the summary in place of everything it covers. The log keeps everything, so the UI still shows the whole
+chat. When to compact and what the summary says are yours.
 
 ```ts
 class Summary extends Schema.TaggedClass<Summary>()("Summary", { text: Schema.String, throughSeq: Schema.Int }) {}
@@ -377,7 +441,7 @@ See [memory and long chats](./apps/docs/guide/memory.md).
 
 ### Tests
 
-The engine only needs a `LanguageModel`. The library's own tests run on a scripted one,
+The engine only needs a `LanguageModel`, so tests swap in a model that answers what you script. The library's own tests run on a scripted one,
 [`test/utils/scripted.ts`](./packages/effect-assistant/test/utils/scripted.ts), so they need no API key.
 
 ## Docs
