@@ -11,7 +11,37 @@ workflow's progress, a webhook, a summary for compaction, the draft the
 user opened. Each is a tagged schema, registered with two choices:
 whether storing it wakes a turn, and how the model reads it (`render`).
 
-## Other
+## Constructors
+
+### make
+
+Registers one of the app's events: whether storing it wakes a turn
+(default: no), and how the model reads it (default: as JSON when it
+wakes a turn, not at all otherwise).
+
+```ts
+const make: <S extends EventSchema>(
+  schema: S,
+  options?: {
+    /** Whether storing it starts a turn, like a user's message. Default false. */
+    readonly wakes?: boolean | undefined
+    /** How the model reads it in its history. */
+    readonly render?: Render<S["Type"]> | undefined
+  }
+) => AppEvent<S> => {
+  const wakes = options?.wakes ?? false
+
+  return {
+    schema,
+    tag: tagOf(schema),
+    wakes,
+    render: options?.render ?? (wakes ? "json" : undefined)
+  }
+```
+
+<small>Since 0.1.0</small>
+
+## Models
 
 ### EventSchema
 
@@ -53,6 +83,8 @@ interface AppEvent<S extends EventSchema = EventSchema> {
 
 <small>Since 0.1.0</small>
 
+## Utility types
+
 ### Any
 
 Any registered event, for generic constraints.
@@ -69,34 +101,6 @@ The type of a registered event's values.
 
 ```ts
 type Type<E extends Any> = E["schema"]["Type"]
-```
-
-<small>Since 0.1.0</small>
-
-### make
-
-Registers one of the app's events: whether storing it wakes a turn
-(default: no), and how the model reads it (default: as JSON when it
-wakes a turn, not at all otherwise).
-
-```ts
-const make: <S extends EventSchema>(
-  schema: S,
-  options?: {
-    /** Whether storing it starts a turn, like a user's message. Default false. */
-    readonly wakes?: boolean | undefined
-    /** How the model reads it in its history. */
-    readonly render?: Render<S["Type"]> | undefined
-  }
-) => AppEvent<S> => {
-  const wakes = options?.wakes ?? false
-
-  return {
-    schema,
-    tag: tagOf(schema),
-    wakes,
-    render: options?.render ?? (wakes ? "json" : undefined)
-  }
 ```
 
 <small>Since 0.1.0</small>

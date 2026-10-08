@@ -7,6 +7,8 @@
  * Tools are a native toolkit (`effect/ai/Toolkit`), with its handlers from the
  * handler's layer. In a turn, the assistant's own tools (`send_user_message`,
  * `wait`, the specialist tools) come with them.
+ *
+ * @since 0.1.0
  */
 import type * as AiError from "effect/ai/AiError"
 import type * as LanguageModel from "effect/ai/LanguageModel"
@@ -24,40 +26,85 @@ import * as Toolkits from "./internal/toolkit.ts"
  * What the loop produces: each model call's output, then for each of its tool
  * calls a `ToolStarted` before it runs and its result, or, for a call that
  * waits for the user's decision, its `DecisionRequested`.
+ *
+ * @category models
+ * @since 0.1.0
  */
 export type Event = Loop.Event
 
-/** A chat's history as the model reads it: its messages, and the last `seq` of the chat they cover. */
+/**
+ * A chat's history as the model reads it: its messages, and the last `seq` of the chat they cover.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export type ChatHistory = Loop.ChatHistory
 
-/** How a step went, for deciding what comes next. */
+/**
+ * How a step went, for deciding what comes next.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export type StepResult = Loop.StepResult
 
-/** What a loop body emits: a value, or what to do next. */
+/**
+ * What a loop body emits: a value, or what to do next.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export type Step<A, S> = Loop.Step<A, S>
 
-/** Emits a value from a loop body. */
+/**
+ * Emits a value from a loop body.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
 export const value = Loop.value
 
-/** Ends a loop body's step and goes on with this state. */
+/**
+ * Ends a loop body's step and goes on with this state.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
 export const next = Loop.next
 
-/** Ends the loop. */
+/**
+ * Ends the loop.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
 export const stop = Loop.stop
 
 /**
  * Runs a loop body from a state: emits its values, and runs it again with the
  * state it goes `next` with, until it `stop`s.
+ *
+ * @category constructors
+ * @since 0.1.0
  */
 export const loop = Loop.loop
 
-/** No tools. */
 type NoTools = Record<never, never>
 
-/** What a toolkit's tools need when they run: their handlers, and what those use. */
+/**
+ * What a toolkit's tools need when they run: their handlers, and what those use.
+ *
+ * @category utility types
+ * @since 0.1.0
+ */
 export type ToolkitServices<T extends Record<string, Tool.Any>> = Tool.HandlersFor<T> | Toolkits.ToolServices<T>
 
-/** Options for {@link step}. */
+/**
+ * Options for {@link step}.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface StepOptions<T extends Record<string, Tool.Any> = NoTools> {
   /** The full system prompt, like `turn.instructions(text)`, optionally with span attributes. */
   readonly instructions: string | Instructions.Resolved
@@ -77,13 +124,17 @@ export interface StepOptions<T extends Record<string, Tool.Any> = NoTools> {
   readonly toolChoice?: LanguageModel.ToolChoice<string> | undefined
 }
 
-/** Options for {@link run}. */
+/**
+ * Options for {@link run}.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface Options<T extends Record<string, Tool.Any> = NoTools> extends StepOptions<T> {
   /** Model calls allowed. Default 16. */
   readonly maxSteps?: number | undefined
 }
 
-/** The toolkit as the loop runs it, with the turn's own tools when there is a turn. */
 const toolsOf = <T extends Record<string, Tool.Any>>(toolkit: Toolkit.Toolkit<T> | undefined) =>
   Effect.map(Loop.TurnTools, (turn) => {
     const own = toolkit === undefined ? Toolkits.empty : Toolkits.fromToolkit(toolkit)
@@ -98,6 +149,9 @@ const toolsOf = <T extends Record<string, Tool.Any>>(toolkit: Toolkit.Toolkit<T>
  * or a `DecisionRequested` for one that waits for the user's decision.
  * `then` decides what comes next: `AssistantLoop.next(state)` or
  * `AssistantLoop.stop()`.
+ *
+ * @category constructors
+ * @since 0.1.0
  */
 export const step = <T extends Record<string, Tool.Any> = NoTools, S = never, E2 = never, R2 = never>(
   options: StepOptions<T>,
@@ -109,6 +163,9 @@ export const step = <T extends Record<string, Tool.Any> = NoTools, S = never, E2
  * Runs the agent loop as a stream: {@link step} after step, until the model
  * is done and nothing new arrived while it worked, or after `maxSteps` model
  * calls.
+ *
+ * @category constructors
+ * @since 0.1.0
  */
 export const run = <T extends Record<string, Tool.Any> = NoTools>(
   options: Options<T>

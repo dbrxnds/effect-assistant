@@ -10,18 +10,19 @@ The `ChatId` module defines the id of one conversation: `chat:` followed by
 a UUID. A chat id keys everything about a chat: its log, its cluster
 entity, and its trace session.
 
-## Other
+## Constructors
 
-### ChatId
+### make
 
-Schema for chat ids: `` `chat:${uuid}` ``, branded so a run id or a plain
-string can't be passed where a chat id is required.
+Creates a new random chat id, with Effect's `Random`: seed it in tests for the same ids every run.
 
 ```ts
-const ChatId = Schema.TemplateLiteral(["chat:", Uuid.Uuid]).pipe(Schema.brand("effect-assistant/ChatId"))
+const make: () => Effect.Effect<ChatId>
 ```
 
 <small>Since 0.1.0</small>
+
+## Models
 
 ### ChatId
 
@@ -33,12 +34,15 @@ type ChatId = typeof ChatId.Type
 
 <small>Since 0.1.0</small>
 
-### make
+## Schemas
 
-Creates a new random chat id, with Effect's `Random`: seed it in tests for the same ids every run.
+### ChatId
+
+Schema for chat ids: `` `chat:${uuid}` ``, branded so a run id or a plain
+string can't be passed where a chat id is required.
 
 ```ts
-const make: () => Effect.Effect<ChatId>
+const ChatId = Schema.TemplateLiteral(["chat:", Uuid.Uuid]).pipe(Schema.brand("effect-assistant/ChatId"))
 ```
 
 <small>Since 0.1.0</small>

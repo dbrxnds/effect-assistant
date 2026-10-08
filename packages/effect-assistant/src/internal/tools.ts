@@ -1,4 +1,3 @@
-/** The tools every assistant has: `send_user_message` and `wait`. */
 import * as Tool from "effect/ai/Tool"
 import * as Toolkit from "effect/ai/Toolkit"
 import * as Effect from "effect/Effect"
@@ -36,17 +35,11 @@ const WaitFlag = Schema.Boolean.annotate({
 
 const endsWithMessage = Schema.decodeUnknownOption(Schema.Struct({ wait: Schema.Literal(true) }))
 
-/**
- * Whether a tool call ends the turn: `wait`, or a message sent with
- * `wait: true`.
- */
+/** @internal */
 export const isTurnEnding = (call: AssistantEvent.ToolCallPart): boolean =>
   call.name === waitToolName || (call.name === sendUserMessageName && Option.isSome(endsWithMessage(call.params)))
 
-/**
- * The message's id, from the call: a call cut off by a crash runs again with
- * the same id, and finds its message already sent.
- */
+// From the call: a call cut off by a crash runs again with the same id, and finds its message already sent.
 const messageId = AssistantToolCall.useSync((call) => Uuid.fromKey(`message:${call.callId}`))
 
 const append = Effect.fnUntraced(function* (message: AssistantEvent.AssistantMessage) {
@@ -86,7 +79,6 @@ const plainTools = Effect.gen(function* () {
 
 const decodeDecisionProps = Schema.decodeUnknownOption(Decision.Props)
 
-/** A decision block asks only for decisions that wait for the user. */
 const checkDecisions = Effect.fnUntraced(function* (ids: ReadonlyArray<string>) {
   const states = Decision.fromEntries(yield* AssistantChat.use((chat) => chat.entries))
   const notWaiting = ids.filter((id) => states.get(id)?.outcome !== undefined || !states.has(id))
@@ -99,10 +91,8 @@ const checkDecisions = Effect.fnUntraced(function* (ids: ReadonlyArray<string>) 
   }
 })
 
-/**
- * A decision block closes when the user decides on it, not because the model
- * says so: the order it asks about would otherwise never be approved.
- */
+// A decision block closes when the user decides on it, not because the model says so: the order it asks about would
+// otherwise never be approved.
 const checkCloses = Effect.fnUntraced(function* (ids: ReadonlyArray<string>) {
   const entries = yield* AssistantChat.use((chat) => chat.entries)
   const states = BlockKit.blockStates(entries)
@@ -126,7 +116,6 @@ const checkCloses = Effect.fnUntraced(function* (ids: ReadonlyArray<string>) {
   }
 })
 
-/** `send_user_message` with an optional block from the kit, and `wait`. */
 const blockTools = Effect.fnUntraced(function* (kit: BlockKit.BlockKit) {
   const catalog = kit.blocks.map((block) => `- ${block.kind}: ${block.description}`).join("\n")
   const kinds = kit.blocks.map((block) => block.kind)
@@ -210,10 +199,7 @@ ${catalog}`,
   return yield* Effect.provideContext(BlockTools, handlers)
 })
 
-/**
- * `send_user_message`, taking an optional block from the kit when there is
- * one, and `wait`.
- */
+/** @internal */
 export const makeMessaging: (kit: BlockKit.BlockKit | undefined) => Effect.Effect<Toolkits.Tools<AssistantChat>> =
   Effect.fnUntraced(function* (kit) {
     if (kit === undefined || kit.blocks.length === 0) {

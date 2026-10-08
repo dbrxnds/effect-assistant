@@ -1,6 +1,8 @@
 /**
  * The `Specialist` module defines specialists: focused agents an assistant
  * hands work to, in the background.
+ *
+ * @since 0.1.0
  */
 import type * as AiError from "effect/ai/AiError"
 import type * as LanguageModel from "effect/ai/LanguageModel"
@@ -22,7 +24,12 @@ import type { Skill } from "./Skill.ts"
 
 const TypeId = "~effect-assistant/Specialist"
 
-/** A specialist's definition. */
+/**
+ * A specialist's definition.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface Specialist<Name extends string = string> {
   readonly [TypeId]: typeof TypeId
   readonly name: Name
@@ -46,6 +53,9 @@ export interface Specialist<Name extends string = string> {
  * the run (or turn) provides, or one its build Effect required (the layer
  * provides those). A handler that uses anything else gets this error, naming
  * the services.
+ *
+ * @category utility types
+ * @since 0.1.0
  */
 export type CheckServices<Undeclared> = [Undeclared] extends [never]
   ? unknown
@@ -60,27 +70,53 @@ export type CheckServices<Undeclared> = [Undeclared] extends [never]
  * The tool handlers a handler's loop uses (`Toolkit.toLayer`): they're the
  * layer's to have, so `Layer.provide(MyToolsLive)` gives them, and a missing
  * one is a type error.
+ *
+ * @category utility types
+ * @since 0.1.0
  */
 export type ToolHandlers<R> = Extract<R, Tool.Handler<string>>
 
-/** Any specialist. */
+/**
+ * Any specialist.
+ *
+ * @category utility types
+ * @since 0.1.0
+ */
 export type Any = Specialist<any>
 
-/** Identifies a specialist's handler in a context. */
+/**
+ * Identifies a specialist's handler in a context.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface SpecialistHandler<Name extends string> {
   readonly _SpecialistHandler: Name
 }
 
-/** Returns the handlers these specialists need. */
+/**
+ * Returns the handlers these specialists need.
+ *
+ * @category utility types
+ * @since 0.1.0
+ */
 export type HandlerOf<S> = S extends Specialist<infer Name> ? SpecialistHandler<Name> : never
 
 /**
  * Services a run provides to its handler: its chat, the chat's runner, and
  * the model.
+ *
+ * @category utility types
+ * @since 0.1.0
  */
 export type RunServices = AssistantChat | Runner | LanguageModel.LanguageModel
 
-/** Options for `run.loop`. */
+/**
+ * Options for `run.loop`.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface LoopOptions<T extends Record<string, Tool.Any> = Record<never, never>, RS = never> {
   readonly instructions: string | Instructions.Resolved
   /** Its tools: a native toolkit, with its handlers from the layer. */
@@ -91,7 +127,12 @@ export interface LoopOptions<T extends Record<string, Tool.Any> = Record<never, 
   readonly maxSteps?: number | undefined
 }
 
-/** One run of a specialist on a brief, as its handler sees it. */
+/**
+ * One run of a specialist on a brief, as its handler sees it.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface Run {
   readonly runId: RunId
   /** The chat it works in: the spawning turn's. */
@@ -117,6 +158,9 @@ export interface Run {
  * A specialist's handler: runs a brief, as a stream of what the loop did. It
  * may return the stream from an Effect. `R` is what the stream needs, `RE`
  * what the Effect needs.
+ *
+ * @category models
+ * @since 0.1.0
  */
 export type Handler<R = never, RE = R> = (
   run: Run
@@ -128,6 +172,9 @@ export type Handler<R = never, RE = R> = (
  * A specialist's handler as its layer provides it: `open` runs the build for
  * a chat (once per chat activation, see `AssistantChat`), and returns the
  * handler with the layer's services already provided.
+ *
+ * @category models
+ * @since 0.1.0
  */
 export interface Built {
   readonly open: Effect.Effect<
@@ -137,14 +184,18 @@ export interface Built {
   >
 }
 
-/** A handler's result as a stream: it may return the stream from an Effect. */
 const toStream = <R, RE>(
   result:
     | Stream.Stream<AssistantLoop.Event, unknown, R>
     | Effect.Effect<Stream.Stream<AssistantLoop.Event, unknown, R>, unknown, RE>
 ): Stream.Stream<AssistantLoop.Event, unknown, R | RE> => (Effect.isEffect(result) ? Stream.unwrap(result) : result)
 
-/** Defines a specialist: its name, and when to use it. */
+/**
+ * Defines a specialist: its name, and when to use it.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
 export const make = <const Name extends string>(
   name: Name,
   options: {
@@ -183,7 +234,12 @@ export const make = <const Name extends string>(
   return { [TypeId]: TypeId, name, description: options.description, Handler, toLayer }
 }
 
-/** Schema for what the assistant tells a specialist. Only `goal` is required. */
+/**
+ * Schema for what the assistant tells a specialist. Only `goal` is required.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
 export const Brief = Schema.Struct({
   goal: Schema.String.annotate({ description: "What to find out or do." }),
   context: Schema.optional(Schema.String).annotate({
@@ -198,10 +254,20 @@ export const Brief = Schema.Struct({
   })
 })
 
-/** A brief. */
+/**
+ * A brief.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export type Brief = typeof Brief.Type
 
-/** A request to start a specialist run in the runner's chat. */
+/**
+ * A request to start a specialist run in the runner's chat.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface SpawnRequest {
   /** The specialist's name. */
   readonly kind: string
@@ -211,6 +277,9 @@ export interface SpawnRequest {
 /**
  * Why a run request can't be done, written for the model: an unknown
  * specialist, a run that's gone, or one that isn't running.
+ *
+ * @category errors
+ * @since 0.1.0
  */
 export class SpecialistError extends Schema.TaggedError<SpecialistError>()("SpecialistError", {
   message: Schema.String
@@ -220,6 +289,9 @@ export class SpecialistError extends Schema.TaggedError<SpecialistError>()("Spec
  * Service that runs a chat's specialists and keeps finished runs warm for
  * follow-ups. The engine provides it to every turn: the specialist tools use
  * it, and so can a handler.
+ *
+ * @category services
+ * @since 0.1.0
  */
 export class Runner extends Context.Service<
   Runner,

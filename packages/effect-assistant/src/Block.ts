@@ -2,16 +2,26 @@
  * The `Block` module defines UI blocks: a bit of UI the assistant can put in a
  * message when a structured answer is easier than typing, such as options to
  * pick from, approve/deny, or a small input.
+ *
+ * @since 0.1.0
  */
 import type * as Schema from "effect/Schema"
 
 /**
  * A schema a block's props or answer can use: any codec that needs no
  * services, since the client decodes and encodes with it too.
+ *
+ * @category utility types
+ * @since 0.1.0
  */
 export type Codec = Schema.Codec<any, any>
 
-/** A kind of UI block. */
+/**
+ * A kind of UI block.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface Block<Kind extends string = string, Props extends Codec = Codec, Answer extends Codec = Codec> {
   readonly kind: Kind
   /** When to use it. The assistant sees this. */
@@ -22,10 +32,20 @@ export interface Block<Kind extends string = string, Props extends Codec = Codec
   readonly answer: Answer | undefined
 }
 
-/** Any block, for generic constraints. */
+/**
+ * Any block, for generic constraints.
+ *
+ * @category utility types
+ * @since 0.1.0
+ */
 export type Any = Block
 
-/** Creates a block. */
+/**
+ * Creates a block.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
 export const make = <const Kind extends string, Props extends Codec, Answer extends Codec = Schema.Never>(
   kind: Kind,
   options: {

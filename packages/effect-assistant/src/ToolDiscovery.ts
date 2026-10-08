@@ -3,6 +3,8 @@
  * prompt doesn't carry every definition: `search_tools` finds tools by what the
  * model needs to do (name, description, input schema), and `execute_tool`
  * validates an input and runs one.
+ *
+ * @since 0.1.0
  */
 import * as Response from "effect/ai/Response"
 import * as Tool from "effect/ai/Tool"
@@ -21,7 +23,6 @@ const words = (text: string): ReadonlySet<string> =>
       .filter((word) => word.length >= 3)
   )
 
-/** How many query words appear in the text, counting prefixes ("ship" matches "shipment"). */
 const score = (query: ReadonlySet<string>, text: string): number => {
   const target = [...words(text)]
 
@@ -31,7 +32,7 @@ const score = (query: ReadonlySet<string>, text: string): number => {
   return [...query].filter(matches).length
 }
 
-/** Best matches first; everything when nothing matches, so the model can pick or search again. */
+// Everything when nothing matches, so the model can pick or search again.
 const search = (tools: ReadonlyArray<Tool.Any>, query: string, limit: number): ReadonlyArray<Tool.Any> => {
   const queryWords = words(query)
 
@@ -73,10 +74,7 @@ const ExecuteTool = Tool.make("execute_tool", {
   dependencies: [AssistantToolCall]
 })
 
-/**
- * Returns a tool with these requirements: a tool's requirements are a
- * covariant phantom type, so one that needs nothing is one that needs any.
- */
+// A tool's requirements are a covariant phantom type, so one that needs nothing is one that needs any.
 const requiring =
   <R>() =>
   <N extends string, C extends (Tool.Any extends Tool.Tool<string, infer K, unknown> ? K : never), R0>(
@@ -89,6 +87,9 @@ const requiring =
  * toolkit and its handlers' layer. Merge the toolkit into the loop's, and
  * provide the layer, which needs the catalog's handlers. A catalog tool's
  * services are `execute_tool`'s: the turn provides them, as for any tool.
+ *
+ * @category constructors
+ * @since 0.1.0
  */
 export const make = <T extends Record<string, Tool.Any>>(catalog: Toolkit.Toolkit<T>) => {
   const Tools = Toolkit.make(SearchTools, requiring<Toolkits.ToolServices<T>>()(ExecuteTool))

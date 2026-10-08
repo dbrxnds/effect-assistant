@@ -1,7 +1,3 @@
-/**
- * Spans in the OpenTelemetry GenAI conventions, so LLM tools (Langfuse,
- * Phoenix, Datadog LLM Observability) can pick the agent work out of a trace:
- */
 import type * as LanguageModel from "effect/ai/LanguageModel"
 import * as Model from "effect/ai/Model"
 import * as Prompt from "effect/ai/Prompt"
@@ -16,10 +12,11 @@ import * as AssistantEvent from "../AssistantEvent.ts"
 import type { SpanAttributes } from "../Instructions.ts"
 import { toJsonText } from "./schema.ts"
 
-/** What the spans record: chat events, or text. */
 type Traced = string | ReadonlyArray<{ readonly _tag: string }>
 
-/** Wraps a turn or a specialist run in an `invoke_agent` span. */
+// Spans follow the OpenTelemetry GenAI conventions, so LLM tools (Langfuse, Phoenix, Datadog LLM Observability) can
+// pick the agent work out of a trace.
+/** @internal */
 export const agentSpan = (name: string, options: { readonly chatId: string; readonly root?: boolean }) =>
   Effect.withSpan(`invoke_agent ${name}`, {
     kind: "internal",
@@ -32,10 +29,8 @@ export const agentSpan = (name: string, options: { readonly chatId: string; read
     }
   })
 
-/**
- * The current trace's id, when a tracer records it: none when tracing is
- * off, or when the tracer is Effect's own, which exports nothing.
- */
+// None when tracing is off, or when the tracer is Effect's own, which exports nothing.
+/** @internal */
 export const currentTraceId: Effect.Effect<Option.Option<string>> = Effect.gen(function* () {
   const tracer = yield* Tracer.Tracer
 
@@ -44,10 +39,10 @@ export const currentTraceId: Effect.Effect<Option.Option<string>> = Effect.gen(f
   return Option.map(yield* Effect.option(Effect.currentSpan), (span) => span.traceId)
 })
 
-/** Sets the agent's input on the current span. */
+/** @internal */
 export const agentInput = (input: Traced) => Effect.annotateCurrentSpan("input.value", toJsonText(input))
 
-/** Sets the agent's output on the current span. */
+/** @internal */
 export const agentOutput = (output: Traced) => Effect.annotateCurrentSpan("output.value", toJsonText(output))
 
 const encodePrompt = Schema.encodeOption(Prompt.Prompt)
@@ -86,11 +81,8 @@ const annotateChat = Effect.fnUntraced(function* <Tools extends Record<string, T
   }
 })
 
-/**
- * Wraps one model call in a `chat` span, with its input, output, and usage.
- * The span is named after the model when the context has its name
- * (`AnthropicLanguageModel.model(...)` provides it).
- */
+// Named after the model when the context has its name (`AnthropicLanguageModel.model(...)` provides it).
+/** @internal */
 export const chatSpan =
   (prompt: Prompt.Prompt, attributes: SpanAttributes | undefined) =>
   <Tools extends Record<string, Tool.Any>, E, R>(
@@ -116,7 +108,7 @@ export const chatSpan =
       )
     })
 
-/** Wraps one tool call in an `execute_tool` span. */
+/** @internal */
 export const toolSpan = (call: AssistantEvent.ToolCallPart) =>
   Effect.withSpan(`execute_tool ${call.name}`, {
     kind: "internal",
@@ -128,6 +120,6 @@ export const toolSpan = (call: AssistantEvent.ToolCallPart) =>
     }
   })
 
-/** Sets a tool's result on the current span. */
+/** @internal */
 export const toolOutput = (result: Schema.Json) =>
   Effect.annotateCurrentSpan("output.value", Schema.is(Schema.String)(result) ? result : toJsonText(result))

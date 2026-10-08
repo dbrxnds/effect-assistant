@@ -1,7 +1,3 @@
-/**
- * Running specialists: a brief's loop, the specialist tools, and the chat's
- * runner.
- */
 import type * as LanguageModel from "effect/ai/LanguageModel"
 import * as Prompt from "effect/ai/Prompt"
 import * as Tool from "effect/ai/Tool"
@@ -37,10 +33,10 @@ import * as Telemetry from "./telemetry.ts"
 import * as Toolkits from "./toolkit.ts"
 import type { Writer } from "./writer.ts"
 
-/** A specialist's handler once its build ran for the chat. */
+/** @internal */
 export type RunHandler = (run: Specialist.Run) => Stream.Stream<AssistantLoop.Event, unknown, Specialist.RunServices>
 
-/** The brief as the specialist's message. */
+/** @internal */
 export const briefText = (brief: Specialist.Brief): string =>
   [
     `Goal: ${brief.goal}`,
@@ -52,17 +48,14 @@ export const briefText = (brief: Specialist.Brief): string =>
     .filter(Boolean)
     .join("\n")
 
-/** The text the model wrote in one call. */
 const finalText = (output: AssistantEvent.ModelOutput): string =>
   output.parts
     .flatMap((part) => (part.type === "text" ? [part.text] : []))
     .join("")
     .trim()
 
-/**
- * Runs a specialist's handler on its history until its loop ends, and
- * returns the answer: the last text the model wrote.
- */
+// The answer is the last text the model wrote.
+/** @internal */
 export const runBrief = Effect.fnUntraced(
   function* (
     handler: RunHandler,
@@ -127,22 +120,17 @@ export const runBrief = Effect.fnUntraced(
   (effect, _handler, options) => effect.pipe(Telemetry.agentSpan(options.specialist.name, { chatId: options.chatId }))
 )
 
-/** How a brief went. */
 type Outcome =
   | { readonly status: "answered"; readonly report: string }
   | { readonly status: "failed"; readonly error: string }
   | { readonly status: "stopped" | "cut_off" }
 
-/**
- * A brief that didn't answer: only `stop` interrupts its loop alone; a failure or a defect failed it.
- */
+// Only `stop` interrupts a brief's loop alone; a failure or a defect failed it.
 const unanswered = (cause: Cause.Cause<unknown>): Outcome =>
   Cause.hasInterruptsOnly(cause) ? { status: "stopped" } : { status: "failed", error: String(Cause.squash(cause)) }
 
-/**
- * What a run reports when it finishes a brief. Its id is fixed per run and
- * brief, so a replay is stored once.
- */
+// The id is fixed per run and brief, so a replay is stored once.
+/** @internal */
 export const finished = (
   specialist: string,
   run: { readonly runId: RunId.RunId; readonly brief: number; readonly goal: string },
@@ -180,14 +168,10 @@ const StopSpecialist = Tool.make("stop_specialist", {
   dependencies: [Specialist.Runner]
 })
 
-/** A runner's refusal, for the model. */
 const refused = <A, R>(effect: Effect.Effect<A, Specialist.SpecialistError, R>) =>
   Effect.catch(effect, (error) => ToolFailure.fail(error.message))
 
-/**
- * Returns `spawn_specialist`, `message_specialist`, and `stop_specialist` for
- * these specialists, or no tools when there are none.
- */
+/** @internal */
 export const toolkit = Effect.fnUntraced(function* (
   specialists: ReadonlyArray<Specialist.Any>
 ): Effect.fn.Return<Toolkits.Tools<Specialist.Runner>> {
@@ -229,10 +213,9 @@ export const toolkit = Effect.fnUntraced(function* (
   return Toolkits.fromWithHandler(yield* Effect.provideContext(SpecialistTools, handlers))
 })
 
-/** How long a finished run stays available for follow-ups. */
+// How long a finished run stays available for follow-ups.
 const warm = "15 minutes"
 
-/** A run of the chat: one specialist's history, continued by follow-ups. */
 interface Run {
   readonly runId: RunId.RunId
   readonly specialist: Specialist.Any
@@ -240,29 +223,27 @@ interface Run {
   readonly goal: string
   readonly brief: Specialist.Brief
   readonly history: Ref.Ref<ReadonlyArray<Prompt.Message>>
-  /** Messages sent while it works; the loop reads them at its next step. */
+  // Messages sent while it works; the loop reads them at its next step.
   readonly inbox: Queue.Queue<Prompt.Message>
-  /** Briefs so far, counting follow-ups; numbers the reports. */
+  // Counts follow-ups too; numbers the reports.
   readonly briefs: Ref.Ref<number>
-  /** Whether it works on a brief; read and changed under `lock`. */
+  // Read and changed under `lock`.
   readonly busy: Ref.Ref<boolean>
-  /** Orders a message against the run finishing, so none is dropped or starts a second loop. */
+  // Orders a message against the run finishing, so none is dropped or starts a second loop.
   readonly lock: Semaphore.Semaphore
 }
 
-/** Creates a chat's specialist runner. */
+/** @internal */
 export const makeRunner = Effect.fnUntraced(function* (options: {
   readonly chat: Writer
-  /** The chat as a run's handler and tools get it. */
   readonly handle: AssistantChat["Service"]
   readonly specialists: ReadonlyArray<{
     readonly specialist: Specialist.Any
     readonly handler: RunHandler
   }>
   readonly model: Context.Context<LanguageModel.LanguageModel>
-  /** Keeps the chat up while the effect runs; an interruption keeps the hold. */
+  // An interruption keeps the hold.
   readonly holding: (effect: Effect.Effect<void>) => Effect.Effect<void>
-  /** Stores a run's report in the chat, and runs a turn for it. */
   readonly report: (finished: AssistantEvent.SpecialistFinished) => Effect.Effect<void>
 }) {
   const { chat } = options
@@ -308,7 +289,6 @@ export const makeRunner = Effect.fnUntraced(function* (options: {
     return outcome
   })
 
-  /** Works on the brief, reports, and starts the countdown to forgetting the run. */
   const work = Effect.fnUntraced(
     function* (run: Run) {
       yield* chat.append([
@@ -355,7 +335,7 @@ export const makeRunner = Effect.fnUntraced(function* (options: {
     yield* FiberSet.run(background, options.holding(work(run)))
   })
 
-  /** Steers a working run, or continues a finished one. Runs under the run's lock. */
+  // Under the run's lock.
   const send = Effect.fnUntraced(function* (run: Run, text: string): Effect.fn.Return<"steered" | "continued"> {
     yield* Ref.update(run.briefs, (n) => n + 1)
 

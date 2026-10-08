@@ -12,17 +12,21 @@ one is created: up front, or on its first message. The library asks it
 before it stores an input and before each model call, and a chat the app
 says is deleted gets deleted here too (see `Assistant.delete`).
 
-## Other
+## Services
 
-### Reason
+### Chats
 
-Why a chat can't be used: the app doesn't know it, or deleted it.
+Service for the app's chats. By default every chat exists from its first
+input, and a deleted one is one whose log says so (`ChatDeleted`): provide
+your own to have the app decide.
 
 ```ts
-const Reason = Schema.Literals(["NotFound", "Deleted"])
+const Chats: Context.Reference<Service>
 ```
 
 <small>Since 0.1.0</small>
+
+## Models
 
 ### Reason
 
@@ -30,24 +34,6 @@ Why a chat can't be used.
 
 ```ts
 type Reason = typeof Reason.Type
-```
-
-<small>Since 0.1.0</small>
-
-### GetChatError
-
-What `get` fails with: the chat can't be used, and why. An input for it
-isn't stored.
-
-```ts
-if (row === undefined) return yield* new GetChatError({ chatId, reason: "NotFound" })
-```
-
-```ts
-class GetChatError extends Schema.TaggedError<GetChatError>()("GetChatError", {
-  chatId: ChatId,
-  reason: Reason
-})
 ```
 
 <small>Since 0.1.0</small>
@@ -78,6 +64,9 @@ interface Service {
  * Service for the app's chats. By default every chat exists from its first
  * input, and a deleted one is one whose log says so (`ChatDeleted`): provide
  * your own to have the app decide.
+ *
+ * @category services
+ * @since 0.1.0
  */
 export const Chats: Context.Reference<Service> = Context.Reference<Service>("effect-assistant/Chats", {
   defaultValue: () => ({ get: (chatId) => Effect.succeed({ chatId }) })
@@ -86,14 +75,34 @@ export const Chats: Context.Reference<Service> = Context.Reference<Service>("eff
 
 <small>Since 0.1.0</small>
 
-### Chats
+## Schemas
 
-Service for the app's chats. By default every chat exists from its first
-input, and a deleted one is one whose log says so (`ChatDeleted`): provide
-your own to have the app decide.
+### Reason
+
+Why a chat can't be used: the app doesn't know it, or deleted it.
 
 ```ts
-const Chats: Context.Reference<Service>
+const Reason = Schema.Literals(["NotFound", "Deleted"])
+```
+
+<small>Since 0.1.0</small>
+
+## Errors
+
+### GetChatError
+
+What `get` fails with: the chat can't be used, and why. An input for it
+isn't stored.
+
+```ts
+if (row === undefined) return yield* new GetChatError({ chatId, reason: "NotFound" })
+```
+
+```ts
+class GetChatError extends Schema.TaggedError<GetChatError>()("GetChatError", {
+  chatId: ChatId,
+  reason: Reason
+})
 ```
 
 <small>Since 0.1.0</small>

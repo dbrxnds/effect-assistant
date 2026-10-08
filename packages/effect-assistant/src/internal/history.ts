@@ -1,4 +1,3 @@
-/** Model history from a chat's log, and whether the log needs a turn. */
 import * as Prompt from "effect/ai/Prompt"
 import * as Response from "effect/ai/Response"
 import * as Match from "effect/Match"
@@ -10,11 +9,11 @@ import * as Decision from "../Decision.ts"
 import { toJson, toJsonText } from "./schema.ts"
 import * as Uuid from "./uuid.ts"
 
-/** A user message with this text. */
+/** @internal */
 export const userText = (text: string): Prompt.UserMessage =>
   Prompt.userMessage({ content: [Prompt.textPart({ text })] })
 
-/** A tool call's result, as a tool message. */
+/** @internal */
 export const toolMessage = (result: AssistantEvent.ToolResult): Prompt.ToolMessage =>
   Prompt.toolMessage({
     content: [
@@ -28,7 +27,8 @@ export const toolMessage = (result: AssistantEvent.ToolResult): Prompt.ToolMessa
     ]
   })
 
-/** The calls in the history with no result: the ones a crash cut off. */
+// A call with no result is one a crash cut off.
+/** @internal */
 export const unansweredCalls = (history: ReadonlyArray<Prompt.Message>): ReadonlyArray<AssistantEvent.ToolCallPart> => {
   const answered = new Set(
     history.flatMap((message) =>
@@ -55,30 +55,19 @@ export const unansweredCalls = (history: ReadonlyArray<Prompt.Message>): Readonl
   )
 }
 
-/**
- * What a tool call gets as its result when its handler's stream stopped
- * before the call ran.
- */
+/** @internal */
 export const notRunOutput = "Not run: the turn ended before this call ran."
 
-/**
- * What a tool call gets as its result when its handler's stream stopped while
- * the call ran: it may have done its work.
- */
+/** @internal */
 export const mayHaveRunOutput =
   "Stopped: the turn ended while this call ran. It may have done its work; check before doing it again."
 
-/** How long ago, roughly, for the model. */
 const ago = (millis: number) => {
   const seconds = Math.max(0, Math.round(millis / 1000))
 
   return seconds < 90 ? `${seconds} seconds` : `${Math.round(seconds / 60)} minutes`
 }
 
-/**
- * A finished run as the model reads it: what it is, how it went, how long it
- * took, whether the user wrote since it started, and its report.
- */
 const finishedText = (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
   index: number,
@@ -119,10 +108,7 @@ const finishedText = (
 const answerText = (answer: AssistantEvent.BlockAnswer) =>
   `<answer message="${answer.messageId}" kind="${answer.kind}">\nThe user answered with the block on your message ${answer.messageId}.\n${toJsonText(answer.value)}\n</answer>`
 
-/**
- * A parked call's result, as the model reads it: it waits for the user, and
- * what to do about it.
- */
+/** @internal */
 export const parkedResult = (
   request: AssistantEvent.DecisionRequested,
   origin: AssistantEvent.CallOrigin
@@ -150,7 +136,6 @@ const whatDecided = (request: AssistantEvent.DecisionRequested, outcome: Assista
 
 const decodeDecisionAnswer = Schema.decodeUnknownOption(Decision.Answer)
 
-/** A decision block's answer: what the user decided, decision by decision. */
 const decisionAnswerText = (
   answer: AssistantEvent.BlockAnswer,
   requests: ReadonlyMap<string, AssistantEvent.DecisionRequested>
@@ -171,7 +156,6 @@ const decisionAnswerText = (
 const resultText = (result: AssistantEvent.ToolResult) =>
   `<result tool="${result.tool}" call="${result.callId}" outcome="${result.outcome}">\nThe result of a call from earlier in this chat.\n${toJsonText(result.result)}\n</result>`
 
-/** An approved call's result, as the model reads it: the call ran after the user approved it. */
 const approvedResultText = (
   request: AssistantEvent.DecisionRequested,
   tool: string,
@@ -179,10 +163,8 @@ const approvedResultText = (
 ) =>
   `<decision id="${request.id}" tool="${tool}" outcome="approved">\nThe user approved it, and ${tool} ran: ${result.outcome}.\n${toJsonText(result.result)}\n</decision>`
 
-/**
- * Rebuilds model history from a chat's entries, in the order the model saw
- * them.
- */
+// In the order the model saw the entries, not the order they were stored.
+/** @internal */
 export const fromEntries = (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
   readApp: (event: { readonly _tag: string }) => string | undefined
@@ -199,7 +181,6 @@ export const fromEntries = (
     if (open.size === 0) history.push(...held.splice(0))
   }
 
-  /** How far the next model step had read when it was written, if there is one. */
   const nextSeen = (from: number) => {
     const next = entries.slice(from + 1).find(({ event }) => Predicate.isTagged(event, "ModelOutput"))?.event
 
@@ -283,24 +264,19 @@ export const fromEntries = (
   return [...history, ...held]
 }
 
-/**
- * Returns whether an event is an input: one of the library's, or one of the
- * app's own that wakes a turn (their tags are `wakes`).
- */
+/** @internal */
 export const isInput = (event: { readonly _tag: string }, wakes: ReadonlySet<string>): boolean =>
   AssistantEvent.isInput(event) || (!AssistantEvent.isLibraryEvent(event) && wakes.has(event._tag))
 
-/** Returns the `seq` the last finished turn read through, or 0. */
+/** @internal */
 export const handledThrough = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): number => {
   const last = entries.findLast(({ event }) => AssistantEvent.isTurnEnd(event))?.event
 
   return last !== undefined && AssistantEvent.isTurnEnd(last) ? last.throughSeq : 0
 }
 
-/**
- * Returns the inputs no finished turn has read: what the next turn is about.
- * A run the assistant stopped isn't one: it wakes nothing.
- */
+// A run the assistant stopped isn't an input here: it wakes nothing.
+/** @internal */
 export const unhandledInputs = (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
   wakes: ReadonlySet<string>
@@ -314,15 +290,12 @@ export const unhandledInputs = (
   )
 }
 
-/** Returns whether an input arrived after the last finished turn read. */
+/** @internal */
 export const needsTurn = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, wakes: ReadonlySet<string>): boolean =>
   unhandledInputs(entries, wakes).length > 0
 
-/**
- * Returns whether the user's latest message (or block answer) read through
- * `throughSeq` has nothing after it for them: no reply, and no failure they
- * were shown.
- */
+// A failure the user was shown counts as a reply.
+/** @internal */
 export const owesReply = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, throughSeq: number): boolean => {
   const latest = entries.findLast(
     ({ event, seq }) => seq <= throughSeq && AssistantEvent.isInput(event) && AssistantEvent.isUserInput(event)
@@ -339,7 +312,7 @@ export const owesReply = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, throu
 
 const sentToWaitOn = Schema.decodeUnknownOption(Schema.Struct({ wait: Schema.Literal(false) }))
 
-/** The ids of messages sent with `wait: false`: progress while it kept working, like "On it". */
+// Messages sent with `wait: false` are progress while the model kept working, like "On it".
 const progressMessages = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): ReadonlySet<string> =>
   new Set(
     entries.flatMap(({ event }) =>
@@ -353,13 +326,9 @@ const progressMessages = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): Read
     )
   )
 
-/**
- * Returns whether the user's latest message (or block answer) read through
- * `throughSeq` only got progress after it: every message since was sent to
- * keep working (`wait: false`, no block), nothing failed, and no specialist
- * it started is still working (its report is what comes next). The model
- * said it was on it, and stopped without the result.
- */
+// The model said it was on it and stopped without the result: only progress messages since the user's latest input.
+// A specialist still working doesn't count, since its report is what comes next.
+/** @internal */
 export const owesDelivery = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, throughSeq: number): boolean => {
   const latest = entries.findLast(
     ({ event, seq }) => seq <= throughSeq && AssistantEvent.isInput(event) && AssistantEvent.isUserInput(event)
@@ -389,7 +358,7 @@ export const owesDelivery = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, th
   )
 }
 
-/** Returns whether an input arrived after `throughSeq`: another turn will read it. */
+/** @internal */
 export const unreadAfter = (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
   throughSeq: number,

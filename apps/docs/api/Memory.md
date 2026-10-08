@@ -12,36 +12,30 @@ Where they're stored and who shares them is the app's: it implements
 `MemoryStore`, whose every method gets the chat it's for. Show the
 facts in a turn's instructions with `render`.
 
-## Other
+## Layers
 
-### Fact
+### layerMemory
 
-A fact the assistant remembers: its id, one short sentence, and when it stops mattering, if it does.
+A store in memory, for tests and local runs: one set of facts that every
+chat shares.
 
 ```ts
-class Fact extends Schema.Class<Fact>("effect-assistant/Memory/Fact")({
-  id: Schema.String,
-  text: Schema.String,
-  expiresAt: Schema.optional(Schema.DateTimeUtc)
-})
+const layerMemory: Layer.Layer<MemoryStore>
 ```
 
 <small>Since 0.1.0</small>
 
-### NewFact
+### layerTools
 
-A fact to keep, as the `remember` tool hands it to the store.
+Layer for the `Tools`' handlers: the `MemoryStore`, for the chat they run in.
 
 ```ts
-interface NewFact {
-  readonly text: string
-  readonly expiresAt?: DateTime.Utc | undefined
-  /** The id of a fact this one replaces. */
-  readonly replaces?: string | undefined
-}
+const layerTools = Tools.toLayer({ …
 ```
 
 <small>Since 0.1.0</small>
+
+## Services
 
 ### MemoryStore
 
@@ -66,27 +60,40 @@ class MemoryStore extends Context.Service<
 
 <small>Since 0.1.0</small>
 
-### render
+## Models
 
-The facts as the model reads them, for a turn's instructions: each with
-its id, so it can replace or forget one. Empty when there are none.
+### NewFact
+
+A fact to keep, as the `remember` tool hands it to the store.
 
 ```ts
-const render: (facts: ReadonlyArray<Fact>) => string
+interface NewFact {
+  readonly text: string
+  readonly expiresAt?: DateTime.Utc | undefined
+  /** The id of a fact this one replaces. */
+  readonly replaces?: string | undefined
+}
 ```
 
 <small>Since 0.1.0</small>
 
-### layerMemory
+## Schemas
 
-A store in memory, for tests and local runs: one set of facts that every
-chat shares.
+### Fact
+
+A fact the assistant remembers: its id, one short sentence, and when it stops mattering, if it does.
 
 ```ts
-const layerMemory: Layer.Layer<MemoryStore>
+class Fact extends Schema.Class<Fact>("effect-assistant/Memory/Fact")({
+  id: Schema.String,
+  text: Schema.String,
+  expiresAt: Schema.optional(Schema.DateTimeUtc)
+})
 ```
 
 <small>Since 0.1.0</small>
+
+## Tools
 
 ### Tools
 
@@ -99,12 +106,15 @@ const Tools = Toolkit.make(Remember, Forget, Recall)
 
 <small>Since 0.1.0</small>
 
-### layerTools
+## Utils
 
-Layer for the `Tools`' handlers: the `MemoryStore`, for the chat they run in.
+### render
+
+The facts as the model reads them, for a turn's instructions: each with
+its id, so it can replace or forget one. Empty when there are none.
 
 ```ts
-const layerTools = Tools.toLayer({ …
+const render: (facts: ReadonlyArray<Fact>) => string
 ```
 
 <small>Since 0.1.0</small>

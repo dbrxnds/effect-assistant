@@ -1,7 +1,3 @@
-/**
- * Decisions in a chat: whether a loop may park a call, which answers the
- * chat takes, and which approved calls are left to run.
- */
 import * as Response from "effect/ai/Response"
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
@@ -14,28 +10,22 @@ import * as BlockKit from "../BlockKit.ts"
 import * as Decision from "../Decision.ts"
 import type { InputId } from "../InputId.ts"
 
-/**
- * What a turn gives its loop, and a specialist's run doesn't: parking calls
- * that need the user's decision, and the approved calls to run. A turn's
- * specialists inherit its context, so their runs set it back to none.
- */
+// Only a turn's loop parks calls and runs approved ones. A turn's specialists inherit its context, so their runs set
+// it back to none.
+/** @internal */
 export const TurnDecisions = Context.Reference<
   Option.Option<{
-    /** The approved calls that haven't run yet. */
     readonly approved: Effect.Effect<ReadonlyArray<AssistantEvent.ToolCallPart>>
   }>
 >("effect-assistant/TurnDecisions", { defaultValue: Option.none })
 
-/** A decision an answer makes. */
+/** @internal */
 export interface Decided {
   readonly request: AssistantEvent.DecisionRequested
   readonly outcome: AssistantEvent.DecisionOutcome
 }
 
-/**
- * What the chat does with a submitted input: store it as is, refuse it, or
- * store it and resolve the decisions it answers.
- */
+/** @internal */
 export type Verdict = Data.TaggedEnum<{
   Store: Record<never, never>
   Refuse: { readonly reason: string }
@@ -60,7 +50,6 @@ const messageOf = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, id: string) 
         AssistantEvent.isLibraryEvent(event) && Predicate.isTagged(event, "AssistantMessage") && event.id === id
     )
 
-/** A block answer's verdict: one on a decision block decides exactly what it asks, once. */
 const answerVerdict = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, answer: AssistantEvent.BlockAnswer) => {
   const message = messageOf(entries, answer.messageId)
   const onDecisionBlock = message?.block?.kind === Decision.kind
@@ -103,7 +92,7 @@ const answerVerdict = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, answer: 
   return Verdicts.Decide({ decided, answer: answer.id })
 }
 
-/** Returns what the chat does with a submitted input, given its entries. */
+/** @internal */
 export const verdict = (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
   input: AssistantEvent.Input | AssistantEvent.StoredAppEvent
@@ -112,10 +101,8 @@ export const verdict = (
     ? answerVerdict(entries, input)
     : store
 
-/**
- * Returns the decisions answered but not resolved: a restart cut the chat
- * off between storing an answer and resolving what it decided.
- */
+// A restart can cut the chat off between storing an answer and resolving what it decided.
+/** @internal */
 export const unresolved = (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>
 ): ReadonlyArray<Decided & { readonly answer: InputId }> =>
@@ -125,10 +112,8 @@ export const unresolved = (
       : []
   )
 
-/**
- * Returns the approved calls that haven't run: they run, with the ids and
- * params the model gave them, before the model's next step.
- */
+// They run with the ids and params the model gave them, before the model's next step.
+/** @internal */
 export const approvedCalls = (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>
 ): ReadonlyArray<AssistantEvent.ToolCallPart> =>

@@ -9,27 +9,7 @@ import { InputId } from "effect-assistant"
 The `InputId` module defines the id of one input to an assistant: a user message,
 a block answer, or one of the app's events (in its `id` field).
 
-## Other
-
-### InputId
-
-Schema for input ids: any string, branded.
-
-```ts
-const InputId = Schema.String.pipe(Schema.brand("effect-assistant/InputId"))
-```
-
-<small>Since 0.1.0</small>
-
-### InputId
-
-An input id.
-
-```ts
-type InputId = typeof InputId.Type
-```
-
-<small>Since 0.1.0</small>
+## Constructors
 
 ### make
 
@@ -48,6 +28,30 @@ gives the same id, so sending the input again stores it once.
 
 ```ts
 const fromKey: (key: string) => InputId
+```
+
+<small>Since 0.1.0</small>
+
+## Models
+
+### InputId
+
+An input id.
+
+```ts
+type InputId = typeof InputId.Type
+```
+
+<small>Since 0.1.0</small>
+
+## Schemas
+
+### InputId
+
+Schema for input ids: any string, branded.
+
+```ts
+const InputId = Schema.String.pipe(Schema.brand("effect-assistant/InputId"))
 ```
 
 <small>Since 0.1.0</small>

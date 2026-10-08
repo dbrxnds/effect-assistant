@@ -10,27 +10,7 @@ The `DecisionId` module defines the id of one decision the user is asked
 to make: `decision:` followed by a UUID. The model passes it to a decision
 block, and the user's answer names it.
 
-## Other
-
-### DecisionId
-
-Schema for decision ids: `` `decision:${uuid}` ``, branded.
-
-```ts
-const DecisionId = Schema.TemplateLiteral(["decision:", Uuid.Uuid]).pipe( …
-```
-
-<small>Since 0.1.0</small>
-
-### DecisionId
-
-A decision id.
-
-```ts
-type DecisionId = typeof DecisionId.Type
-```
-
-<small>Since 0.1.0</small>
+## Constructors
 
 ### fromKey
 
@@ -49,6 +29,30 @@ The decision id of a tool call that waits for the user's decision.
 
 ```ts
 const fromCallId: (callId: string) => DecisionId
+```
+
+<small>Since 0.1.0</small>
+
+## Models
+
+### DecisionId
+
+A decision id.
+
+```ts
+type DecisionId = typeof DecisionId.Type
+```
+
+<small>Since 0.1.0</small>
+
+## Schemas
+
+### DecisionId
+
+Schema for decision ids: `` `decision:${uuid}` ``, branded.
+
+```ts
+const DecisionId = Schema.TemplateLiteral(["decision:", Uuid.Uuid]).pipe( …
 ```
 
 <small>Since 0.1.0</small>

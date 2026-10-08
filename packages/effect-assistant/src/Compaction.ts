@@ -4,6 +4,8 @@
  * writes the summary, and what the summary says are the app's: its handler
  * reads the chat's entries, has a model write the summary, stores it as one
  * of its own events, and its loop reads the chat with {@link since}.
+ *
+ * @since 0.1.0
  */
 import type * as Prompt from "effect/ai/Prompt"
 import * as Option from "effect/Option"
@@ -20,6 +22,9 @@ import { toJsonText } from "./internal/schema.ts"
  * What a summary event has: its text, and the last `seq` it covers. Entries
  * after `throughSeq` stay as they are, so an input that arrived while the
  * summary was written isn't lost.
+ *
+ * @category models
+ * @since 0.1.0
  */
 export interface Summary {
   readonly _tag: string
@@ -30,6 +35,9 @@ export interface Summary {
 /**
  * Returns the input tokens of the chat's last model call: how big the prompt
  * has grown. 0 before the first call.
+ *
+ * @category utils
+ * @since 0.1.0
  */
 export const inputTokens = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): number => {
   const last = entries.findLast(
@@ -46,6 +54,9 @@ export const inputTokens = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): nu
  * Returns what was still open at `throughSeq` and still is: decisions waiting
  * for the user, blocks the user hasn't answered, and specialists working. As
  * text for the model, or none when nothing is.
+ *
+ * @category utils
+ * @since 0.1.0
  */
 export const openItems = (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
@@ -113,6 +124,9 @@ export const openItems = (
 /**
  * The files the user attached up to `throughSeq`, as lines for the model, or
  * none. A summary may drop a file's id, and tools need it.
+ *
+ * @category utils
+ * @since 0.1.0
  */
 export const attachedFiles = (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
@@ -130,6 +144,9 @@ export const attachedFiles = (
 /**
  * A history view that starts at the last summary: the summary, what is still
  * open, then the entries after it. Without a summary, every entry.
+ *
+ * @category utils
+ * @since 0.1.0
  */
 export const since =
   (isSummary: (event: unknown) => event is Summary) =>

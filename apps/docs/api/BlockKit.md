@@ -9,7 +9,19 @@ import { BlockKit } from "effect-assistant"
 The `BlockKit` module groups the blocks an assistant may put in its messages, and
 renders them on the client.
 
-## Other
+## Constructors
+
+### make
+
+Creates a kit from blocks.
+
+```ts
+const make: <const Blocks extends ReadonlyArray<Block.Any>>(blocks: Blocks) => BlockKit<Blocks[number]>
+```
+
+<small>Since 0.1.0</small>
+
+## Models
 
 ### BlockKit
 
@@ -24,16 +36,6 @@ interface BlockKit<Blocks extends Block.Any = Block.Any> {
 
 <small>Since 0.1.0</small>
 
-### make
-
-Creates a kit from blocks.
-
-```ts
-const make: <const Blocks extends ReadonlyArray<Block.Any>>(blocks: Blocks) => BlockKit<Blocks[number]>
-```
-
-<small>Since 0.1.0</small>
-
 ### BlockState
 
 Where a message's block stands.
@@ -44,56 +46,6 @@ interface BlockState {
   /** Its answer, if the user used it. */
   readonly answer: AssistantEvent.BlockAnswer | undefined
 }
-```
-
-<small>Since 0.1.0</small>
-
-### nextBlockStates
-
-Returns the block states after one more event.
-
-```ts
-const nextBlockStates: (
-  states: ReadonlyMap<string, BlockState>,
-  event: { readonly _tag: string }
-) => ReadonlyMap<string, BlockState>
-```
-
-<small>Since 0.1.0</small>
-
-### blockStates
-
-Returns the state of every message's block, by message id.
-
-```ts
-const blockStates: (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => ReadonlyMap<string, BlockState>
-```
-
-<small>Since 0.1.0</small>
-
-### staleBlocks
-
-Returns the blocks still open after the user typed this many messages
-without using them: the ones `closeStale` closes. Decision blocks
-never go stale: work waits on them, and closing one would leave it waiting.
-
-```ts
-const staleBlocks: (
-  entries: ReadonlyArray<AssistantEvent.AnyEntry>,
-  options: { readonly messages: number }
-) => ReadonlyArray<string>
-```
-
-<small>Since 0.1.0</small>
-
-### closeStale
-
-Closes the blocks the user moved on from: still open after this many typed
-messages. Run it from a turn, before or after its loop; it records a
-`BlocksClosed` event, so every client folds them closed.
-
-```ts
-const closeStale = Effect.fn(function* (options: { readonly messages: number }) { …
 ```
 
 <small>Since 0.1.0</small>
@@ -143,6 +95,58 @@ interface RenderOptions {
   /** Submits an answer, for example over RPC. */
   readonly respond: (answer: AssistantEvent.BlockAnswer) => void
 }
+```
+
+<small>Since 0.1.0</small>
+
+## Utils
+
+### nextBlockStates
+
+Returns the block states after one more event.
+
+```ts
+const nextBlockStates: (
+  states: ReadonlyMap<string, BlockState>,
+  event: { readonly _tag: string }
+) => ReadonlyMap<string, BlockState>
+```
+
+<small>Since 0.1.0</small>
+
+### blockStates
+
+Returns the state of every message's block, by message id.
+
+```ts
+const blockStates: (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => ReadonlyMap<string, BlockState>
+```
+
+<small>Since 0.1.0</small>
+
+### staleBlocks
+
+Returns the blocks still open after the user typed this many messages
+without using them: the ones `closeStale` closes. Decision blocks
+never go stale: work waits on them, and closing one would leave it waiting.
+
+```ts
+const staleBlocks: (
+  entries: ReadonlyArray<AssistantEvent.AnyEntry>,
+  options: { readonly messages: number }
+) => ReadonlyArray<string>
+```
+
+<small>Since 0.1.0</small>
+
+### closeStale
+
+Closes the blocks the user moved on from: still open after this many typed
+messages. Run it from a turn, before or after its loop; it records a
+`BlocksClosed` event, so every client folds them closed.
+
+```ts
+const closeStale = Effect.fnUntraced(function* (options: { readonly messages: number }) { …
 ```
 
 <small>Since 0.1.0</small>

@@ -2,13 +2,20 @@
  * The `AssistantChat` module gives code that runs in a chat that chat: its
  * id, its entries, and a way to add to it. A turn's handler, its tools, and
  * its specialists' runs get it with `yield* AssistantChat`.
+ *
+ * @since 0.1.0
  */
 import * as Context from "effect/Context"
 import type * as Effect from "effect/Effect"
 import type * as AssistantEvent from "./AssistantEvent.ts"
 import type { ChatId } from "./ChatId.ts"
 
-/** Service for the chat that code runs in. */
+/**
+ * Service for the chat that code runs in.
+ *
+ * @category services
+ * @since 0.1.0
+ */
 export class AssistantChat extends Context.Service<
   AssistantChat,
   {

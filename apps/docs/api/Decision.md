@@ -11,59 +11,7 @@ assistant can't make on its own, like placing an order or publishing a
 post: a tool with Effect's `needsApproval` is parked when the model calls
 it, and the user's answer to the decision block runs it or declines it.
 
-## Other
-
-### kind
-
-The decision block's kind.
-
-```ts
-const kind = "decision" …
-```
-
-<small>Since 0.1.0</small>
-
-### Props
-
-Schema for the decision block's props: which decisions it asks for, and
-optionally its buttons' labels.
-
-```ts
-const Props = Schema.Struct({ …
-```
-
-<small>Since 0.1.0</small>
-
-### Props
-
-The decision block's props.
-
-```ts
-type Props = typeof Props.Type
-```
-
-<small>Since 0.1.0</small>
-
-### Answer
-
-Schema for the decision block's answer: an outcome for every decision the
-block asks for, by id.
-
-```ts
-const Answer = Schema.Struct({ …
-```
-
-<small>Since 0.1.0</small>
-
-### Answer
-
-The decision block's answer.
-
-```ts
-type Answer = typeof Answer.Type
-```
-
-<small>Since 0.1.0</small>
+## Constructors
 
 ### block
 
@@ -89,6 +37,28 @@ const answerAll: (props: Props, outcome: AssistantEvent.DecisionOutcome) => Answ
 
 <small>Since 0.1.0</small>
 
+## Models
+
+### Props
+
+The decision block's props.
+
+```ts
+type Props = typeof Props.Type
+```
+
+<small>Since 0.1.0</small>
+
+### Answer
+
+The decision block's answer.
+
+```ts
+type Answer = typeof Answer.Type
+```
+
+<small>Since 0.1.0</small>
+
 ### State
 
 Where a decision stands.
@@ -105,6 +75,42 @@ interface State {
   /** An approved call's result, once it ran. */
   readonly result: AssistantEvent.ToolResult | undefined
 }
+```
+
+<small>Since 0.1.0</small>
+
+## Schemas
+
+### Props
+
+Schema for the decision block's props: which decisions it asks for, and
+optionally its buttons' labels.
+
+```ts
+const Props = Schema.Struct({ …
+```
+
+<small>Since 0.1.0</small>
+
+### Answer
+
+Schema for the decision block's answer: an outcome for every decision the
+block asks for, by id.
+
+```ts
+const Answer = Schema.Struct({ …
+```
+
+<small>Since 0.1.0</small>
+
+## Utils
+
+### kind
+
+The decision block's kind.
+
+```ts
+const kind = "decision" …
 ```
 
 <small>Since 0.1.0</small>

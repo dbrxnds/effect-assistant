@@ -1,7 +1,3 @@
-/**
- * An assistant's registration, and running one turn: the turn's API for the
- * handler, recording what its loop does, and how the turn ends.
- */
 import type * as LanguageModel from "effect/ai/LanguageModel"
 import type * as Tool from "effect/ai/Tool"
 import type * as Prompt from "effect/ai/Prompt"
@@ -37,59 +33,44 @@ import * as Toolkits from "./toolkit.ts"
 import type { Writer } from "./writer.ts"
 import * as Tools from "./tools.ts"
 
-/** Host-visible failure when a turn handled the user's input but never spoke. */
+/** @internal */
 export const silentTurnMessage = "I finished without sending a reply."
 
-/**
- * The last message of one more short pass when a turn would end without
- * replying, unless the handler gives its own.
- */
+/** @internal */
 export const defaultReplyNudge =
   "You haven't replied to the user's latest message yet. Reply now with send_user_message."
 
-/**
- * The last message of the reply pass when the turn told the user it was on
- * their request and stopped without the result.
- */
+/** @internal */
 export const deliveryNudge =
   "You told the user you're on it, but stopped without giving them the result. Send it now with send_user_message; if part of it is still running, say what and that you'll report back. If they already have everything, call wait."
 
-/** What `Assistant.make` defines: the name, blocks, specialists, and events. */
+/** @internal */
 export interface Definition {
   readonly name: string
   readonly blocks: BlockKit.BlockKit | undefined
   readonly specialists: ReadonlyArray<Specialist.Any>
-  /** The app's own events. */
   readonly app: AppEvents.AppEvents
 }
 
-/**
- * An assistant's handler once its build ran: the layer's services are
- * provided, so its streams need only what a turn provides.
- */
+// Once its build ran the layer's services are provided, so its streams need only what a turn provides.
+/** @internal */
 export type TurnHandler = (
   turn: Assistant.Turn<any>
 ) => Stream.Stream<AssistantLoop.Event, unknown, Assistant.TurnServices | LanguageModel.LanguageModel>
 
-/** An assistant as `toLayer` registers it with the engine. */
+/** @internal */
 export interface Registration {
   readonly definition: Definition
-  /** The model API the assistant's layer was given, for its turns and its specialists' runs. */
   readonly model: Context.Context<LanguageModel.LanguageModel>
-  /** Runs the handler's build for a chat, in the chat's scope. */
   readonly open: Effect.Effect<TurnHandler, never, Scope.Scope | AssistantChat>
   readonly specialists: ReadonlyArray<{
     readonly specialist: Specialist.Any
     readonly built: Specialist.Built
   }>
-  /** The assistant's own tools: `send_user_message`, `wait`, and the specialist tools. */
   readonly builtins: Toolkits.Tools<Assistant.TurnServices>
 }
 
-/**
- * Collects what a registration needs from the layer: the model API, and each
- * specialist's handler.
- */
+/** @internal */
 export const register = Effect.fnUntraced(function* (
   definition: Definition,
   options: { readonly open: Registration["open"] }
@@ -135,7 +116,7 @@ export const register = Effect.fnUntraced(function* (
 
 const ProviderError = Schema.Struct({ _tag: Schema.optional(Schema.String), raw: Schema.Unknown })
 
-/** A short failure message; provider errors keep their response body. */
+// Provider errors keep their response body.
 const failureMessage = (cause: Cause.Cause<unknown>): string =>
   Option.match(Schema.decodeUnknownOption(ProviderError)(Cause.squash(cause)), {
     onNone: () => Cause.pretty(cause),
@@ -144,10 +125,6 @@ const failureMessage = (cause: Cause.Cause<unknown>): string =>
 
 const lastSeq = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, otherwise: number) => entries.at(-1)?.seq ?? otherwise
 
-/**
- * A history view's result as a history: each run of entries as the model
- * reads them, and prompt messages as they are, in order.
- */
 const toHistory = (
   viewed: ReadonlyArray<Assistant.Entry<any> | Prompt.Message>,
   app: AppEvents.AppEvents
@@ -176,12 +153,8 @@ const toHistory = (
 const isEntry = (item: Assistant.Entry<any> | Prompt.Message): item is Assistant.Entry<any> =>
   Predicate.hasProperty(item, "seq")
 
-/**
- * Closes the calls this turn made that have no result: the handler's stream
- * ended between a step's output and its tools, or while they ran. An
- * interrupted turn (a shutdown) leaves them open: the next turn runs them
- * again.
- */
+// The handler's stream can end between a step's output and its tools, or while they run. An interrupted turn (a
+// shutdown) leaves its calls open instead: the next turn runs them again.
 const closeOpenCalls = Effect.fnUntraced(function* (chat: Writer, startSeq: number) {
   const entries = (yield* chat.entries).filter(({ seq }) => seq > startSeq)
 
@@ -210,11 +183,8 @@ const closeOpenCalls = Effect.fnUntraced(function* (chat: Writer, startSeq: numb
   )
 })
 
-/**
- * How far this turn handled the chat: the inputs that woke it (before its
- * `TurnStarted`, at `startSeq`), and everything the model read in it, as its
- * outputs record.
- */
+// The inputs before the turn's `TurnStarted` (at `startSeq`) woke it; past that, what its model outputs record
+// reading.
 const handledThrough = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, startSeq: number) =>
   entries.reduce(
     (through, { seq, event }) =>
@@ -227,11 +197,8 @@ const handledThrough = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, startSe
     startSeq
   )
 
-/**
- * Ends a turn that ran to the end. It fails, visibly, when the user's latest
- * input got no reply; an input that arrived after what its model read gets
- * the next turn, which replies.
- */
+// Fails visibly when the user's latest input got no reply; an input that arrived after what its model read gets the
+// next turn, which replies.
 const finishTurn = Effect.fnUntraced(function* (chat: Writer, read: number, wakes: ReadonlySet<string>) {
   const entries = yield* chat.entries
 
@@ -243,9 +210,7 @@ const finishTurn = Effect.fnUntraced(function* (chat: Writer, read: number, wake
   yield* chat.append([end])
 })
 
-/**
- * Ends a turn whose handler failed. Everything stored so far counts as read, so a failing input isn't retried forever.
- */
+// Everything stored so far counts as read, so a failing input isn't retried forever.
 const failTurn = Effect.fnUntraced(function* (chat: Writer, cause: Cause.Cause<unknown>) {
   yield* Effect.logError("assistant turn failed", cause)
 
@@ -254,9 +219,6 @@ const failTurn = Effect.fnUntraced(function* (chat: Writer, cause: Cause.Cause<u
   yield* chat.append([AssistantEvent.TurnFailed.make({ throughSeq: last, message: failureMessage(cause) })])
 })
 
-/**
- * The turn as its handler sees it. `startSeq` is its `TurnStarted`: the inputs before it woke the turn.
- */
 const makeTurnApi = (
   registration: Registration,
   chat: Writer,
@@ -284,11 +246,7 @@ const makeTurnApi = (
   const instructions = (given: string | Instructions.Resolved) =>
     mapText(given, (text) => `${Instructions.protocol}\n\n${text}`)
 
-  /**
-   * One more pass when the turn would end without the reply it owes: the
-   * loop's own prompt and tools, so the prompt stays cached, with the nudge
-   * at the end. Only send_user_message runs; any other call is refused.
-   */
+  // The loop's own prompt and tools, so the prompt stays cached, with the nudge at the end.
   const replyPass = <R>(options: {
     readonly instructions: Instructions.Resolved
     readonly toolkit: Toolkits.Tools<R>
@@ -345,7 +303,6 @@ const makeTurnApi = (
       nudge: options.nudge
     })
 
-  // What the loop sends for these options: its system prompt, its tools, and which entries it reads.
   const prepare = <T extends Record<string, Tool.Any>, RS>(options: Assistant.LoopOptions<T, RS, any>) => {
     const skills = options.skills ?? []
 
@@ -391,18 +348,15 @@ const makeTurnApi = (
   }
 }
 
-/**
- * Runs one turn of a chat: the handler's loop, every event it emits recorded
- * before the loop is pulled again, then how the turn ended.
- */
+// Every event the handler's loop emits is recorded before the loop is pulled again.
+/** @internal */
 export const run = Effect.fnUntraced(
   function* (options: {
     readonly registration: Registration
     readonly handler: TurnHandler
     readonly chat: Writer
-    /** What a turn provides to its handler's stream. */
     readonly services: Context.Context<Assistant.TurnServices | LanguageModel.LanguageModel>
-    /** Whether the app still has the chat: one it deleted is deleted, and the turn stops. */
+    // A chat the app deleted is deleted here, and the turn stops.
     readonly checkOpen: Effect.Effect<void>
   }) {
     const { chat } = options
@@ -446,7 +400,7 @@ export const run = Effect.fnUntraced(
       })
     )
 
-    // What the user saw this turn, and a failure if any, as the trace's output.
+    // The trace's output is what the user saw this turn, and a failure if any.
     const shown = (yield* chat.entries).flatMap(({ event, seq }) =>
       seq > startSeq && (Predicate.isTagged(event, "AssistantMessage") || Predicate.isTagged(event, "TurnFailed"))
         ? [event]
