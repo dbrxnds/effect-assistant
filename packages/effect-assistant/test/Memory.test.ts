@@ -1,7 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
-import * as Prompt from "effect/ai/Prompt"
 import * as Toolkit from "effect/ai/Toolkit"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
@@ -9,29 +10,18 @@ import { type Assistant, ChatId, Memory } from "../src/index.ts"
 import { collectUntil, newChat, runMemory, say, TestAssistant, turnsDone } from "./utils/fixtures.ts"
 import * as Scripted from "./utils/scripted.ts"
 
-const scopes: Memory.Scopes = { personal: "user:1", shared: "team:1" }
-
-/** A handler with memory: what it remembers before the chat, and the memory tools. */
+/** A handler with memory: the chat's facts in its instructions, and the memory tools. */
 const remembering = Effect.gen(function* () {
   const store = yield* Memory.MemoryStore
 
   return (turn: Assistant.Turn) =>
     Stream.unwrap(
       Effect.gen(function* () {
-        const memory = Memory.render(yield* Memory.facts(scopes), scopes)
+        const facts = yield* store.facts(turn.chatId)
 
-        return turn.loop({
-          instructions: "Be brief.",
-          toolkit: Memory.Tools,
-          history: (entries) => [
-            ...Option.toArray(
-              Option.map(memory, (text) => Prompt.userMessage({ content: [Prompt.textPart({ text })] }))
-            ),
-            ...entries
-          ]
-        })
+        return turn.loop({ instructions: `Be brief.\n\n${Memory.render(facts)}`, toolkit: Memory.Tools })
       })
-    ).pipe(Stream.provideService(Memory.MemoryStore, store), Stream.provideService(Memory.CurrentScopes, scopes))
+    ).pipe(Stream.provideService(Memory.MemoryStore, store))
 })
 
 const run = (script: Scripted.Script) =>
@@ -55,119 +45,42 @@ const chat = (text: string) =>
     return yield* collectUntil(TestAssistant, chatId, (entries) => turnsDone(entries) >= 1)
   })
 
+const endOfDay = (date: string) => Option.getOrThrow(DateTime.make(`${date}T23:59:59Z`))
+
 describe("Memory", () => {
-  it.live("a later chat reads what an earlier one remembered", () =>
+  it.live("a later chat is told what an earlier one remembered", () =>
     Effect.gen(function* () {
-      const { model, layer } = yield* run((request) => {
-        const last = Scripted.lastInput(request)
-
-        if (last.includes("Dutch") && !Scripted.hasCalled(request, "remember")) {
-          return [
-            Scripted.call("remember", {
-              text: "Rotterdam's copy is always Dutch.",
-              kind: "profile",
-              team: true
-            })
-          ]
-        }
-
-        return Scripted.reply("Noted.")
-      })
+      const { model, layer } = yield* run((request) =>
+        Scripted.lastInput(request).includes("Dutch") && !Scripted.hasCalled(request, "remember")
+          ? [Scripted.call("remember", { text: "Rotterdam's copy is always Dutch." })]
+          : Scripted.reply("Noted.")
+      )
 
       yield* Effect.gen(function* () {
         yield* chat("For Rotterdam we always write in Dutch.")
         yield* chat("Write a post for Rotterdam.")
       }).pipe(Effect.provide(layer))
 
-      const requests = yield* model.requests
-      const later = requests.at(-1)!
+      const later = (yield* model.requests).at(-1)!
 
-      expect(Scripted.inputs(later)[0]).toMatch(
-        /<memory>[\s\S]*About them:\n- \[f-[0-9a-f]{8}\] Rotterdam's copy is always Dutch\. \(team\)/
-      )
+      expect(later.system).toMatch(/<memory>[\s\S]*- \[f-[0-9a-f]{8}\] Rotterdam's copy is always Dutch\./)
       expect(later.tools).toEqual(expect.arrayContaining(["remember", "forget", "recall"]))
     })
   )
 
-  it.effect("keeps facts per scope, and forgets only in the scopes it's given", () =>
-    Effect.gen(function* () {
-      const store = yield* Memory.MemoryStore
-
-      const fact = (id: string, scope: string) =>
-        new Memory.Fact({
-          id,
-          scope,
-          kind: "profile",
-          text: id,
-          chatId: null,
-          at: 1,
-          expiresAt: null
-        })
-
-      yield* store.put(fact("mine", "user:1"))
-      yield* store.put(fact("theirs", "user:2"))
-      yield* store.put(fact("team", "team:1"))
-
-      const seen = yield* Memory.facts(scopes)
-      expect(seen.map((f) => f.id).sort()).toEqual(["mine", "team"])
-
-      expect(yield* store.remove(["user:1", "team:1"], "theirs")).toBe(false)
-      expect(yield* store.remove(["user:1", "team:1"], "mine")).toBe(true)
-      expect((yield* Memory.facts(scopes)).map((f) => f.id)).toEqual(["team"])
-    }).pipe(Effect.provide(Memory.layerMemory))
-  )
-
-  it.live("drops notes once they expire, and dates the log", () =>
-    Effect.gen(function* () {
-      const store = yield* Memory.MemoryStore
-      const chatId = yield* ChatId.make()
-      yield* store.put(
-        new Memory.Fact({
-          id: "old-note",
-          scope: "user:1",
-          kind: "note",
-          text: "Out of office.",
-          chatId: null,
-          at: 0,
-          expiresAt: 1
-        })
-      )
-      yield* Memory.log(scopes, chatId, "Ordered 25 bags for New York, #1042.")
-      yield* Memory.log(scopes, chatId, "Ordered 30 bags for New York, #1042.")
-
-      const facts = yield* Memory.facts(scopes)
-
-      // One line per chat: the second replaced the first.
-      expect(facts.map((f) => f.text)).toEqual(["Ordered 30 bags for New York, #1042."])
-      expect(Option.getOrThrow(Memory.render(facts, scopes))).toMatch(
-        /Earlier chats, newest first:\n- \d{4}-\d{2}-\d{2}: Ordered 30 bags for New York, #1042\./
-      )
-      expect(Memory.render([], scopes)).toEqual(Option.none())
-
-      // The chat is never shown its own line.
-      expect(yield* Memory.facts(scopes, { exceptLogOf: chatId })).toEqual([])
-      expect((yield* Memory.facts(scopes, { exceptLogOf: yield* ChatId.make() })).length).toBe(1)
-    }).pipe(Effect.provide(Memory.layerMemory))
-  )
-
-  it.live("forgets by id, and recall finds older facts by their words", () =>
+  it.live("forgets by id, and recall finds facts by their words", () =>
     Effect.gen(function* () {
       const { model, layer } = yield* run((request) => {
         const last = Scripted.lastInput(request)
 
         if (last.includes("12") && !Scripted.hasCalled(request, "remember")) {
-          return [
-            Scripted.call("remember", {
-              text: "Orders coffee in multiples of 12.",
-              kind: "profile"
-            })
-          ]
+          return [Scripted.call("remember", { text: "Orders coffee in multiples of 12." })]
         }
 
-        if (last.includes("forget")) {
-          const id = /\[(f-[0-9a-f]{8})\]/.exec(Scripted.inputs(request)[0] ?? "")?.[1] ?? ""
+        if (last.includes("forget") && !Scripted.hasCalled(request, "forget")) {
+          const id = /\[(f-[0-9a-f]{8})\]/.exec(request.system)?.[1] ?? ""
 
-          if (!Scripted.hasCalled(request, "forget")) return [Scripted.call("forget", { id })]
+          return [Scripted.call("forget", { id })]
         }
 
         if (last.includes("coffee") && !Scripted.hasCalled(request, "recall")) {
@@ -187,11 +100,56 @@ describe("Memory", () => {
       const requests = yield* model.requests
       const recalls = requests.flatMap((request) => Option.toArray(Scripted.lastResult(request, "recall")))
 
-      expect(recalls[0]).toMatch(/Orders coffee in multiples of 12\. \(profile\)/)
+      expect(recalls[0]).toMatch(/Orders coffee in multiples of 12\./)
       // After forgetting: nothing left to find, and nothing shown.
       expect(recalls.at(-1)).toBe("[]")
-      expect(Scripted.inputs(requests.at(-1)!).some((input) => input.includes("<memory>"))).toBe(false)
+      expect(requests.at(-1)!.system).not.toContain("<memory>")
     })
+  )
+
+  it.live("keeps a short-lived fact until its day, and refuses a date it can't read", () =>
+    Effect.gen(function* () {
+      const { model, layer } = yield* run((request) => {
+        const last = Scripted.lastInput(request)
+
+        if (last.includes("Friday") && !Scripted.hasCalled(request, "remember")) {
+          return [Scripted.call("remember", { text: "Out of office until Friday.", until: "2999-01-02" })]
+        }
+
+        if (last.includes("soon") && !Scripted.hasCalled(request, "remember")) {
+          return [Scripted.call("remember", { text: "Back soon.", until: "next week" })]
+        }
+
+        return Scripted.reply("Noted.")
+      })
+
+      yield* Effect.gen(function* () {
+        yield* chat("I'm out until Friday.")
+        yield* chat("I'll be back soon.")
+      }).pipe(Effect.provide(layer))
+
+      const requests = yield* model.requests
+
+      expect(requests.at(-1)!.system).toContain("Out of office until Friday. (until 2999-01-02)")
+      expect(Option.getOrUndefined(Scripted.lastResult(requests.at(-1)!, "remember"))).toContain(
+        "until must be a date as YYYY-MM-DD"
+      )
+    })
+  )
+
+  it.live("the in-memory store drops expired facts, replaces by id, and fails to forget what it doesn't have", () =>
+    Effect.gen(function* () {
+      const store = yield* Memory.MemoryStore
+      const chatId = yield* ChatId.make()
+
+      yield* store.remember(chatId, { text: "Gone.", expiresAt: endOfDay("2000-01-01") })
+      const old = yield* store.remember(chatId, { text: "Prefers email." })
+      yield* store.remember(chatId, { text: "Prefers phone calls.", replaces: old })
+
+      expect((yield* store.facts(chatId)).map((fact) => fact.text)).toEqual(["Prefers phone calls."])
+      expect(Exit.isFailure(yield* Effect.exit(store.forget(chatId, "f-missing")))).toBe(true)
+      expect(Memory.render([])).toBe("")
+    }).pipe(Effect.provide(Memory.layerMemory))
   )
 
   it("is a native toolkit, to merge with the app's", () => {

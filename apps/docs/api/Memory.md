@@ -6,52 +6,38 @@
 import { Memory } from "effect-assistant"
 ```
 
-The `Memory` module is what an assistant remembers across chats, in three
-kinds: lasting facts about the user (`profile`), short-lived ones that
-expire (`note`), and one line per chat about what happened in it (`log`).
-Facts live in scopes the app picks: the user's own, and their team's.
+The `Memory` module is what an assistant remembers across chats: facts the
+model keeps with `remember`, finds with `recall`, and drops with `forget`.
+Where they're stored and who shares them is the app's: it implements
+`MemoryStore`, whose every method gets the chat it's for. Show the
+facts in a turn's instructions with `render`.
 
 ## Other
 
-### Kind
-
-What kind of fact: lasting (`profile`), what happened in a chat (`log`),
-or short-lived (`note`).
-
-```ts
-const Kind = Schema.Literals(["profile", "log", "note"])
-```
-
-<small>Since 0.1.0</small>
-
 ### Fact
 
-A fact the assistant remembers: its text, the scope it's in, the chat it
-came from, when it was written, and when it expires (never, for most).
+A fact the assistant remembers: its id, one short sentence, and when it stops mattering, if it does.
 
 ```ts
 class Fact extends Schema.Class<Fact>("effect-assistant/Memory/Fact")({
   id: Schema.String,
-  scope: Schema.String,
-  kind: Kind,
   text: Schema.String,
-  chatId: Schema.NullOr(ChatId),
-  at: Schema.Finite,
-  expiresAt: Schema.NullOr(Schema.Finite)
+  expiresAt: Schema.optional(Schema.DateTimeUtc)
 })
 ```
 
 <small>Since 0.1.0</small>
 
-### Scopes
+### NewFact
 
-Where facts go and whom they're read for: the user's own scope, and the
-one their team shares, if any. The app chooses the keys; a turn reads both.
+A fact to keep, as the `remember` tool hands it to the store.
 
 ```ts
-interface Scopes {
-  readonly personal: string
-  readonly shared?: string | undefined
+interface NewFact {
+  readonly text: string
+  readonly expiresAt?: DateTime.Utc | undefined
+  /** The id of a fact this one replaces. */
+  readonly replaces?: string | undefined
 }
 ```
 
@@ -59,27 +45,42 @@ interface Scopes {
 
 ### MemoryStore
 
-Stores facts per scope.
+Where facts are kept: the app's. Every method gets the chat it's for, and
+the app decides whose facts that means (the chat's user, their team, ...).
 
 ```ts
 class MemoryStore extends Context.Service<
   MemoryStore,
   {
-    /** Writes the fact, replacing the one with its id. */
-    readonly put: (fact: Fact) => Effect.Effect<void>
-    /** Removes the fact if it's in one of the scopes; whether it was there. */
-    readonly remove: (scopes: ReadonlyArray<string>, id: string) => Effect.Effect<boolean>
-    /** The facts in the scopes that haven't expired at `now`, newest first. */
-    readonly list: (scopes: ReadonlyArray<string>, now: number) => Effect.Effect<ReadonlyArray<Fact>>
+    /** The facts a chat should know, unexpired. */
+    readonly facts: (chatId: ChatId) => Effect.Effect<ReadonlyArray<Fact>>
+    /** Keeps a fact for the chat's owner, and returns its id. */
+    readonly remember: (chatId: ChatId, fact: NewFact) => Effect.Effect<string>
+    /** Drops a fact; fails, for the model to read, when the chat's owner has no fact with that id. */
+    readonly forget: (chatId: ChatId, id: string) => Effect.Effect<void, ToolFailure.ToolFailure>
+    /** The chat owner's facts that match a query, best first. */
+    readonly recall: (chatId: ChatId, query: string) => Effect.Effect<ReadonlyArray<Fact>>
   }
 >()("effect-assistant/Memory/MemoryStore")
 ```
 
 <small>Since 0.1.0</small>
 
+### render
+
+The facts as the model reads them, for a turn's instructions: each with
+its id, so it can replace or forget one. Empty when there are none.
+
+```ts
+const render: (facts: ReadonlyArray<Fact>) => string
+```
+
+<small>Since 0.1.0</small>
+
 ### layerMemory
 
-A store in memory, for tests and local development.
+A store in memory, for tests and local runs: one set of facts that every
+chat shares.
 
 ```ts
 const layerMemory: Layer.Layer<MemoryStore>
@@ -87,84 +88,10 @@ const layerMemory: Layer.Layer<MemoryStore>
 
 <small>Since 0.1.0</small>
 
-### layerSql
-
-A store in SQL, in a `memory_facts` table (`id` primary key, `scope`, `kind`,
-`text`, `chat_id` nullable, `at`, `expires_at` nullable) that must exist.
-
-```ts
-const layerSql: Layer.Layer<MemoryStore, never, SqlClient.SqlClient>
-```
-
-<small>Since 0.1.0</small>
-
-### facts
-
-The facts the scopes have now, newest first. `exceptLogOf` leaves out that
-chat's own log line: the chat has itself, and a line that got something
-wrong would otherwise tell it so.
-
-```ts
-const facts: (
-  scopes: Scopes,
-  options?: { readonly exceptLogOf?: ChatId | undefined }
-) => Effect.Effect<ReadonlyArray<Fact>, never, MemoryStore>
-```
-
-<small>Since 0.1.0</small>
-
-### RenderOptions
-
-Options for `render`.
-
-```ts
-interface RenderOptions {
-  /** How many log lines, newest first. Default 10; older ones stay findable with `recall`. */
-  readonly logLines?: number | undefined
-}
-```
-
-<small>Since 0.1.0</small>
-
-### render
-
-The facts as the model reads them, or none when there are none: profile
-facts and notes with their ids (so it can replace or forget them), and the
-newest log lines, each dated.
-
-```ts
-const render: (facts: ReadonlyArray<Fact>, scopes: Scopes, options?: RenderOptions) => Option.Option<string>
-```
-
-<small>Since 0.1.0</small>
-
-### log
-
-Writes the chat's log line: one per chat, replacing the one it had, dated
-now, in the user's own scope.
-
-```ts
-const log: (scopes: Scopes, chatId: ChatId, text: string) => Effect.Effect<void, never, MemoryStore>
-```
-
-<small>Since 0.1.0</small>
-
-### CurrentScopes
-
-Whose memory the tools read and write: a turn provides it, from whom the
-chat is for (`Stream.provideService(Memory.CurrentScopes, scopes)`).
-
-```ts
-class CurrentScopes extends Context.Service<CurrentScopes, Scopes>()("effect-assistant/Memory/CurrentScopes")
-```
-
-<small>Since 0.1.0</small>
-
 ### Tools
 
 The `remember`, `forget` and `recall` tools. Merge them into the loop's
-toolkit, provide `layerTools`, and provide `CurrentScopes` for
-each turn.
+toolkit, and provide `layerTools` and a `MemoryStore`.
 
 ```ts
 const Tools = Toolkit.make(Remember, Forget, Recall)
@@ -174,7 +101,7 @@ const Tools = Toolkit.make(Remember, Forget, Recall)
 
 ### layerTools
 
-Layer for the `Tools`' handlers. They use the `MemoryStore` and the turn's `CurrentScopes`.
+Layer for the `Tools`' handlers: the `MemoryStore`, for the chat they run in.
 
 ```ts
 const layerTools = Tools.toLayer({ …

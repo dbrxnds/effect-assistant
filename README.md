@@ -317,49 +317,63 @@ const NoteToolsLive = NoteTools.toLayer({
 `MyAssistant.Chat` is typed with the assistant's events. Code that doesn't know the assistant, like a shared
 tool, uses `AssistantChat`: the same chat, untyped.
 
-### Memory and long chats
+### Memory
+
+```ts
+// Yours: where facts live, and whose they are for a chat.
+const MemoryStoreLive = Layer.succeed(Memory.MemoryStore, {
+  facts: (chatId) => ...,               // the chat owner's unexpired facts
+  remember: (chatId, { text, expiresAt, replaces }) => ...,  // returns the fact's id
+  forget: (chatId, id) => ...,
+  recall: (chatId, query) => ...
+})
+
+const MyAssistantLive = MyAssistant.toLayer(
+  Effect.gen(function* () {
+    const memory = yield* Memory.MemoryStore
+
+    return (turn) =>
+      Stream.unwrap(
+        Effect.map(memory.facts(turn.chatId), (facts) =>
+          turn.loop({
+            instructions: `${instructions}\n\n${Memory.render(facts)}`,
+            toolkit: Toolkit.merge(WeatherTools, Memory.Tools) // remember, forget, recall
+          })
+        )
+      ).pipe(Stream.provideService(Memory.MemoryStore, memory))
+  })
+).pipe(Layer.provide([WeatherToolsLive, Memory.layerTools]), Layer.provide(MemoryStoreLive))
+```
+
+`Memory.layerMemory` is an in-memory store for tests and local runs.
+
+### Long chats
 
 ```ts
 class Summary extends Schema.TaggedClass<Summary>()("Summary", { text: Schema.String, throughSeq: Schema.Int }) {}
 
 export const MyAssistant = Assistant.make("my-assistant", { events: [AppEvent.make(Summary)] })
 
-const MyAssistantLive = MyAssistant.toLayer(
-  Effect.gen(function* () {
-    const store = yield* Memory.MemoryStore // once per chat, from the layer
+const MyAssistantLive = MyAssistant.toLayer((turn) => {
+  const compact = Effect.gen(function* () {
+    const chat = yield* MyAssistant.Chat
+    const entries = yield* chat.entries
 
-    return (turn) =>
-      Stream.unwrap(
-        Effect.gen(function* () {
-          const scopes = { personal: "user:42", shared: "team:7" } // from the chat's owner
-          const remembered = Option.getOrElse(Memory.render(yield* Memory.facts(scopes), scopes), () => "")
+    if (Compaction.inputTokens(entries) < 100_000) return
 
-          const compact = Effect.gen(function* () {
-            const chat = yield* MyAssistant.Chat
-            const entries = yield* chat.entries
+    const { text } = yield* LanguageModel.generateText({ prompt: `Summarize:\n\n${transcript(entries)}` })
 
-            if (Compaction.inputTokens(entries) < 100_000) return
-
-            const { text } = yield* LanguageModel.generateText({ prompt: `Summarize:\n\n${transcript(entries)}` })
-
-            yield* chat.append(Summary.make({ text, throughSeq: entries.at(-1)?.seq ?? 0 }))
-          })
-
-          return Stream.concat(
-            turn.loop({
-              instructions: `${instructions}\n\n${remembered}`,
-              toolkit: Toolkit.merge(WeatherTools, Memory.Tools), // remember, forget, recall
-              history: Compaction.since(Schema.is(Summary)) // the last summary, then what came after
-            }),
-            Stream.drain(Stream.fromEffect(compact))
-          ).pipe(Stream.provideService(Memory.CurrentScopes, scopes))
-        })
-      ).pipe(Stream.provideService(Memory.MemoryStore, store))
+    yield* chat.append(Summary.make({ text, throughSeq: entries.at(-1)?.seq ?? 0 }))
   })
-).pipe(Layer.provide([WeatherToolsLive, Memory.layerTools]), Layer.provide(Memory.layerMemory))
+
+  return Stream.concat(
+    turn.loop({ instructions, history: Compaction.since(Schema.is(Summary)) }), // the last summary, then the rest
+    Stream.drain(Stream.fromEffect(compact)) // after the reply, so the user doesn't wait
+  )
+})
 ```
 
-`Memory.layerSql` stores facts in a `memory_facts` table. See [memory and long chats](./apps/docs/guide/memory.md).
+See [memory and long chats](./apps/docs/guide/memory.md).
 
 ### Tests
 

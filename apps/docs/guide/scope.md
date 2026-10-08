@@ -32,7 +32,7 @@ your app, built from services, tools, instructions, and [loops](./loops).
   the log records.
 - **Compaction.** It changes how history is rebuilt from the log, so it
   can't be done well outside it. See [memory and long chats](./memory).
-- **Memory across chats.** Facts per user and team, with tools to keep them,
+- **Memory across chats.** Tools to keep facts, over a store the app implements,
   read into the turn. See [memory and long chats](./memory).
 
 ## Not in the library
