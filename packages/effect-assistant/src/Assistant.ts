@@ -12,7 +12,7 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import type * as AppEvent from "./AppEvent.ts"
-import type { AssistantChat } from "./AssistantChat.ts"
+import { AssistantChat } from "./AssistantChat.ts"
 import { AssistantEngine } from "./AssistantEngine.ts"
 import * as AssistantEvent from "./AssistantEvent.ts"
 import type * as AssistantLoop from "./AssistantLoop.ts"
@@ -152,6 +152,28 @@ export interface Identifier<Name extends string> {
   readonly "~effect-assistant/Assistant": Name
 }
 
+/** Identifies an assistant's chat in a context: the one its turns run in. */
+export interface ChatIdentifier<Name extends string> {
+  readonly "~effect-assistant/Assistant/Chat": Name
+}
+
+/**
+ * The chat a turn of this assistant runs in, typed with its events:
+ * `yield* MyAssistant.Chat` in its handler, the handler's build, or a tool
+ * its turns run. Code that doesn't know the assistant uses `AssistantChat`.
+ */
+export interface Chat<Events = never> {
+  readonly chatId: ChatId
+  /** The chat's entries so far, in order: the library's events, and the assistant's own, typed. */
+  readonly entries: Effect.Effect<ReadonlyArray<Entry<Events>>>
+  /**
+   * Appends events after the chat's last entry and sends them to its
+   * subscribers: the library's, or the assistant's own, like a summary. One
+   * that wakes a turn gets the next turn.
+   */
+  append(...events: ReadonlyArray<AssistantEvent.AssistantEvent | Events>): Effect.Effect<void>
+}
+
 /**
  * What `yield* MyAssistant` gives: its chats, from outside them, like a
  * server or a workflow. Code in a chat uses `AssistantChat`.
@@ -224,14 +246,14 @@ export interface Assistant<
    */
   readonly toLayer: <R = never, RE = never, E = never, RX = never>(
     build: (Handler<R, RE, Events> | Effect.Effect<Handler<R, RE, Events>, E, RX>) &
-      Specialist.CheckServices<Exclude<HandlerServices<R | RE>, RX>>
+      Specialist.CheckServices<Exclude<HandlerServices<R | RE>, RX | ChatIdentifier<Name>>>
   ) => Layer.Layer<
     Identifier<Name>,
     never,
     | AssistantEngine
     | LanguageModel.LanguageModel
     | Specialist.HandlerOf<Specs>
-    | Exclude<RX, Scope.Scope | AssistantChat>
+    | Exclude<RX, Scope.Scope | AssistantChat | ChatIdentifier<Name>>
     | Specialist.ToolHandlers<R | RE>
   >
   /**
@@ -240,6 +262,8 @@ export interface Assistant<
    * front of a cluster.
    */
   readonly layerClient: Layer.Layer<Identifier<Name>, never, AssistantEngine>
+  /** The key of the chat its turns run in, typed with its events: see {@link Chat}. */
+  readonly Chat: Context.Service<ChatIdentifier<Name>, Chat<Events>>
   /** Schema for the chat's entries, the assistant's own events included, in JSON. */
   readonly Entry: Schema.Codec<Entry<Events>, Schema.Json>
 }
@@ -306,6 +330,23 @@ export const make = <
   ): Effect.Effect<AssistantEvent.Input | AssistantEvent.StoredAppEvent> =>
     AssistantEvent.isInput(input) ? Effect.succeed(input) : AppEvents.encode(definition.app, input)
 
+  const ChatKey = Context.Service<ChatIdentifier<Name>, Chat<OwnEvents>>(`effect-assistant/Assistant/${name}/Chat`)
+
+  // The assistant's own events, as its schemas decode them: what its typed chat keeps of the entries.
+  const isOwn = Schema.is(Schema.Union(events.map((event) => event.schema)))
+
+  /** The chat a turn runs in, typed with this assistant's events. */
+  const typedChat = (chat: AssistantChat["Service"]): Chat<OwnEvents> =>
+    ChatKey.of({
+      chatId: chat.chatId,
+      entries: Effect.map(chat.entries, (all) =>
+        all.flatMap(({ chatId, seq, at, event }) =>
+          AssistantEvent.isLibraryEvent(event) || isOwn(event) ? [{ chatId, seq, at, event }] : []
+        )
+      ),
+      append: (...appended) => chat.append(...appended)
+    })
+
   // On the engine and the app's `Chats` the layer was given, so every caller sees the same ones.
   const makeService = Effect.gen(function* () {
     const engine = yield* AssistantEngine
@@ -335,14 +376,14 @@ export const make = <
   // required, are provided to it and to every turn's stream, so what's left is the turn services.
   function toLayer<R = never, RE = never, E = never, RX = never>(
     build: (Handler<R, RE, OwnEvents> | Effect.Effect<Handler<R, RE, OwnEvents>, E, RX>) &
-      Specialist.CheckServices<Exclude<HandlerServices<R | RE>, RX>>
+      Specialist.CheckServices<Exclude<HandlerServices<R | RE>, RX | ChatIdentifier<Name>>>
   ): Layer.Layer<
     Identifier<Name>,
     never,
     | AssistantEngine
     | LanguageModel.LanguageModel
     | Specialist.HandlerOf<Specs[number]>
-    | Exclude<RX, Scope.Scope | AssistantChat>
+    | Exclude<RX, Scope.Scope | AssistantChat | ChatIdentifier<Name>>
     | Specialist.ToolHandlers<R | RE>
   >
   function toLayer(
@@ -356,9 +397,11 @@ export const make = <
         const registration = yield* Turns.register(definition, {
           // The build runs per chat activation, in the chat; here it only keeps the layer's services for it.
           open: Effect.gen(function* () {
-            const handler = Effect.isEffect(build) ? yield* build : build
+            const chat = typedChat(yield* AssistantChat)
+            const handler = Effect.isEffect(build) ? yield* Effect.provideService(build, ChatKey, chat) : build
 
-            return (turn: Turn<any>) => Stream.provideContext(toStream(handler(turn)), context)
+            return (turn: Turn<any>) =>
+              Stream.provideContext(toStream(handler(turn)), context).pipe(Stream.provideService(ChatKey, chat))
           }).pipe(Effect.provideContext(context), Effect.orDie)
         })
 
@@ -370,15 +413,16 @@ export const make = <
   }
 
   // The key is a function, whose own `name` is read-only: the assistant's name replaces it.
-  Object.defineProperty(Key, "name", { value: name, writable: true })
+  const named = Object.defineProperty(Key, "name", { value: name, writable: true })
 
-  return Object.assign(Key, {
+  return Object.assign(named, {
     name,
     blocks: options?.blocks,
     specialists: options?.specialists ?? [],
     events,
     toLayer,
     layerClient: Layer.effect(Key, makeService),
+    Chat: ChatKey,
     Entry: entrySchema<OwnEvents>(events)
   })
 }

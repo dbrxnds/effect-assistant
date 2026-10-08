@@ -403,7 +403,7 @@ Register your own tagged schemas with the assistant. An event with
 `wakes: true` starts a turn, like a user message, and the model reads it as
 `render` describes. The user sees it only if the assistant tells them.
 Events that don't wake a turn are bookkeeping that a handler reads back
-from the chat, `(yield* AssistantChat.AssistantChat).entries`.
+from the chat, typed: `(yield* MyAssistant.Chat).entries`.
 
 ```ts
 import { AppEvent, InputId } from "effect-assistant"
@@ -448,7 +448,7 @@ build prompts. The example below also adds two optional pieces:
   writes the summary. The library supplies the pieces.
 
 ```ts
-import { AppEvent, AssistantChat, Compaction, Memory } from "effect-assistant"
+import { AppEvent, Compaction, Memory } from "effect-assistant"
 import * as LanguageModel from "effect/ai/LanguageModel"
 
 class Summary extends Schema.TaggedClass<Summary>()("Summary", {
@@ -476,7 +476,7 @@ const MyAssistantHandlers = MyAssistant.toLayer(
           const remembered = Option.getOrElse(Memory.render(facts, scopes), () => "")
 
           const compact = Effect.gen(function* () {
-            const chat = yield* AssistantChat.AssistantChat
+            const chat = yield* MyAssistant.Chat // typed with its events
             const entries = yield* chat.entries
 
             if (Compaction.inputTokens(entries) < 100_000) return

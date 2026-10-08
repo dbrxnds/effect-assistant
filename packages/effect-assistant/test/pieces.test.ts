@@ -1,6 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Prompt from "effect/ai/Prompt"
+import * as Tool from "effect/ai/Tool"
+import * as Toolkit from "effect/ai/Toolkit"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
@@ -53,10 +56,11 @@ describe("the app's own events", () => {
       const handlers = Compacting.toLayer(() =>
         Stream.fromEffect(
           Effect.gen(function* () {
-            yield* (yield* AssistantChat.AssistantChat).append(summary)
-            seen = (yield* (yield* AssistantChat.AssistantChat).entries).flatMap(({ event }) =>
-              event instanceof Summary ? [event] : []
-            )
+            const chat = yield* Compacting.Chat
+
+            yield* chat.append(summary)
+            // Typed with the assistant's events: narrowing by tag gives a Summary.
+            seen = (yield* chat.entries).flatMap(({ event }) => (Predicate.isTagged(event, "Summary") ? [event] : []))
           })
         ).pipe(Stream.drain)
       )
@@ -139,6 +143,44 @@ describe("the app's own events", () => {
 
       expect(entries.filter(({ event }) => Predicate.isTagged(event, "TurnStarted"))).toHaveLength(1)
       expect(Scripted.inputs(request!)).toEqual(["The user opened draft d1.", "finish it"])
+    })
+  )
+
+  it.live("a tool its turn runs gets the assistant's typed chat too", () =>
+    Effect.gen(function* () {
+      const NoteSummary = Tool.make("note_summary", {
+        description: "Notes a summary of the chat.",
+        success: Schema.String,
+        dependencies: [Compacting.Chat]
+      })
+
+      const NoteTools = Toolkit.make(NoteSummary)
+
+      const NoteToolsLive = NoteTools.toLayer({
+        note_summary: () =>
+          Effect.gen(function* () {
+            yield* (yield* Compacting.Chat).append(summary)
+
+            return "noted"
+          })
+      })
+
+      const handlers = Compacting.toLayer((turn) => turn.loop({ instructions: "Be brief.", toolkit: NoteTools })).pipe(
+        Layer.provide(NoteToolsLive)
+      )
+
+      const model = Scripted.layer((request) =>
+        Scripted.hasCalled(request, "note_summary") ? Scripted.reply("Noted.") : [Scripted.call("note_summary")]
+      )
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* (yield* Compacting).submit(chat, say("note it"))
+
+        return yield* collectUntil(Compacting, chat, (es) => turnsDone(es) >= 1)
+      }).pipe(Effect.provide(runMemory(handlers, model)))
+
+      expect(entries.flatMap(({ event }) => (event instanceof Summary ? [event] : []))).toEqual([summary])
     })
   )
 

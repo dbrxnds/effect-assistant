@@ -103,7 +103,7 @@ summary, and what it says are your app's:
   tokens, to decide when the prompt is big enough to compact.
 
 ```ts
-import { AppEvent, AssistantChat, Compaction } from "effect-assistant"
+import { AppEvent, Compaction } from "effect-assistant"
 import * as LanguageModel from "effect/ai/LanguageModel"
 
 class Summary extends Schema.TaggedClass<Summary>()("Summary", {
@@ -117,7 +117,7 @@ const sinceSummary = Compaction.since(Schema.is(Summary))
 
 const MyAssistantHandlers = MyAssistant.toLayer((turn) => {
   const compact = Effect.gen(function* () {
-    const chat = yield* AssistantChat.AssistantChat
+    const chat = yield* MyAssistant.Chat // typed with its events
     const entries = yield* chat.entries
 
     if (Compaction.inputTokens(entries) < 100_000) return

@@ -46,12 +46,17 @@ export const MyAssistant = Assistant.make("my-assistant", {
 ```
 
 The assistant's `submit` (`yield* MyAssistant`) stores them like a user's
-message, and code in the chat writes them with `AssistantChat`'s `append`.
-The chat stores no event its assistant didn't register: `submit` only takes
-the registered ones (anything else is a type error), and `append` fails the
-turn for one that isn't. `AssistantChat`'s `entries`, history views, and the
-assistant's `subscribe` decode them, so read them with `Schema.is(MyEvent)`
-or `instanceof`.
+message. Code in the chat (the handler, its build, a tool its turns run)
+reads and writes them through the assistant's chat, `yield* MyAssistant.Chat`:
+its `entries` are typed with the assistant's events, and its `append` takes
+only those and the library's. Anything else is a type error, for `submit` and
+`append` alike. History views and the assistant's `subscribe` decode them to
+their types too.
+
+Code that doesn't know the assistant, like a tool shared by several, uses
+`AssistantChat`: the same chat, with the events decoded but untyped (read
+them with `Schema.is(MyEvent)`), and an `append` that fails the turn for an
+event the assistant didn't register.
 
 ```ts
 import { type ChatId, InputId } from "effect-assistant"
