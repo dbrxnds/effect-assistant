@@ -11,7 +11,7 @@ prompt doesn't carry every definition: `search_tools` finds tools by what the
 model needs to do (name, description, input schema), and `execute_tool`
 validates an input and runs one.
 
-## Other
+## Constructors
 
 ### make
 

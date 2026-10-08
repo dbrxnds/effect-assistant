@@ -5,6 +5,8 @@
  * engine: {@link layerMemory} runs chats in the process, for tests and one
  * process; {@link layerCluster} runs each chat as a cluster entity, so a turn
  * cut off by a crash resumes.
+ *
+ * @since 0.1.0
  */
 import * as ClusterSchema from "effect/cluster/ClusterSchema"
 import * as Entity from "effect/cluster/Entity"
@@ -32,6 +34,9 @@ import type * as Turns from "./internal/turns.ts"
 /**
  * Service that runs assistants' chats. `toLayer` registers an assistant with
  * it; the assistant's `submit` and `subscribe` use it.
+ *
+ * @category services
+ * @since 0.1.0
  */
 export class AssistantEngine extends Context.Service<
   AssistantEngine,
@@ -51,7 +56,6 @@ export class AssistantEngine extends Context.Service<
   }
 >()("effect-assistant/AssistantEngine") {}
 
-/** An open chat of the in-memory engine: which assistant, which chat. */
 class ChatKey extends Data.Class<{ readonly assistant: string; readonly chatId: ChatId }> {}
 
 const notRegistered = (assistant: string) =>
@@ -60,6 +64,9 @@ const notRegistered = (assistant: string) =>
 /**
  * Layer that runs chats in the process. Each chat's turns are fibers, one at
  * a time.
+ *
+ * @category layers
+ * @since 0.1.0
  */
 export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.effect(
   AssistantEngine,
@@ -113,9 +120,7 @@ export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.e
       return yield* f(chat)
     }, Effect.scoped)
 
-    /**
-     * Runs turns for the assistant's chats that owe one: its last turn was cut off, or an input came after.
-     */
+    // A chat owes a turn when its last turn was cut off, or an input came after.
     const resumeAll = Effect.fnUntraced(function* (registration: Turns.Registration) {
       const { name, app } = registration.definition
 
@@ -130,17 +135,23 @@ export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.e
     })
 
     return AssistantEngine.of({
-      register: Effect.fn("AssistantEngine.register")(function* (registration: Turns.Registration) {
-        registered.set(registration.definition.name, registration)
-        // Chats this assistant was working on when the process stopped: pick them up again.
-        yield* Effect.forkScoped(resumeAll(registration))
-      }),
+      register: Effect.fnUntraced(
+        function* (registration: Turns.Registration) {
+          registered.set(registration.definition.name, registration)
+          // Chats this assistant was working on when the process stopped: pick them up again.
+          yield* Effect.forkScoped(resumeAll(registration))
+        },
+        (effect) => Effect.withSpan(effect, "AssistantEngine.register", { captureStackTrace: false })
+      ),
       submit: (assistant, chatId, input) => withChat(assistant, chatId, (chat) => chat.submitInBackground(input)),
       // The chat deletes itself, so a chat that's open stops; the entry goes, and the next open finds it deleted.
-      delete: Effect.fn("AssistantEngine.delete")(function* (assistant: string, chatId: ChatId) {
-        yield* withChat(assistant, chatId, (chat) => chat.delete)
-        yield* RcMap.invalidate(chats, new ChatKey({ assistant, chatId }))
-      }),
+      delete: Effect.fnUntraced(
+        function* (assistant: string, chatId: ChatId) {
+          yield* withChat(assistant, chatId, (chat) => chat.delete)
+          yield* RcMap.invalidate(chats, new ChatKey({ assistant, chatId }))
+        },
+        (effect) => Effect.withSpan(effect, "AssistantEngine.delete", { captureStackTrace: false })
+      ),
       // The subscriber holds the chat open while it streams.
       subscribe: (assistant, chatId, after) =>
         Stream.unwrap(
@@ -154,7 +165,6 @@ export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.e
   })
 )
 
-/** A registered assistant's chats, through their entities. */
 interface EntityClient {
   readonly submit: (chatId: ChatId, input: AssistantEvent.Input | AssistantEvent.StoredAppEvent) => Effect.Effect<void>
   readonly subscribe: (chatId: ChatId, after: number) => Stream.Stream<AssistantEvent.Entry>
@@ -179,6 +189,9 @@ const chatEntity = (assistant: string) => Entity.make(`Assistant/${assistant}`, 
  * Layer that runs chats as cluster entities, one per chat, keyed by chat id.
  * Needs `Sharding`: a `SingleRunner` for one process with SQL storage, a
  * runner of the app's cluster, or `TestRunner` in tests.
+ *
+ * @category layers
+ * @since 0.1.0
  */
 export const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Sharding.Sharding> = Layer.effect(
   AssistantEngine,
@@ -243,15 +256,14 @@ export const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Shardin
 
     return AssistantEngine.of({
       register: (registration) => register(registration).pipe(Effect.provide(context)),
-      submit: Effect.fn("AssistantEngine.submit")(function* (
-        assistant: string,
-        chatId: ChatId,
-        input: AssistantEvent.Input | AssistantEvent.StoredAppEvent
-      ) {
-        const client = yield* clientOf(assistant)
+      submit: Effect.fnUntraced(
+        function* (assistant: string, chatId: ChatId, input: AssistantEvent.Input | AssistantEvent.StoredAppEvent) {
+          const client = yield* clientOf(assistant)
 
-        yield* client.submit(chatId, input)
-      }),
+          yield* client.submit(chatId, input)
+        },
+        (effect) => Effect.withSpan(effect, "AssistantEngine.submit", { captureStackTrace: false })
+      ),
       subscribe: (assistant, chatId, after) =>
         Stream.unwrap(
           Effect.gen(function* () {
@@ -260,11 +272,14 @@ export const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Shardin
             return client.subscribe(chatId, after)
           })
         ),
-      delete: Effect.fn("AssistantEngine.delete")(function* (assistant: string, chatId: ChatId) {
-        const client = yield* clientOf(assistant)
+      delete: Effect.fnUntraced(
+        function* (assistant: string, chatId: ChatId) {
+          const client = yield* clientOf(assistant)
 
-        yield* client.delete(chatId)
-      })
+          yield* client.delete(chatId)
+        },
+        (effect) => Effect.withSpan(effect, "AssistantEngine.delete", { captureStackTrace: false })
+      )
     })
   })
 )

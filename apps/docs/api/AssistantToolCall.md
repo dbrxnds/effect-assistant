@@ -9,7 +9,7 @@ import { AssistantToolCall } from "effect-assistant"
 The `AssistantToolCall` module gives a tool the call it runs for: its id,
 and a key for anything it does outside the chat.
 
-## Other
+## Services
 
 ### AssistantToolCall
 
@@ -29,6 +29,8 @@ class AssistantToolCall extends Context.Service<
 ```
 
 <small>Since 0.1.0</small>
+
+## Accessors
 
 ### idempotencyKey
 

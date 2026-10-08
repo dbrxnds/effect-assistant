@@ -1,6 +1,8 @@
 /**
  * The `BlockKit` module groups the blocks an assistant may put in its messages, and
  * renders them on the client.
+ *
+ * @since 0.1.0
  */
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
@@ -13,13 +15,23 @@ import type * as ChatView from "./ChatView.ts"
 import * as Decision from "./Decision.ts"
 import * as InputId from "./InputId.ts"
 
-/** A catalog of blocks. */
+/**
+ * A catalog of blocks.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface BlockKit<Blocks extends Block.Any = Block.Any> {
   readonly blocks: ReadonlyArray<Blocks>
   readonly byKind: ReadonlyMap<string, Blocks>
 }
 
-/** Creates a kit from blocks. */
+/**
+ * Creates a kit from blocks.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
 export const make = <const Blocks extends ReadonlyArray<Block.Any>>(blocks: Blocks): BlockKit<Blocks[number]> => ({
   blocks,
   byKind: new Map(blocks.map((block) => [block.kind, block]))
@@ -33,14 +45,24 @@ type PropsOf<B> = B extends { readonly props: Schema.Top } ? B["props"]["Type"] 
 
 type AnswerOf<B> = B extends { readonly answer: infer A } ? (A extends Schema.Top ? A["Type"] : never) : never
 
-/** Where a message's block stands. */
+/**
+ * Where a message's block stands.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface BlockState {
   readonly open: boolean
   /** Its answer, if the user used it. */
   readonly answer: AssistantEvent.BlockAnswer | undefined
 }
 
-/** Returns the block states after one more event. */
+/**
+ * Returns the block states after one more event.
+ *
+ * @category utils
+ * @since 0.1.0
+ */
 export const nextBlockStates = (
   states: ReadonlyMap<string, BlockState>,
   event: { readonly _tag: string }
@@ -72,7 +94,12 @@ export const nextBlockStates = (
   return new Map(states).set(event.messageId, { open: false, answer: event })
 }
 
-/** Returns the state of every message's block, by message id. */
+/**
+ * Returns the state of every message's block, by message id.
+ *
+ * @category utils
+ * @since 0.1.0
+ */
 export const blockStates = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): ReadonlyMap<string, BlockState> => {
   let states: ReadonlyMap<string, BlockState> = new Map()
 
@@ -85,6 +112,9 @@ export const blockStates = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): Re
  * Returns the blocks still open after the user typed this many messages
  * without using them: the ones {@link closeStale} closes. Decision blocks
  * never go stale: work waits on them, and closing one would leave it waiting.
+ *
+ * @category utils
+ * @since 0.1.0
  */
 export const staleBlocks = (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
@@ -118,15 +148,23 @@ export const staleBlocks = (
  * Closes the blocks the user moved on from: still open after this many typed
  * messages. Run it from a turn, before or after its loop; it records a
  * `BlocksClosed` event, so every client folds them closed.
+ *
+ * @category utils
+ * @since 0.1.0
  */
-export const closeStale = Effect.fn(function* (options: { readonly messages: number }) {
+export const closeStale = Effect.fnUntraced(function* (options: { readonly messages: number }) {
   const chat = yield* AssistantChat
   const stale = staleBlocks(yield* chat.entries, options)
 
   if (stale.length > 0) yield* chat.append(AssistantEvent.BlocksClosed.make({ messageIds: stale }))
 })
 
-/** What a renderer gets for one block. */
+/**
+ * What a renderer gets for one block.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface RenderArgs<B> {
   readonly text: string
   readonly props: PropsOf<B>
@@ -143,12 +181,22 @@ export interface RenderArgs<B> {
   readonly respond: (answer: AnswerOf<B>) => void
 }
 
-/** A renderer for every kind in a kit. */
+/**
+ * A renderer for every kind in a kit.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export type Renderers<Kit extends BlockKit, Out> = {
   readonly [K in KindOf<Kit["blocks"][number]>]: (args: RenderArgs<BlockOf<Kit, K>>) => Out
 }
 
-/** Options for rendering one message's block. */
+/**
+ * Options for rendering one message's block.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface RenderOptions {
   /** Submits an answer, for example over RPC. */
   readonly respond: (answer: AssistantEvent.BlockAnswer) => void
@@ -157,6 +205,9 @@ export interface RenderOptions {
 /**
  * Creates a client-side renderer for the blocks on a chat view's messages
  * (`ChatView.AssistantMessage`).
+ *
+ * @category constructors
+ * @since 0.1.0
  */
 export function toClient<Kit extends BlockKit, Out>(
   kit: Kit,

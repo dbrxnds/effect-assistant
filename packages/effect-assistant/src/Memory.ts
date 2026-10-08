@@ -4,6 +4,8 @@
  * Where they're stored and who shares them is the app's: it implements
  * {@link MemoryStore}, whose every method gets the chat it's for. Show the
  * facts in a turn's instructions with {@link render}.
+ *
+ * @since 0.1.0
  */
 import * as Tool from "effect/ai/Tool"
 import * as Toolkit from "effect/ai/Toolkit"
@@ -20,14 +22,24 @@ import type { ChatId } from "./ChatId.ts"
 import * as Uuid from "./internal/uuid.ts"
 import * as ToolFailure from "./ToolFailure.ts"
 
-/** A fact the assistant remembers: its id, one short sentence, and when it stops mattering, if it does. */
+/**
+ * A fact the assistant remembers: its id, one short sentence, and when it stops mattering, if it does.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
 export class Fact extends Schema.Class<Fact>("effect-assistant/Memory/Fact")({
   id: Schema.String,
   text: Schema.String,
   expiresAt: Schema.optional(Schema.DateTimeUtc)
 }) {}
 
-/** A fact to keep, as the `remember` tool hands it to the store. */
+/**
+ * A fact to keep, as the `remember` tool hands it to the store.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface NewFact {
   readonly text: string
   readonly expiresAt?: DateTime.Utc | undefined
@@ -38,6 +50,9 @@ export interface NewFact {
 /**
  * Where facts are kept: the app's. Every method gets the chat it's for, and
  * the app decides whose facts that means (the chat's user, their team, ...).
+ *
+ * @category services
+ * @since 0.1.0
  */
 export class MemoryStore extends Context.Service<
   MemoryStore,
@@ -61,6 +76,9 @@ const line = (fact: Fact): string =>
 /**
  * The facts as the model reads them, for a turn's instructions: each with
  * its id, so it can replace or forget one. Empty when there are none.
+ *
+ * @category utils
+ * @since 0.1.0
  */
 export const render = (facts: ReadonlyArray<Fact>): string =>
   facts.length === 0
@@ -73,7 +91,6 @@ const words = (text: string): ReadonlyArray<string> =>
     .split(/[^\p{L}\p{N}]+/u)
     .filter((word) => word.length > 2)
 
-/** How many of the query's words the fact has; a word counts when one starts with the other. */
 const matches = (fact: Fact, query: ReadonlyArray<string>): number => {
   const own = words(fact.text)
 
@@ -86,6 +103,9 @@ const live = (now: number) => (fact: Fact) =>
 /**
  * A store in memory, for tests and local runs: one set of facts that every
  * chat shares.
+ *
+ * @category layers
+ * @since 0.1.0
  */
 export const layerMemory: Layer.Layer<MemoryStore> = Layer.effect(
   MemoryStore,
@@ -163,14 +183,21 @@ const Recall = Tool.make("recall", {
 /**
  * The `remember`, `forget` and `recall` tools. Merge them into the loop's
  * toolkit, and provide {@link layerTools} and a {@link MemoryStore}.
+ *
+ * @category tools
+ * @since 0.1.0
  */
 export const Tools = Toolkit.make(Remember, Forget, Recall)
 
-/** The end of the day a `YYYY-MM-DD` names, in UTC. */
 const endOf = (date: string): Option.Option<DateTime.Utc> =>
   /^\d{4}-\d{2}-\d{2}$/.test(date) ? DateTime.make(`${date}T23:59:59Z`) : Option.none()
 
-/** Layer for the {@link Tools}' handlers: the {@link MemoryStore}, for the chat they run in. */
+/**
+ * Layer for the {@link Tools}' handlers: the {@link MemoryStore}, for the chat they run in.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
 export const layerTools = Tools.toLayer({
   remember: Effect.fnUntraced(function* ({ text, until, replaces }) {
     const chat = yield* AssistantChat

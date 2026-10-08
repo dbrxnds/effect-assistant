@@ -1,4 +1,3 @@
-/** The `load_skill` tool a loop with skills gets. */
 import * as Tool from "effect/ai/Tool"
 import * as Toolkit from "effect/ai/Toolkit"
 import type * as Context from "effect/Context"
@@ -9,10 +8,7 @@ import type { Skill } from "../Skill.ts"
 import * as ToolFailure from "../ToolFailure.ts"
 import * as Toolkits from "./toolkit.ts"
 
-/**
- * Returns the `load_skill` tool for these skills, or no tools when there are
- * none.
- */
+/** @internal */
 export const toTools = <R>(skills: ReadonlyArray<Skill<R>>): Toolkits.Tools<R> => {
   if (skills.length === 0) return Toolkits.empty
 

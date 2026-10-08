@@ -9,23 +9,7 @@ import { Instructions } from "effect-assistant"
 The `Instructions` module defines what an assistant, specialist, or skill is
 told to do: text, optionally with span attributes (a `Resolved`).
 
-## Other
-
-### protocol
-
-What the model has to know for a turn's loop to work: every step is a tool
-call, `wait` (or a last message with `wait: true`) ends the turn, and
-messages can arrive mid-turn. The rest (the user sees only
-`send_user_message`, what a `<specialist>` or an app's event is) is in the
-tools' descriptions and in the history itself.
-`turn.instructions(text)` puts it before the text; a custom loop on
-`AssistantLoop.run` can use it too.
-
-```ts
-const protocol = `Every step is a tool call. When you have nothing more to do right now, end your turn: set wait to true on your last send_user_message, or call wait if you have nothing to say. …
-```
-
-<small>Since 0.1.0</small>
+## Models
 
 ### SpanAttributes
 
@@ -60,12 +44,30 @@ type Instructions<R = never> = string | Effect.Effect<string | Resolved, never, 
 
 <small>Since 0.1.0</small>
 
+## Utils
+
+### protocol
+
+What the model has to know for a turn's loop to work: every step is a tool
+call, `wait` (or a last message with `wait: true`) ends the turn, and
+messages can arrive mid-turn. The rest (the user sees only
+`send_user_message`, what a `<specialist>` or an app's event is) is in the
+tools' descriptions and in the history itself.
+`turn.instructions(text)` puts it before the text; a custom loop on
+`AssistantLoop.run` can use it too.
+
+```ts
+const protocol = `Every step is a tool call. When you have nothing more to do right now, end your turn: set wait to true on your last send_user_message, or call wait if you have nothing to say. …
+```
+
+<small>Since 0.1.0</small>
+
 ### resolve
 
 Resolves instructions to text and span attributes.
 
 ```ts
-const resolve = Effect.fn("Instructions.resolve")(function* <R = never>(instructions: Instructions<R>) { …
+const resolve = Effect.fnUntraced( …
 ```
 
 <small>Since 0.1.0</small>

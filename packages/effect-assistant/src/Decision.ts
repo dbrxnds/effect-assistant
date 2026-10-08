@@ -3,6 +3,8 @@
  * assistant can't make on its own, like placing an order or publishing a
  * post: a tool with Effect's `needsApproval` is parked when the model calls
  * it, and the user's answer to the decision block runs it or declines it.
+ *
+ * @since 0.1.0
  */
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
@@ -12,12 +14,20 @@ import * as Block from "./Block.ts"
 import * as DecisionId from "./DecisionId.ts"
 import type { InputId } from "./InputId.ts"
 
-/** The decision block's kind. */
+/**
+ * The decision block's kind.
+ *
+ * @category utils
+ * @since 0.1.0
+ */
 export const kind = "decision"
 
 /**
  * Schema for the decision block's props: which decisions it asks for, and
  * optionally its buttons' labels.
+ *
+ * @category schemas
+ * @since 0.1.0
  */
 export const Props = Schema.Struct({
   // Plain strings: a strict tool schema with the id's pattern is too much for some providers; the ids are checked
@@ -34,18 +44,31 @@ export const Props = Schema.Struct({
   })
 })
 
-/** The decision block's props. */
+/**
+ * The decision block's props.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export type Props = typeof Props.Type
 
 /**
  * Schema for the decision block's answer: an outcome for every decision the
  * block asks for, by id.
+ *
+ * @category schemas
+ * @since 0.1.0
  */
 export const Answer = Schema.Struct({
   decisions: Schema.Record(Schema.String, AssistantEvent.DecisionOutcome)
 })
 
-/** The decision block's answer. */
+/**
+ * The decision block's answer.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export type Answer = typeof Answer.Type
 
 /**
@@ -53,6 +76,9 @@ export type Answer = typeof Answer.Type
  * Put it in the assistant's `BlockKit`; an assistant with a tool that needs
  * a decision must have it. The client renders it like any block, with the
  * calls from {@link fromEntries}: their tool and params.
+ *
+ * @category constructors
+ * @since 0.1.0
  */
 export const block = Block.make(kind, {
   description:
@@ -64,12 +90,20 @@ export const block = Block.make(kind, {
 /**
  * The answer that gives every decision the block asks for the same outcome:
  * what an "Approve" or "Decline" button sends.
+ *
+ * @category constructors
+ * @since 0.1.0
  */
 export const answerAll = (props: Props, outcome: AssistantEvent.DecisionOutcome): Answer => ({
   decisions: Object.fromEntries(props.decisionIds.map((id) => [id, outcome]))
 })
 
-/** Where a decision stands. */
+/**
+ * Where a decision stands.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface State {
   readonly request: AssistantEvent.DecisionRequested
   /** How the user decided; `undefined` while it waits. */
@@ -84,7 +118,12 @@ export interface State {
 
 const decodeAnswer = Schema.decodeUnknownOption(Answer)
 
-/** Returns the decision states after one more event. */
+/**
+ * Returns the decision states after one more event.
+ *
+ * @category utils
+ * @since 0.1.0
+ */
 export const apply = (
   states: ReadonlyMap<string, State>,
   event: { readonly _tag: string }
@@ -148,7 +187,12 @@ export const apply = (
   return states
 }
 
-/** Returns every decision in the log and where it stands, by id. */
+/**
+ * Returns every decision in the log and where it stands, by id.
+ *
+ * @category utils
+ * @since 0.1.0
+ */
 export const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): ReadonlyMap<string, State> => {
   let all: ReadonlyMap<string, State> = new Map()
 

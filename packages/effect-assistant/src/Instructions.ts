@@ -1,6 +1,8 @@
 /**
  * The `Instructions` module defines what an assistant, specialist, or skill is
  * told to do: text, optionally with span attributes (a {@link Resolved}).
+ *
+ * @since 0.1.0
  */
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
@@ -13,27 +15,53 @@ import * as Predicate from "effect/Predicate"
  * tools' descriptions and in the history itself.
  * `turn.instructions(text)` puts it before the text; a custom loop on
  * `AssistantLoop.run` can use it too.
+ *
+ * @category utils
+ * @since 0.1.0
  */
 export const protocol = `Every step is a tool call. When you have nothing more to do right now, end your turn: set wait to true on your last send_user_message, or call wait if you have nothing to say.
 The user sees only the text of what you send with send_user_message: anything else you write is never shown, so put the whole answer in the message, not next to it.
 Messages and updates can arrive while you work: handle the newest one, and don't repeat what you already told the user.`
 
-/** Span attributes added to every model call made with a prompt. */
+/**
+ * Span attributes added to every model call made with a prompt.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export type SpanAttributes = Readonly<Record<string, string | number | boolean>>
 
-/** Instructions with the span attributes to record them under. */
+/**
+ * Instructions with the span attributes to record them under.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface Resolved {
   readonly text: string
   readonly attributes?: SpanAttributes | undefined
 }
 
-/** Text, or an Effect that produces it (optionally with span attributes). */
+/**
+ * Text, or an Effect that produces it (optionally with span attributes).
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export type Instructions<R = never> = string | Effect.Effect<string | Resolved, never, R>
 
-/** Resolves instructions to text and span attributes. */
-export const resolve = Effect.fn("Instructions.resolve")(function* <R = never>(instructions: Instructions<R>) {
-  return Predicate.isString(instructions) ? { text: instructions } : toResolved(yield* instructions)
-})
+/**
+ * Resolves instructions to text and span attributes.
+ *
+ * @category utils
+ * @since 0.1.0
+ */
+export const resolve = Effect.fnUntraced(
+  function* <R = never>(instructions: Instructions<R>) {
+    return Predicate.isString(instructions) ? { text: instructions } : toResolved(yield* instructions)
+  },
+  (effect) => Effect.withSpan(effect, "Instructions.resolve", { captureStackTrace: false })
+)
 
 const toResolved = (resolved: string | Resolved): Resolved =>
   Predicate.isString(resolved) ? { text: resolved } : resolved

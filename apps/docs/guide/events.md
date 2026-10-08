@@ -10,9 +10,10 @@ model's history is rebuilt from it before every model call.
 import * as Console from "effect/Console"
 import * as Stream from "effect/Stream"
 
-const assistant = yield * MyAssistant
-
-yield * assistant.subscribe(chatId).pipe(Stream.runForEach(({ seq, event }) => Console.log(seq, event._tag)))
+const printLog = (chatId: ChatId.ChatId) =>
+  MyAssistant.use((assistant) =>
+    assistant.subscribe(chatId).pipe(Stream.runForEach(({ seq, event }) => Console.log(seq, event._tag)))
+  )
 // 1 UserMessage
 // 2 TurnStarted
 // 3 ModelOutput

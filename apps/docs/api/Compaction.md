@@ -12,7 +12,7 @@ writes the summary, and what the summary says are the app's: its handler
 reads the chat's entries, has a model write the summary, stores it as one
 of its own events, and its loop reads the chat with `since`.
 
-## Other
+## Models
 
 ### Summary
 
@@ -29,6 +29,8 @@ interface Summary {
 ```
 
 <small>Since 0.1.0</small>
+
+## Utils
 
 ### inputTokens
 

@@ -11,28 +11,7 @@ is an append-only log of these events, and the log is the source of truth:
 a chat client gets what its user sees of it (`ChatView`), and the model's
 history is rebuilt from it before every model call.
 
-## Other
-
-### Attachment
-
-A file the user attached to a message, by reference: the file itself is
-stored elsewhere, so the log never holds its bytes.
-
-```ts
-const Attachment = Schema.Struct({ …
-```
-
-<small>Since 0.1.0</small>
-
-### MAX_ATTACHMENTS
-
-The most files one message carries: each is a line in every prompt after it.
-
-```ts
-const MAX_ATTACHMENTS = 10 …
-```
-
-<small>Since 0.1.0</small>
+## Models
 
 ### Attachment
 
@@ -44,32 +23,132 @@ type Attachment = typeof Attachment.Type
 
 <small>Since 0.1.0</small>
 
-### formatSize
+### DecisionOutcome
 
-A byte count for people and the model: `2.1 MB`.
+How the user decided.
 
 ```ts
-const formatSize: (bytes: number) => string
+type DecisionOutcome = typeof DecisionOutcome.Type
 ```
 
 <small>Since 0.1.0</small>
 
-### attachmentLine
+### CallOrigin
 
-The line the model reads for an attachment. It names the file and never holds its content.
+A decision a tool call waits for.
 
 ```ts
-const attachmentLine: (attachment: Attachment) => string
+type CallOrigin = typeof CallOrigin.Type
 ```
 
 <small>Since 0.1.0</small>
 
-### textWithAttachments
+### Input
 
-The text of a message followed by a line per attached file.
+An input to an assistant.
 
 ```ts
-const textWithAttachments: (text: string, attachments: ReadonlyArray<Attachment> | undefined) => string
+type Input = typeof Input.Type
+```
+
+<small>Since 0.1.0</small>
+
+### UserInput
+
+An input from the chat's user.
+
+```ts
+type UserInput = typeof UserInput.Type
+```
+
+<small>Since 0.1.0</small>
+
+### ToolCallPart
+
+A tool call the model made.
+
+```ts
+type ToolCallPart = typeof ToolCallPart.Type
+```
+
+<small>Since 0.1.0</small>
+
+### ModelPart
+
+A part of a model call's output.
+
+```ts
+type ModelPart = typeof ModelPart.Type
+```
+
+<small>Since 0.1.0</small>
+
+### ToolOutcome
+
+How a tool call went.
+
+```ts
+type ToolOutcome = typeof ToolOutcome.Type
+```
+
+<small>Since 0.1.0</small>
+
+### AssistantEvent
+
+An event the library defines.
+
+```ts
+type AssistantEvent = typeof AssistantEvent.Type
+```
+
+<small>Since 0.1.0</small>
+
+### StoredAppEvent
+
+One of the app's own events, as it's stored.
+
+```ts
+type StoredAppEvent = typeof StoredAppEvent.Type
+```
+
+<small>Since 0.1.0</small>
+
+### AnyEntry
+
+A chat's entry with any event in it: the library's, or the app's own
+(decoded or not). What the folds over a chat take, so a client's typed
+entries fit too.
+
+```ts
+interface AnyEntry {
+  readonly chatId: ChatId
+  readonly seq: number
+  readonly at: number
+  readonly event: { readonly _tag: string }
+}
+```
+
+<small>Since 0.1.0</small>
+
+### Entry
+
+A stored event with its position in the chat.
+
+```ts
+type Entry = typeof Entry.Type
+```
+
+<small>Since 0.1.0</small>
+
+## Schemas
+
+### Attachment
+
+A file the user attached to a message, by reference: the file itself is
+stored elsewhere, so the log never holds its bytes.
+
+```ts
+const Attachment = Schema.Struct({ …
 ```
 
 <small>Since 0.1.0</small>
@@ -138,16 +217,6 @@ const DecisionOutcome = Schema.Literals(["approved", "declined"])
 
 <small>Since 0.1.0</small>
 
-### DecisionOutcome
-
-How the user decided.
-
-```ts
-type DecisionOutcome = typeof DecisionOutcome.Type
-```
-
-<small>Since 0.1.0</small>
-
 ### CallOrigin
 
 Schema for a decision a tool call waits for: the call, as the model wrote
@@ -155,16 +224,6 @@ it. Approving it runs exactly this call.
 
 ```ts
 const CallOrigin = Schema.TaggedStruct("Call", { …
-```
-
-<small>Since 0.1.0</small>
-
-### CallOrigin
-
-A decision a tool call waits for.
-
-```ts
-type CallOrigin = typeof CallOrigin.Type
 ```
 
 <small>Since 0.1.0</small>
@@ -208,16 +267,6 @@ const Input = Schema.Union([UserMessage, BlockAnswer, SpecialistFinished])
 
 <small>Since 0.1.0</small>
 
-### Input
-
-An input to an assistant.
-
-```ts
-type Input = typeof Input.Type
-```
-
-<small>Since 0.1.0</small>
-
 ### UserInput
 
 Schema for the inputs from the chat's user: messages and block answers. A
@@ -226,16 +275,6 @@ submit; the app's events come from the server.
 
 ```ts
 const UserInput = Schema.Union([UserMessage, BlockAnswer])
-```
-
-<small>Since 0.1.0</small>
-
-### UserInput
-
-An input from the chat's user.
-
-```ts
-type UserInput = typeof UserInput.Type
 ```
 
 <small>Since 0.1.0</small>
@@ -283,16 +322,6 @@ const ToolCallPart = Schema.Struct({ …
 
 <small>Since 0.1.0</small>
 
-### ToolCallPart
-
-A tool call the model made.
-
-```ts
-type ToolCallPart = typeof ToolCallPart.Type
-```
-
-<small>Since 0.1.0</small>
-
 ### ModelPart
 
 Schema for what the log keeps of a model call: `effect/ai`'s
@@ -301,16 +330,6 @@ thinking block's signature), and tool calls.
 
 ```ts
 const ModelPart = Schema.Union([Response.TextPart, Response.ReasoningPart, ToolCallPart])
-```
-
-<small>Since 0.1.0</small>
-
-### ModelPart
-
-A part of a model call's output.
-
-```ts
-type ModelPart = typeof ModelPart.Type
 ```
 
 <small>Since 0.1.0</small>
@@ -364,16 +383,6 @@ model reads as an error.
 
 ```ts
 const ToolOutcome = Schema.Literals(["success", "failure"])
-```
-
-<small>Since 0.1.0</small>
-
-### ToolOutcome
-
-How a tool call went.
-
-```ts
-type ToolOutcome = typeof ToolOutcome.Type
 ```
 
 <small>Since 0.1.0</small>
@@ -491,16 +500,6 @@ const AssistantEvent = Schema.Union([ …
 
 <small>Since 0.1.0</small>
 
-### AssistantEvent
-
-An event the library defines.
-
-```ts
-type AssistantEvent = typeof AssistantEvent.Type
-```
-
-<small>Since 0.1.0</small>
-
 ### AppTag
 
 Schema for the tag of one of the app's own events: any tag but the
@@ -526,43 +525,6 @@ const StoredAppEvent = Schema.StructWithRest(Schema.Struct({ _tag: AppTag }), [ 
 
 <small>Since 0.1.0</small>
 
-### StoredAppEvent
-
-One of the app's own events, as it's stored.
-
-```ts
-type StoredAppEvent = typeof StoredAppEvent.Type
-```
-
-<small>Since 0.1.0</small>
-
-### isLibraryEvent
-
-Returns whether an event is one of the library's, not one of the app's own.
-
-```ts
-const isLibraryEvent: (event: { readonly _tag: string }) => event is AssistantEvent
-```
-
-<small>Since 0.1.0</small>
-
-### AnyEntry
-
-A chat's entry with any event in it: the library's, or the app's own
-(decoded or not). What the folds over a chat take, so a client's typed
-entries fit too.
-
-```ts
-interface AnyEntry {
-  readonly chatId: ChatId
-  readonly seq: number
-  readonly at: number
-  readonly event: { readonly _tag: string }
-}
-```
-
-<small>Since 0.1.0</small>
-
 ### Entry
 
 Schema for a stored event with its position in the chat. `seq` starts at 1
@@ -574,12 +536,14 @@ const Entry = Schema.Struct({ …
 
 <small>Since 0.1.0</small>
 
-### Entry
+## Guards
 
-A stored event with its position in the chat.
+### isLibraryEvent
+
+Returns whether an event is one of the library's, not one of the app's own.
 
 ```ts
-type Entry = typeof Entry.Type
+const isLibraryEvent: (event: { readonly _tag: string }) => event is AssistantEvent
 ```
 
 <small>Since 0.1.0</small>
@@ -623,6 +587,48 @@ Returns whether an event ends a turn, and so says how far the assistant has read
 
 ```ts
 const isTurnEnd: (event: { readonly _tag: string }) => event is TurnCompleted | TurnFailed
+```
+
+<small>Since 0.1.0</small>
+
+## Utils
+
+### MAX_ATTACHMENTS
+
+The most files one message carries: each is a line in every prompt after it.
+
+```ts
+const MAX_ATTACHMENTS = 10 …
+```
+
+<small>Since 0.1.0</small>
+
+### formatSize
+
+A byte count for people and the model: `2.1 MB`.
+
+```ts
+const formatSize: (bytes: number) => string
+```
+
+<small>Since 0.1.0</small>
+
+### attachmentLine
+
+The line the model reads for an attachment. It names the file and never holds its content.
+
+```ts
+const attachmentLine: (attachment: Attachment) => string
+```
+
+<small>Since 0.1.0</small>
+
+### textWithAttachments
+
+The text of a message followed by a line per attached file.
+
+```ts
+const textWithAttachments: (text: string, attachments: ReadonlyArray<Attachment> | undefined) => string
 ```
 
 <small>Since 0.1.0</small>

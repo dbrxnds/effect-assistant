@@ -10,7 +10,22 @@ The `ToolFailure` module is the failure a tool gives the model: a message
 it reads and adapts to, like "No office named Paris", instead of a turn that
 fails.
 
-## Other
+## Constructors
+
+### fail
+
+Fails a tool's handler with a message for the model.
+
+```ts
+const fail: (
+  message: string,
+  options?: { readonly kind?: string | undefined }
+) => Effect.Effect<never, ToolFailure>
+```
+
+<small>Since 0.1.0</small>
+
+## Errors
 
 ### ToolFailure
 
@@ -22,19 +37,6 @@ class ToolFailure extends Schema.TaggedError<ToolFailure>()("ToolFailure", {
   message: Schema.String,
   kind: Schema.optional(Schema.String)
 })
-```
-
-<small>Since 0.1.0</small>
-
-### fail
-
-Fails a tool's handler with a message for the model.
-
-```ts
-const fail: (
-  message: string,
-  options?: { readonly kind?: string | undefined }
-) => Effect.Effect<never, ToolFailure>
 ```
 
 <small>Since 0.1.0</small>

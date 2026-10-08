@@ -15,7 +15,82 @@ Tools are a native toolkit (`effect/ai/Toolkit`), with its handlers from the
 handler's layer. In a turn, the assistant's own tools (`send_user_message`,
 `wait`, the specialist tools) come with them.
 
-## Other
+## Constructors
+
+### value
+
+Emits a value from a loop body.
+
+```ts
+const value = Loop.value …
+```
+
+<small>Since 0.1.0</small>
+
+### next
+
+Ends a loop body's step and goes on with this state.
+
+```ts
+const next = Loop.next …
+```
+
+<small>Since 0.1.0</small>
+
+### stop
+
+Ends the loop.
+
+```ts
+const stop = Loop.stop …
+```
+
+<small>Since 0.1.0</small>
+
+### loop
+
+Runs a loop body from a state: emits its values, and runs it again with the
+state it goes `next` with, until it `stop`s.
+
+```ts
+const loop = Loop.loop …
+```
+
+<small>Since 0.1.0</small>
+
+### step
+
+One step of the agent loop, as a body for `loop`: it calls the model
+with the current history and emits its `ModelOutput`, then runs the
+output's tool calls and emits a `ToolStarted` and a `ToolResult` for each,
+or a `DecisionRequested` for one that waits for the user's decision.
+`then` decides what comes next: `AssistantLoop.next(state)` or
+`AssistantLoop.stop()`.
+
+```ts
+const step: <T extends Record<string, Tool.Any> = NoTools, S = never, E2 = never, R2 = never>(
+  options: StepOptions<T>,
+  then: (result: StepResult) => Stream.Stream<Step<never, S>, E2, R2>
+) => Stream.Stream<Step<Event, S>, AiError.AiError | E2, LanguageModel.LanguageModel | ToolkitServices<T> | R2>
+```
+
+<small>Since 0.1.0</small>
+
+### run
+
+Runs the agent loop as a stream: `step` after step, until the model
+is done and nothing new arrived while it worked, or after `maxSteps` model
+calls.
+
+```ts
+const run: <T extends Record<string, Tool.Any> = NoTools>(
+  options: Options<T>
+) => Stream.Stream<Event, AiError.AiError, LanguageModel.LanguageModel | ToolkitServices<T>>
+```
+
+<small>Since 0.1.0</small>
+
+## Models
 
 ### Event
 
@@ -59,57 +134,6 @@ type Step<A, S> = Loop.Step<A, S>
 
 <small>Since 0.1.0</small>
 
-### value
-
-Emits a value from a loop body.
-
-```ts
-const value = Loop.value …
-```
-
-<small>Since 0.1.0</small>
-
-### next
-
-Ends a loop body's step and goes on with this state.
-
-```ts
-const next = Loop.next …
-```
-
-<small>Since 0.1.0</small>
-
-### stop
-
-Ends the loop.
-
-```ts
-const stop = Loop.stop …
-```
-
-<small>Since 0.1.0</small>
-
-### loop
-
-Runs a loop body from a state: emits its values, and runs it again with the
-state it goes `next` with, until it `stop`s.
-
-```ts
-const loop = Loop.loop …
-```
-
-<small>Since 0.1.0</small>
-
-### ToolkitServices
-
-What a toolkit's tools need when they run: their handlers, and what those use.
-
-```ts
-type ToolkitServices<T extends Record<string, Tool.Any>> = Tool.HandlersFor<T> | Toolkits.ToolServices<T>
-```
-
-<small>Since 0.1.0</small>
-
 ### StepOptions
 
 Options for `step`.
@@ -134,13 +158,17 @@ interface StepOptions<T extends Record<string, Tool.Any> = NoTools> {
   readonly toolChoice?: LanguageModel.ToolChoice<string> | undefined
 }
 
-/** Options for {@link run}. */
+/**
+ * Options for {@link run}.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface Options<T extends Record<string, Tool.Any> = NoTools> extends StepOptions<T> {
   /** Model calls allowed. Default 16. */
   readonly maxSteps?: number | undefined
 }
 
-/** The toolkit as the loop runs it, with the turn's own tools when there is a turn. */
 const toolsOf = <T extends Record<string, Tool.Any>>(toolkit: Toolkit.Toolkit<T> | undefined) =>
   Effect.map(Loop.TurnTools, (turn) => {
     const own = toolkit === undefined ? Toolkits.empty : Toolkits.fromToolkit(toolkit)
@@ -155,6 +183,9 @@ const toolsOf = <T extends Record<string, Tool.Any>>(toolkit: Toolkit.Toolkit<T>
  * or a `DecisionRequested` for one that waits for the user's decision.
  * `then` decides what comes next: `AssistantLoop.next(state)` or
  * `AssistantLoop.stop()`.
+ *
+ * @category constructors
+ * @since 0.1.0
  */
 export const step = <T extends Record<string, Tool.Any> = NoTools, S = never, E2 = never, R2 = never>(
   options: StepOptions<T>,
@@ -166,6 +197,9 @@ export const step = <T extends Record<string, Tool.Any> = NoTools, S = never, E2
  * Runs the agent loop as a stream: {@link step} after step, until the model
  * is done and nothing new arrived while it worked, or after `maxSteps` model
  * calls.
+ *
+ * @category constructors
+ * @since 0.1.0
  */
 export const run = <T extends Record<string, Tool.Any> = NoTools>(
   options: Options<T>
@@ -188,34 +222,14 @@ interface Options<T extends Record<string, Tool.Any> = NoTools> extends StepOpti
 
 <small>Since 0.1.0</small>
 
-### step
+## Utility types
 
-One step of the agent loop, as a body for `loop`: it calls the model
-with the current history and emits its `ModelOutput`, then runs the
-output's tool calls and emits a `ToolStarted` and a `ToolResult` for each,
-or a `DecisionRequested` for one that waits for the user's decision.
-`then` decides what comes next: `AssistantLoop.next(state)` or
-`AssistantLoop.stop()`.
+### ToolkitServices
+
+What a toolkit's tools need when they run: their handlers, and what those use.
 
 ```ts
-const step: <T extends Record<string, Tool.Any> = NoTools, S = never, E2 = never, R2 = never>(
-  options: StepOptions<T>,
-  then: (result: StepResult) => Stream.Stream<Step<never, S>, E2, R2>
-) => Stream.Stream<Step<Event, S>, AiError.AiError | E2, LanguageModel.LanguageModel | ToolkitServices<T> | R2>
-```
-
-<small>Since 0.1.0</small>
-
-### run
-
-Runs the agent loop as a stream: `step` after step, until the model
-is done and nothing new arrived while it worked, or after `maxSteps` model
-calls.
-
-```ts
-const run: <T extends Record<string, Tool.Any> = NoTools>(
-  options: Options<T>
-) => Stream.Stream<Event, AiError.AiError, LanguageModel.LanguageModel | ToolkitServices<T>>
+type ToolkitServices<T extends Record<string, Tool.Any>> = Tool.HandlersFor<T> | Toolkits.ToolServices<T>
 ```
 
 <small>Since 0.1.0</small>

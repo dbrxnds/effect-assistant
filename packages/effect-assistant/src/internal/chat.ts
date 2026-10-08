@@ -1,7 +1,3 @@
-/**
- * One chat of an assistant: its writer, its turns, and its specialist runs.
- * Both engines run chats with this.
- */
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
@@ -31,7 +27,6 @@ import * as Specialists from "./specialists.ts"
 import * as Turns from "./turns.ts"
 import type { Writer } from "./writer.ts"
 
-/** An input's id: the library's inputs have one, and the app's may. */
 const idOf = (event: { readonly _tag: string }): string | undefined =>
   AssistantEvent.isLibraryEvent(event)
     ? AssistantEvent.isInput(event)
@@ -41,15 +36,8 @@ const idOf = (event: { readonly _tag: string }): string | undefined =>
       ? event.id
       : undefined
 
-/** The chat's live entries, for its subscribers; shut down with the chat. */
 const makeChannelPubSub = Effect.acquireRelease(PubSub.unbounded<AssistantEvent.Entry>(), PubSub.shutdown)
 
-/**
- * Returns `holding`: runs an effect while holding the chat's keep-alive. The
- * first hold turns it on and the last one out turns it off. An effect that's
- * interrupted (a shutdown) keeps its hold, so the chat starts again and
- * picks up where it was cut off.
- */
 const makeHolding = Effect.fnUntraced(function* (keepAlive: (enabled: boolean) => Effect.Effect<void>) {
   const holds = yield* SynchronizedRef.make(0)
 
@@ -79,34 +67,24 @@ const makeHolding = Effect.fnUntraced(function* (keepAlive: (enabled: boolean) =
     Effect.acquireUseRelease(
       acquire,
       () => effect,
+      // An interrupted effect (a shutdown) keeps its hold, so the chat starts again and picks up where it was cut off.
       (_, exit) => (Exit.hasInterrupts(exit) ? Effect.void : release)
     )
 })
 
-/** One open chat of an assistant: what the engines do with it. */
+/** @internal */
 export interface Chat {
-  /** Stores the input, then runs turns until nothing is pending. */
   readonly submit: (input: AssistantEvent.Input | AssistantEvent.StoredAppEvent) => Effect.Effect<void>
-  /** Stores the input, and runs turns for it in the background. */
   readonly submitInBackground: (input: AssistantEvent.Input | AssistantEvent.StoredAppEvent) => Effect.Effect<void>
-  /**
-   * Runs turns in the background for inputs no turn has read, like a report stored during a shutdown.
-   */
+  // For inputs no turn has read, like a report stored during a shutdown.
   readonly resume: Effect.Effect<void>
-  /**
-   * The chat's entries after `after` (all of them by default), then new ones as they're appended.
-   */
   readonly stream: (after: number) => Stream.Stream<AssistantEvent.Entry>
-  /**
-   * Deletes the chat: stores a `ChatDeleted`, stops what works in it, and ends its subscribers' streams. Its log
-   * stays.
-   */
+  // Stops what works in the chat and ends its subscribers' streams; its log stays.
   readonly delete: Effect.Effect<void>
 }
 
 const isChatDeleted = (entry: AssistantEvent.Entry) => Predicate.isTagged(entry.event, "ChatDeleted")
 
-/** A chat whose log ends in `ChatDeleted`: it streams its log, and takes nothing. */
 const deletedChat = (entries: ReadonlyArray<AssistantEvent.Entry>): Chat => ({
   submit: () => Effect.void,
   submitInBackground: () => Effect.void,
@@ -118,10 +96,7 @@ const deletedChat = (entries: ReadonlyArray<AssistantEvent.Entry>): Chat => ({
 const refused = (input: { readonly _tag: string }, why: string) =>
   Effect.logDebug(`assistant chat ${why}: ${input._tag} not stored`)
 
-/**
- * Opens one chat of an assistant, in the current scope: runs the handlers'
- * builds, and returns how to submit to it and stream it.
- */
+/** @internal */
 export const make = Effect.fnUntraced(function* (options: {
   readonly registration: Turns.Registration
   readonly chatId: ChatId
@@ -138,12 +113,12 @@ export const make = Effect.fnUntraced(function* (options: {
 
   const channel = yield* makeChannelPubSub
   const writes = yield* Semaphore.make(1)
-  // Inputs are stored one at a time, with the decisions they make: an answer checks the decisions the last one made.
+  // Inputs are stored one at a time with the decisions they make: an answer checks the decisions the last one made.
   const storing = yield* Semaphore.make(1)
   const turnsLock = yield* Semaphore.make(1)
   const holding = yield* makeHolding(options.keepAlive)
   const deleted = yield* Deferred.make<undefined>()
-  // What works in the chat, so deleting it stops all of it: its turns, runs, and the builds' resources.
+  // So deleting the chat stops all its work: its turns, runs, and the builds' resources.
   const working = yield* Scope.fork(yield* Effect.scope)
   const inWorking = Effect.provideService(Scope.Scope, working)
   const background = yield* inWorking(FiberSet.make())
@@ -151,11 +126,11 @@ export const make = Effect.fnUntraced(function* (options: {
 
   const isDeleted = Deferred.isDone(deleted)
 
-  // The chat is its log's only writer, so it reads the log once and keeps the entries: a turn reads memory.
+  // The chat is its log's only writer, so it reads the log once and turns read memory.
   const entries = yield* Ref.make(initial)
 
-  // Every writer (the turn's loop, specialist runs, a handler's own appends) goes through here, one at a time: each
-  // append is numbered after the last, and its entries go to the chat's subscribers. After a delete it stores nothing.
+  // Every writer goes through here, one at a time, so each append is numbered after the last. After a delete it
+  // stores nothing.
   const write = Effect.fnUntraced(function* (
     events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>
   ) {
@@ -188,7 +163,6 @@ export const make = Effect.fnUntraced(function* (options: {
     append: (events) => Semaphore.withPermit(writes)(write(events))
   }
 
-  /** An event as the log stores it: the library's as it is, the assistant's own encoded. */
   const toStored = (event: {
     readonly _tag: string
   }): Effect.Effect<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent> =>
@@ -198,24 +172,21 @@ export const make = Effect.fnUntraced(function* (options: {
         ? AppEvents.encode(app, event)
         : Effect.die(`${event._tag} isn't one of the ${registration.definition.name} assistant's events.`)
 
-  // The chat as handlers, tools, and runs get it: the assistant's own events decoded, and encoded when appended.
+  // What handlers, tools, and runs see: the assistant's own events decoded, and encoded when appended.
   const handle = AssistantChat.of({
     chatId,
     entries: Effect.map(chat.entries, (all) => AppEvents.decodeEntries(app, all)),
     append: (...events) => Effect.asVoid(Effect.flatMap(Effect.forEach(events, toStored), chat.append))
   })
 
-  /** Records what an answer decided: an approved call runs at the turn's next step. */
+  // An approved call runs at the turn's next step.
   const resolve = Effect.fnUntraced(function* (decided: ReadonlyArray<Decisions.Decided>, answer: InputId) {
     yield* chat.append(
       decided.map(({ request, outcome }) => AssistantEvent.DecisionResolved.make({ id: request.id, outcome, answer }))
     )
   })
 
-  /**
-   * Whether the app has the chat (`Chats`). One it deleted is deleted here too, which stops what works in it: a
-   * turn that asks stops there.
-   */
+  // A chat the app deleted is deleted here too, which stops what works in it: a turn that checks stops there.
   const checkAvailable: Effect.Effect<boolean> = chats.get(chatId).pipe(
     Effect.as(true),
     Effect.catchTag("GetChatError", (unavailable) =>
@@ -228,11 +199,7 @@ export const make = Effect.fnUntraced(function* (options: {
     )
   )
 
-  /**
-   * Stores the input unless an input with its id is already stored, the chat is deleted or unavailable, or the chat
-   * refuses it: a decision answer that doesn't fit its block or what's still waiting. A decision answer's decisions
-   * are resolved before the next input.
-   */
+  // Under `storing`: an answer's decisions are resolved before the next input is stored.
   const store = Effect.fnUntraced(function* (input: AssistantEvent.Input | AssistantEvent.StoredAppEvent) {
     if (yield* isDeleted) return yield* refused(input, "is deleted")
 
@@ -278,8 +245,7 @@ export const make = Effect.fnUntraced(function* (options: {
     { discard: true }
   )
 
-  // The handlers' builds run now, in the chat's working scope: what they set up lives until the chat closes or is
-  // deleted.
+  // The handlers' builds run in the chat's working scope: what they set up lives until the chat closes or is deleted.
   const handler = yield* inWorking(Effect.provideService(registration.open, AssistantChat, handle))
 
   const specialists = yield* Effect.forEach(
@@ -303,7 +269,6 @@ export const make = Effect.fnUntraced(function* (options: {
     }
   }, Effect.orDie)
 
-  /** Runs turns, one at a time, until no input is left unhandled. */
   const drain: Effect.Effect<void> = Semaphore.withPermit(turnsLock)(
     Effect.gen(function* () {
       while (!(yield* isDeleted) && History.needsTurn(yield* chat.entries, wakes)) {

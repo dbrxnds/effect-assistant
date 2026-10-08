@@ -9,7 +9,42 @@ import { AssistantActivity } from "effect-assistant"
 The `AssistantActivity` module says what is working in a chat right now,
 read from its log: the assistant's turn, and specialist runs.
 
-## Other
+## Constructors
+
+### empty
+
+Nothing working: a chat with an empty log.
+
+```ts
+const empty: Activity
+```
+
+<small>Since 0.1.0</small>
+
+### fromEntries
+
+Returns what is working after these entries.
+
+```ts
+const fromEntries: (entries: ReadonlyArray<AssistantEvent.AnyEntry>, options?: Options) => Activity
+```
+
+<small>Since 0.1.0</small>
+
+## Combinators
+
+### apply
+
+Returns the activity after one more entry. Fold a chat's entries in order,
+or use `fromEntries`.
+
+```ts
+const apply: (activity: Activity, entry: AssistantEvent.AnyEntry, options?: Options) => Activity
+```
+
+<small>Since 0.1.0</small>
+
+## Models
 
 ### SpecialistRun
 
@@ -25,7 +60,12 @@ interface SpecialistRun {
   readonly since: number
 }
 
-/** What is working in a chat. */
+/**
+ * What is working in a chat.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface Activity {
   /** When the running turn started, in epoch milliseconds; `undefined` when no turn runs. */
   readonly turnSince: number | undefined
@@ -56,7 +96,12 @@ interface Activity {
   readonly specialists: ReadonlyMap<RunId, SpecialistRun>
 }
 
-/** Nothing working: a chat with an empty log. */
+/**
+ * Nothing working: a chat with an empty log.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
 export const empty: Activity = {
   turnSince: undefined,
   queued: false,
@@ -73,21 +118,16 @@ const withoutRun = (activity: Activity, runId: RunId): Activity => {
   return { ...activity, specialists }
 }
 
-/** Options for folding activity. */
+/**
+ * Options for folding activity.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface Options {
   /** The tags of the app's events that wake a turn (see `AppEvent`): inputs too. Default: none. */
   readonly wakes?: ReadonlySet<string> | undefined
 }
-```
-
-<small>Since 0.1.0</small>
-
-### empty
-
-Nothing working: a chat with an empty log.
-
-```ts
-const empty: Activity
 ```
 
 <small>Since 0.1.0</small>
@@ -105,6 +145,9 @@ interface Options {
 /**
  * Returns the activity after one more entry. Fold a chat's entries in order,
  * or use {@link fromEntries}.
+ *
+ * @category combinators
+ * @since 0.1.0
  */
 export const apply = (activity: Activity, entry: AssistantEvent.AnyEntry, options?: Options): Activity => {
   const event = entry.event
@@ -143,13 +186,21 @@ export const apply = (activity: Activity, entry: AssistantEvent.AnyEntry, option
   )
 }
 
-/** Returns what is working after these entries. */
+/**
+ * Returns what is working after these entries.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
 export const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, options?: Options): Activity =>
   entries.reduce((activity, entry) => apply(activity, entry, options), empty)
 
 /**
  * Returns whether anything is working: a turn (or one about to start), or a
  * specialist run.
+ *
+ * @category guards
+ * @since 0.1.0
  */
 export const isWorking = (activity: Activity): boolean =>
   activity.turnSince !== undefined || activity.queued || activity.specialists.size > 0
@@ -157,26 +208,7 @@ export const isWorking = (activity: Activity): boolean =>
 
 <small>Since 0.1.0</small>
 
-### apply
-
-Returns the activity after one more entry. Fold a chat's entries in order,
-or use `fromEntries`.
-
-```ts
-const apply: (activity: Activity, entry: AssistantEvent.AnyEntry, options?: Options) => Activity
-```
-
-<small>Since 0.1.0</small>
-
-### fromEntries
-
-Returns what is working after these entries.
-
-```ts
-const fromEntries: (entries: ReadonlyArray<AssistantEvent.AnyEntry>, options?: Options) => Activity
-```
-
-<small>Since 0.1.0</small>
+## Guards
 
 ### isWorking
 

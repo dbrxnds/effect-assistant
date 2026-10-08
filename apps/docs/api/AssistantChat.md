@@ -10,7 +10,7 @@ The `AssistantChat` module gives code that runs in a chat that chat: its
 id, its entries, and a way to add to it. A turn's handler, its tools, and
 its specialists' runs get it with `yield* AssistantChat`.
 
-## Other
+## Services
 
 ### AssistantChat
 

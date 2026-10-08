@@ -1,6 +1,8 @@
 /**
  * The `ChatLog` module stores each chat as an append-only list of
  * `AssistantEvent`s.
+ *
+ * @since 0.1.0
  */
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
@@ -13,7 +15,12 @@ import * as SqlClient from "effect/sql/SqlClient"
 import * as AssistantEvent from "./AssistantEvent.ts"
 import { ChatId } from "./ChatId.ts"
 
-/** Service that stores each chat's events. */
+/**
+ * Service that stores each chat's events.
+ *
+ * @category services
+ * @since 0.1.0
+ */
 export class ChatLog extends Context.Service<
   ChatLog,
   {
@@ -31,7 +38,12 @@ export class ChatLog extends Context.Service<
   }
 >()("effect-assistant/ChatLog") {}
 
-/** Which of a chat's entries to read. */
+/**
+ * Which of a chat's entries to read.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface ReadOptions {
   /** Only the entries after this `seq`. */
   readonly after?: number | undefined
@@ -41,6 +53,9 @@ export interface ReadOptions {
  * The storage a `ChatLog` is built on: read a chat, find its last `seq`,
  * write new entries, and find every chat's last entry. Entries are never
  * removed: a deleted chat keeps its log, ending in `ChatDeleted`.
+ *
+ * @category models
+ * @since 0.1.0
  */
 export interface Storage {
   readonly read: (chatId: ChatId, options?: ReadOptions) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
@@ -50,24 +65,29 @@ export interface Storage {
   readonly lastEntries: Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
 }
 
-/** Creates a `ChatLog` from a {@link Storage}. */
+/**
+ * Creates a `ChatLog` from a {@link Storage}.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
 export const make = (storage: Storage): ChatLog["Service"] =>
   ChatLog.of({
     read: storage.read,
-    append: Effect.fn("ChatLog.append")(function* (
-      chatId: ChatId,
-      events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>
-    ) {
-      if (events.length === 0) return []
+    append: Effect.fnUntraced(
+      function* (chatId: ChatId, events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>) {
+        if (events.length === 0) return []
 
-      const seq = yield* storage.lastSeq(chatId)
-      const at = yield* Clock.currentTimeMillis
-      const entries = events.map((event, n) => AssistantEvent.Entry.make({ chatId, seq: seq + n + 1, at, event }))
+        const seq = yield* storage.lastSeq(chatId)
+        const at = yield* Clock.currentTimeMillis
+        const entries = events.map((event, n) => AssistantEvent.Entry.make({ chatId, seq: seq + n + 1, at, event }))
 
-      yield* storage.write(chatId, entries)
+        yield* storage.write(chatId, entries)
 
-      return entries
-    }),
+        return entries
+      },
+      (effect) => Effect.withSpan(effect, "ChatLog.append", { captureStackTrace: false })
+    ),
     unfinished: Effect.gen(function* () {
       const last = yield* storage.lastEntries
 
@@ -78,7 +98,12 @@ export const make = (storage: Storage): ChatLog["Service"] =>
     })
   })
 
-/** Layer that keeps every chat in memory. */
+/**
+ * Layer that keeps every chat in memory.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
 export const layerMemory: Layer.Layer<ChatLog> = Layer.effect(
   ChatLog,
   Effect.gen(function* () {
@@ -118,6 +143,9 @@ const decodeLastSeq = Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ se
 /**
  * Layer that stores chats in a SQL table, `chat_log` (`chat_id`, `seq`, `at`,
  * `event`; primary key `chat_id, seq`), which must exist.
+ *
+ * @category layers
+ * @since 0.1.0
  */
 export const layerSql: Layer.Layer<ChatLog, never, SqlClient.SqlClient> = Layer.effect(
   ChatLog,

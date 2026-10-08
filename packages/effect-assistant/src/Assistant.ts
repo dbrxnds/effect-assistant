@@ -1,4 +1,8 @@
-/** The `Assistant` module defines assistants: colleagues in a chat. */
+/**
+ * The `Assistant` module defines assistants: colleagues in a chat.
+ *
+ * @since 0.1.0
+ */
 import type * as AiError from "effect/ai/AiError"
 import type * as LanguageModel from "effect/ai/LanguageModel"
 import type * as Prompt from "effect/ai/Prompt"
@@ -29,10 +33,18 @@ import type * as Specialist from "./Specialist.ts"
 /**
  * Services a turn provides to its tools, loop, and specialists: its chat, and
  * the chat's specialist runner.
+ *
+ * @category utility types
+ * @since 0.1.0
  */
 export type TurnServices = AssistantChat | Specialist.Runner
 
-/** Options for `turn.loop`. */
+/**
+ * Options for `turn.loop`.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface LoopOptions<T extends Record<string, Tool.Any> = Record<never, never>, RS = never, Events = never> {
   /** The assistant's role and rules. `Instructions.protocol` goes before them. */
   readonly instructions: string | Instructions.Resolved
@@ -57,12 +69,20 @@ export interface LoopOptions<T extends Record<string, Tool.Any> = Record<never, 
  * Which of a chat's entries the model reads, and what else goes with them:
  * returns entries (the model reads them as usual) and prompt messages (it
  * reads them as they are), in order.
+ *
+ * @category models
+ * @since 0.1.0
  */
 export type HistoryView<Events = never> = (
   entries: ReadonlyArray<Entry<Events>>
 ) => ReadonlyArray<Entry<Events> | Prompt.Message>
 
-/** A chat's entry, with the assistant's own events decoded to their types. */
+/**
+ * A chat's entry, with the assistant's own events decoded to their types.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface Entry<Events = never> {
   readonly chatId: ChatId
   readonly seq: number
@@ -70,7 +90,12 @@ export interface Entry<Events = never> {
   readonly event: AssistantEvent.AssistantEvent | Events
 }
 
-/** Options for `turn.replyIfOwed`. */
+/**
+ * Options for `turn.replyIfOwed`.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface ReplyOptions {
   /** The assistant's instructions, as for `turn.loop`: `Instructions.protocol` is added. */
   readonly instructions: string | Instructions.Resolved
@@ -83,6 +108,9 @@ export interface ReplyOptions {
 /**
  * One turn, as the assistant's handler sees it. `Events` are the app's own
  * events the assistant registered (its `events` option).
+ *
+ * @category models
+ * @since 0.1.0
  */
 export interface Turn<Events = never> {
   readonly chatId: ChatId
@@ -126,6 +154,9 @@ export interface Turn<Events = never> {
  * An assistant's handler: runs a turn, as a stream of what the loop did. It
  * may return the stream from an Effect. `R` is what the stream needs, `RE`
  * what the Effect needs.
+ *
+ * @category models
+ * @since 0.1.0
  */
 export type Handler<R = never, RE = R, Events = never> = (
   turn: Turn<Events>
@@ -137,22 +168,34 @@ export type Handler<R = never, RE = R, Events = never> = (
  * Returns what an assistant's handler needs beyond what its turns provide
  * (the turn services and `LanguageModel`) and its tools' handlers (which its
  * layer needs): what its build Effect must require.
+ *
+ * @category utility types
+ * @since 0.1.0
  */
 export type HandlerServices<R> = Exclude<R, TurnServices | LanguageModel.LanguageModel | Tool.Handler<string>>
 
-/** A handler's result as a stream: it may return the stream from an Effect. */
 const toStream = <R, RE>(
   result:
     | Stream.Stream<AssistantLoop.Event, unknown, R>
     | Effect.Effect<Stream.Stream<AssistantLoop.Event, unknown, R>, unknown, RE>
 ): Stream.Stream<AssistantLoop.Event, unknown, R | RE> => (Effect.isEffect(result) ? Stream.unwrap(result) : result)
 
-/** Identifies an assistant's service in a context: one per assistant, by its name. */
+/**
+ * Identifies an assistant's service in a context: one per assistant, by its name.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface Identifier<Name extends string> {
   readonly "~effect-assistant/Assistant": Name
 }
 
-/** Identifies an assistant's chat in a context: the one its turns run in. */
+/**
+ * Identifies an assistant's chat in a context: the one its turns run in.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface ChatIdentifier<Name extends string> {
   readonly "~effect-assistant/Assistant/Chat": Name
 }
@@ -161,6 +204,9 @@ export interface ChatIdentifier<Name extends string> {
  * The chat a turn of this assistant runs in, typed with its events:
  * `yield* MyAssistant.Chat` in its handler, the handler's build, or a tool
  * its turns run. Code that doesn't know the assistant uses `AssistantChat`.
+ *
+ * @category models
+ * @since 0.1.0
  */
 export interface Chat<Events = never> {
   readonly chatId: ChatId
@@ -177,6 +223,9 @@ export interface Chat<Events = never> {
 /**
  * What `yield* MyAssistant` gives: its chats, from outside them, like a
  * server or a workflow. Code in a chat uses `AssistantChat`.
+ *
+ * @category models
+ * @since 0.1.0
  */
 export interface Service<Events = never> {
   /**
@@ -225,6 +274,9 @@ export interface Service<Events = never> {
  * An assistant's definition: what callers and the UI need to know, its
  * handler's layer, and the key of its service (`yield* MyAssistant`).
  * `Events` are the app's own events it registered.
+ *
+ * @category models
+ * @since 0.1.0
  */
 export interface Assistant<
   Name extends string = string,
@@ -268,10 +320,14 @@ export interface Assistant<
   readonly Entry: Schema.Codec<Entry<Events>, Schema.Json>
 }
 
-/** Any assistant. */
+/**
+ * Any assistant.
+ *
+ * @category utility types
+ * @since 0.1.0
+ */
 export type Any = Assistant<any, any, any>
 
-/** The entry schema for these app events, in JSON: the library's events, and the app's. */
 function entrySchema<E>(events: ReadonlyArray<AppEvent.Any>): Schema.Codec<Entry<E>, Schema.Json>
 // The overload states the decoded type: the library's events, or one of these schemas' types.
 function entrySchema(events: ReadonlyArray<AppEvent.Any>): Schema.Top {
@@ -288,6 +344,9 @@ function entrySchema(events: ReadonlyArray<AppEvent.Any>): Schema.Top {
 /**
  * Defines an assistant: its name, its UI blocks, its specialists, and the
  * app's own events it stores (see `AppEvent`).
+ *
+ * @category constructors
+ * @since 0.1.0
  */
 export const make = <
   const Name extends string,
@@ -335,7 +394,6 @@ export const make = <
   // The assistant's own events, as its schemas decode them: what its typed chat keeps of the entries.
   const isOwn = Schema.is(Schema.Union(events.map((event) => event.schema)))
 
-  /** The chat a turn runs in, typed with this assistant's events. */
   const typedChat = (chat: AssistantChat["Service"]): Chat<OwnEvents> =>
     ChatKey.of({
       chatId: chat.chatId,
@@ -353,11 +411,14 @@ export const make = <
     const chats = yield* Chats.Chats
 
     return Key.of({
-      submit: Effect.fn("Assistant.submit")(function* (chatId: ChatId, input: AssistantEvent.Input | OwnEvents) {
-        // Checked here, where the caller can handle it: the chat checks again when it stores the input.
-        yield* chats.get(chatId)
-        yield* engine.submit(name, chatId, yield* stored(input))
-      }),
+      submit: Effect.fnUntraced(
+        function* (chatId: ChatId, input: AssistantEvent.Input | OwnEvents) {
+          // Checked here, where the caller can handle it: the chat checks again when it stores the input.
+          yield* chats.get(chatId)
+          yield* engine.submit(name, chatId, yield* stored(input))
+        },
+        (effect) => Effect.withSpan(effect, "Assistant.submit", { captureStackTrace: false })
+      ),
       subscribe: (chatId, options) =>
         engine
           .subscribe(name, chatId, options?.after ?? 0)

@@ -13,7 +13,32 @@ engine: `layerMemory` runs chats in the process, for tests and one
 process; `layerCluster` runs each chat as a cluster entity, so a turn
 cut off by a crash resumes.
 
-## Other
+## Layers
+
+### layerMemory
+
+Layer that runs chats in the process. Each chat's turns are fibers, one at
+a time.
+
+```ts
+const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog>
+```
+
+<small>Since 0.1.0</small>
+
+### layerCluster
+
+Layer that runs chats as cluster entities, one per chat, keyed by chat id.
+Needs `Sharding`: a `SingleRunner` for one process with SQL storage, a
+runner of the app's cluster, or `TestRunner` in tests.
+
+```ts
+const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Sharding.Sharding>
+```
+
+<small>Since 0.1.0</small>
+
+## Services
 
 ### AssistantEngine
 
@@ -38,29 +63,6 @@ class AssistantEngine extends Context.Service<
     readonly delete: (assistant: string, chatId: ChatId) => Effect.Effect<void>
   }
 >()("effect-assistant/AssistantEngine")
-```
-
-<small>Since 0.1.0</small>
-
-### layerMemory
-
-Layer that runs chats in the process. Each chat's turns are fibers, one at
-a time.
-
-```ts
-const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog>
-```
-
-<small>Since 0.1.0</small>
-
-### layerCluster
-
-Layer that runs chats as cluster entities, one per chat, keyed by chat id.
-Needs `Sharding`: a `SingleRunner` for one process with SQL storage, a
-runner of the app's cluster, or `TestRunner` in tests.
-
-```ts
-const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Sharding.Sharding>
 ```
 
 <small>Since 0.1.0</small>

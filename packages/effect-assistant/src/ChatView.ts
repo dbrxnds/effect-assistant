@@ -1,6 +1,8 @@
 /**
  * The `ChatView` module is a chat as its user sees it: what a chat client
  * gets, and all it gets.
+ *
+ * @since 0.1.0
  */
 import * as Match from "effect/Match"
 import * as Option from "effect/Option"
@@ -18,6 +20,9 @@ import { toJson } from "./internal/schema.ts"
  * Schema for a decision as the user sees it on a decision block: the call
  * it's for (its tool and params, which the app shows as it likes), and how
  * they decided, once they did.
+ *
+ * @category schemas
+ * @since 0.1.0
  */
 export const Decision = Schema.Struct({
   id: DecisionId,
@@ -26,17 +31,30 @@ export const Decision = Schema.Struct({
   outcome: Schema.optional(AssistantEvent.DecisionOutcome)
 })
 
-/** A decision as the user sees it. */
+/**
+ * A decision as the user sees it.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export type Decision = typeof Decision.Type
 
 /**
  * Schema for where a block stands: `"open"` while it takes an answer,
  * `"answered"` once the user used it, `"closed"` when it closed without an
  * answer (the user answered in words, or moved on).
+ *
+ * @category schemas
+ * @since 0.1.0
  */
 export const BlockStatus = Schema.Literals(["open", "answered", "closed"])
 
-/** Where a block stands. */
+/**
+ * Where a block stands.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export type BlockStatus = typeof BlockStatus.Type
 
 /**
@@ -44,6 +62,9 @@ export type BlockStatus = typeof BlockStatus.Type
  * as the block's props schema encodes them), where it stands, the user's
  * answer (in JSON, as its answer schema encodes it), and, for a decision
  * block, its decisions.
+ *
+ * @category schemas
+ * @since 0.1.0
  */
 export const Block = Schema.Struct({
   kind: Schema.String,
@@ -53,12 +74,20 @@ export const Block = Schema.Struct({
   decisions: Schema.optional(Schema.Array(Decision))
 })
 
-/** A block on an assistant's message. */
+/**
+ * A block on an assistant's message.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export type Block = typeof Block.Type
 
 /**
  * Schema for a message the user sent. `at` is when it was stored, in epoch
  * milliseconds.
+ *
+ * @category schemas
+ * @since 0.1.0
  */
 export const UserMessage = Schema.TaggedStruct("UserMessage", {
   id: InputId,
@@ -67,12 +96,20 @@ export const UserMessage = Schema.TaggedStruct("UserMessage", {
   at: Schema.Finite
 })
 
-/** A message the user sent. */
+/**
+ * A message the user sent.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export type UserMessage = typeof UserMessage.Type
 
 /**
  * Schema for a message the assistant sent the user, with its block, if it
  * has one.
+ *
+ * @category schemas
+ * @since 0.1.0
  */
 export const AssistantMessage = Schema.TaggedStruct("AssistantMessage", {
   id: Schema.String,
@@ -81,44 +118,78 @@ export const AssistantMessage = Schema.TaggedStruct("AssistantMessage", {
   block: Schema.optional(Block)
 })
 
-/** A message the assistant sent the user. */
+/**
+ * A message the assistant sent the user.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export type AssistantMessage = typeof AssistantMessage.Type
 
-/** Schema for a message in the chat: the user's or the assistant's. */
+/**
+ * Schema for a message in the chat: the user's or the assistant's.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
 export const Message = Schema.Union([UserMessage, AssistantMessage])
 
-/** A message in the chat. */
+/**
+ * A message in the chat.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export type Message = typeof Message.Type
 
 /**
  * Schema for a specialist that works for the assistant: which one, and
  * since when (epoch milliseconds).
+ *
+ * @category schemas
+ * @since 0.1.0
  */
 export const SpecialistWorking = Schema.Struct({
   specialist: Schema.String,
   since: Schema.Finite
 })
 
-/** A specialist that works for the assistant. */
+/**
+ * A specialist that works for the assistant.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export type SpecialistWorking = typeof SpecialistWorking.Type
 
 /**
  * Schema for what works in the chat: the assistant (a turn, or one about to
  * start, for something that arrived), and its specialists. Nothing works
  * when the chat is idle, even if a workflow waits on a timer or a decision.
+ *
+ * @category schemas
+ * @since 0.1.0
  */
 export const Activity = Schema.Struct({
   working: Schema.Boolean,
   specialists: Schema.Array(SpecialistWorking)
 })
 
-/** What works in the chat. */
+/**
+ * What works in the chat.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export type Activity = typeof Activity.Type
 
 /**
  * Schema for a chat as its user sees it: its messages, what works in it,
  * whether the last turn failed, and whether the chat was deleted. `seq` is
  * how far into the chat's log it is.
+ *
+ * @category schemas
+ * @since 0.1.0
  */
 export const View = Schema.Struct({
   seq: Schema.Int,
@@ -130,7 +201,12 @@ export const View = Schema.Struct({
   deleted: Schema.Boolean
 })
 
-/** A chat as its user sees it. */
+/**
+ * A chat as its user sees it.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export type View = typeof View.Type
 
 /**
@@ -138,6 +214,9 @@ export type View = typeof View.Type
  * changed (a block answered or closed, a decision decided), whole, and what
  * works in the chat, whether the last turn failed, and whether the chat was
  * deleted, now. `seq` is how far into the log it is.
+ *
+ * @category schemas
+ * @since 0.1.0
  */
 export const Update = Schema.Struct({
   seq: Schema.Int,
@@ -147,10 +226,20 @@ export const Update = Schema.Struct({
   deleted: Schema.Boolean
 })
 
-/** A change to a chat's view. */
+/**
+ * A change to a chat's view.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export type Update = typeof Update.Type
 
-/** A chat before anything happened in it: no messages, and nothing working. */
+/**
+ * A chat before anything happened in it: no messages, and nothing working.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
 export const empty: View = {
   seq: 0,
   messages: [],
@@ -162,6 +251,9 @@ export const empty: View = {
 /**
  * Returns the view after an update: its messages replace the ones with
  * their ids, in place, and the new ones go after the rest.
+ *
+ * @category combinators
+ * @since 0.1.0
  */
 export const apply = (view: View, update: Update): View => {
   const changed = new Map(update.messages.map((message) => [message.id, message]))
@@ -179,10 +271,20 @@ export const apply = (view: View, update: Update): View => {
   }
 }
 
-/** Returns whether nothing works in the chat: no turn, and no specialist. */
+/**
+ * Returns whether nothing works in the chat: no turn, and no specialist.
+ *
+ * @category guards
+ * @since 0.1.0
+ */
 export const isIdle = (view: View): boolean => !view.activity.working && view.activity.specialists.length === 0
 
-/** Options for a view of a chat's log. */
+/**
+ * Options for a view of a chat's log.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface Options {
   /**
    * The tags of the app's events that wake a turn: a turn is about to start after one. Default: none.
@@ -194,6 +296,9 @@ export interface Options {
  * Returns a chat's view from its log's entries, for server-side code: a
  * client gets it from `MyAssistant.subscribeView`, which knows the
  * assistant's events.
+ *
+ * @category constructors
+ * @since 0.1.0
  */
 export const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, options?: Options): View => {
   const fold = folding(options?.wakes ?? new Set())
@@ -203,11 +308,8 @@ export const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, opt
   return fold.view
 }
 
-/** A fold over one chat's log, one entry at a time. */
 interface Folding {
-  /** Folds one more entry, and returns what changed for the user, if anything did. */
   readonly step: (entry: AssistantEvent.AnyEntry) => Update | undefined
-  /** The whole view so far. */
   readonly view: View
 }
 
@@ -232,7 +334,6 @@ const sameActivity = (a: Activity, b: Activity) =>
     return other !== undefined && run.specialist === other.specialist && run.since === other.since
   })
 
-/** The decisions a decision block asks for. */
 const decisionIds = (block: AssistantEvent.MessageBlock): ReadonlyArray<string> =>
   block.kind === Decisions.kind
     ? Option.match(decodeProps(block.props), {
@@ -241,7 +342,6 @@ const decisionIds = (block: AssistantEvent.MessageBlock): ReadonlyArray<string> 
       })
     : []
 
-/** Starts a fold over a chat's log. `wakes` are the tags of the app's events that wake a turn. */
 const folding = (wakes: ReadonlySet<string>): Folding => {
   let seq = 0
   let failed = false
@@ -287,7 +387,6 @@ const folding = (wakes: ReadonlySet<string>): Folding => {
       : AssistantMessage.make({ id: message.id, text: message.text, at, block })
   }
 
-  /** The messages an event changes for the user, by id. */
   const touched = (event: AssistantEvent.AssistantEvent, at: number): ReadonlyArray<string> =>
     Match.value(event).pipe(
       Match.tagsExhaustive({
@@ -400,9 +499,6 @@ const folding = (wakes: ReadonlySet<string>): Folding => {
   }
 }
 
-/**
- * One update for several: their messages, each as it is in the last one that has it, and the last one's activity.
- */
 const merge = (updates: ReadonlyArray<Update>): Update | undefined => {
   const last = updates.at(-1)
 
@@ -426,6 +522,9 @@ const merge = (updates: ReadonlyArray<Update>): Update | undefined => {
  * log (as `MyAssistant.subscribe` streams them): the ones after `after`, each
  * chunk of entries (like the stored ones, which come at once) as one update.
  * `MyAssistant.subscribeView` is this over the assistant's log.
+ *
+ * @category utils
+ * @since 0.1.0
  */
 export const updates = <E, R>(
   entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,

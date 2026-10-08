@@ -10,18 +10,26 @@ The `Block` module defines UI blocks: a bit of UI the assistant can put in a
 message when a structured answer is easier than typing, such as options to
 pick from, approve/deny, or a small input.
 
-## Other
+## Constructors
 
-### Codec
+### make
 
-A schema a block's props or answer can use: any codec that needs no
-services, since the client decodes and encodes with it too.
+Creates a block.
 
 ```ts
-type Codec = Schema.Codec<any, any>
+const make: <const Kind extends string, Props extends Codec, Answer extends Codec = Schema.Never>(
+  kind: Kind,
+  options: {
+    readonly description: string
+    readonly props: Props
+    readonly answer?: Answer | undefined
+  }
+) => Block<Kind, Props, Answer>
 ```
 
 <small>Since 0.1.0</small>
+
+## Models
 
 ### Block
 
@@ -41,29 +49,25 @@ interface Block<Kind extends string = string, Props extends Codec = Codec, Answe
 
 <small>Since 0.1.0</small>
 
+## Utility types
+
+### Codec
+
+A schema a block's props or answer can use: any codec that needs no
+services, since the client decodes and encodes with it too.
+
+```ts
+type Codec = Schema.Codec<any, any>
+```
+
+<small>Since 0.1.0</small>
+
 ### Any
 
 Any block, for generic constraints.
 
 ```ts
 type Any = Block
-```
-
-<small>Since 0.1.0</small>
-
-### make
-
-Creates a block.
-
-```ts
-const make: <const Kind extends string, Props extends Codec, Answer extends Codec = Schema.Never>(
-  kind: Kind,
-  options: {
-    readonly description: string
-    readonly props: Props
-    readonly answer?: Answer | undefined
-  }
-) => Block<Kind, Props, Answer>
 ```
 
 <small>Since 0.1.0</small>

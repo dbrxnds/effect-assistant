@@ -9,7 +9,19 @@ import { Skill } from "effect-assistant"
 The `Skill` module defines playbooks: step-by-step instructions for a kind
 of task.
 
-## Other
+## Constructors
+
+### make
+
+Creates a skill.
+
+```ts
+const make: <R = never>(skill: Skill<R>) => Skill<R>
+```
+
+<small>Since 0.1.0</small>
+
+## Models
 
 ### Skill
 
@@ -27,15 +39,7 @@ interface Skill<R = never> {
 
 <small>Since 0.1.0</small>
 
-### make
-
-Creates a skill.
-
-```ts
-const make: <R = never>(skill: Skill<R>) => Skill<R>
-```
-
-<small>Since 0.1.0</small>
+## Utility types
 
 ### Services
 
@@ -46,6 +50,8 @@ type Services<S> = S extends Skill<infer R> ? R : never
 ```
 
 <small>Since 0.1.0</small>
+
+## Utils
 
 ### withCatalog
 
