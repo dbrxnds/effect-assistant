@@ -12,12 +12,8 @@ export const InputId = Schema.String.pipe(Schema.brand("effect-assistant/InputId
 /** An input id. */
 export type InputId = typeof InputId.Type
 
-/** Creates a new random input id, with Effect's `Random`. */
-export const make: Effect.Effect<InputId> = Effect.gen(function* () {
-  const uuid = yield* Uuid.make
-
-  return InputId.make(uuid)
-})
+/** Creates a new random input id, with Effect's `Random`: seed it in tests for the same ids every run. */
+export const make = (): Effect.Effect<InputId> => Effect.map(Uuid.make, (uuid) => InputId.make(uuid))
 
 /**
  * Creates the input id for a key, like `${runId}:order_placed`: the same key

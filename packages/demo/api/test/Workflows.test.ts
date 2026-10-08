@@ -85,7 +85,7 @@ describe("CreateCampaign", () => {
   it.live("goes live and reports first results", () =>
     Effect.gen(function* () {
       yield* Effect.gen(function* () {
-        const chatId = yield* ChatId.make
+        const chatId = yield* ChatId.make()
         yield* startCampaign(chatId)
         yield* waitFor(chatId, "first_results")
 
@@ -104,7 +104,7 @@ describe("PrintOrder", () => {
   it.live("reports confirmed, printing, shipped with tracking, and delivered, and updates the order", () =>
     Effect.gen(function* () {
       yield* Effect.gen(function* () {
-        const chatId = yield* ChatId.make
+        const chatId = yield* ChatId.make()
         const orders = yield* LiveOrders.LiveOrders
         yield* orders.put(
           LiveOrders.LiveOrder.make({
@@ -151,7 +151,7 @@ describe("PrintOrder", () => {
   it.live("goes on quietly when its chat is deleted: the chat takes none of its steps after that", () =>
     Effect.gen(function* () {
       yield* Effect.gen(function* () {
-        const chatId = yield* ChatId.make
+        const chatId = yield* ChatId.make()
         const orders = yield* LiveOrders.LiveOrders
         yield* orders.put(
           LiveOrders.LiveOrder.make({

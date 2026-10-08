@@ -48,7 +48,7 @@ export const layerMemory: Layer.Layer<Chats> = Layer.effect(
       list: Ref.get(store).pipe(Effect.map((m) => sortChats([...m.values()]))),
       create: Effect.gen(function* () {
         const chat = ChatSummary.make({
-          chatId: yield* ChatId.make,
+          chatId: yield* ChatId.make(),
           title: newChatTitle,
           createdAt: yield* Clock.currentTimeMillis
         })
@@ -113,7 +113,7 @@ export const layerSql: Layer.Layer<Chats, never, SqlClient.SqlClient> = Layer.ef
       ),
       create: Effect.gen(function* () {
         const chat = ChatSummary.make({
-          chatId: yield* ChatId.make,
+          chatId: yield* ChatId.make(),
           title: newChatTitle,
           createdAt: yield* Clock.currentTimeMillis
         })

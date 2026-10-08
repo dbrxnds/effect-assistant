@@ -120,7 +120,7 @@ describe("Memory", () => {
   it.live("drops notes once they expire, and dates the log", () =>
     Effect.gen(function* () {
       const store = yield* Memory.MemoryStore
-      const chatId = yield* ChatId.make
+      const chatId = yield* ChatId.make()
       yield* store.put(
         new Memory.Fact({
           id: "old-note",
@@ -146,7 +146,7 @@ describe("Memory", () => {
 
       // The chat is never shown its own line.
       expect(yield* Memory.facts(scopes, { exceptLogOf: chatId })).toEqual([])
-      expect((yield* Memory.facts(scopes, { exceptLogOf: yield* ChatId.make })).length).toBe(1)
+      expect((yield* Memory.facts(scopes, { exceptLogOf: yield* ChatId.make() })).length).toBe(1)
     }).pipe(Effect.provide(Memory.layerMemory))
   )
 

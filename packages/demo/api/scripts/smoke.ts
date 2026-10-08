@@ -134,7 +134,7 @@ const program = Effect.gen(function* () {
   }
 
   const send = Effect.fn(function* (chatId: ChatId.ChatId, text: string) {
-    return yield* client.Submit({ chatId, input: AssistantEvent.UserMessage.make({ id: yield* InputId.make, text }) })
+    return yield* client.Submit({ chatId, input: AssistantEvent.UserMessage.make({ id: yield* InputId.make(), text }) })
   })
 
   /** Uses a block the way the web app does. */

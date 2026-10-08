@@ -35,10 +35,10 @@ type ChatId = typeof ChatId.Type
 
 ### make
 
-Creates a new random chat id, with Effect's `Random`.
+Creates a new random chat id, with Effect's `Random`: seed it in tests for the same ids every run.
 
 ```ts
-const make: Effect.Effect<ChatId>
+const make: () => Effect.Effect<ChatId>
 ```
 
 <small>Since 0.1.0</small>

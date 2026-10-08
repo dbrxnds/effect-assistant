@@ -49,7 +49,7 @@ rather than on every change.
 
 Everything runs in one process with `AssistantEngine.layerMemory` and the
 memory event log. That's all an engine needs. A chat is just a new id,
-`ChatId.make`:
+`ChatId.make()`:
 
 ```ts
 import { describe, expect, it } from "@effect/vitest"
@@ -64,11 +64,8 @@ const AssistantTest = MyAssistant.toLayer((turn) => turn.loop({ instructions, to
 it.live("uses a tool and reports its result", () =>
   Effect.gen(function* () {
     const assistant = yield* MyAssistant
-    const chatId = yield* ChatId.make
-    yield* assistant.submit(
-      chatId,
-      AssistantEvent.UserMessage.make({ id: yield* InputId.make, text: "What's the weather in Oslo?" })
-    )
+    const chatId = yield* ChatId.make()
+    yield* assistant.submit(chatId, AssistantEvent.UserMessage.make({ text: "What's the weather in Oslo?" }))
 
     const entries = yield* assistant.subscribe(chatId).pipe(
       Stream.takeUntil(({ event }) => Predicate.isTagged(event, "TurnCompleted")),

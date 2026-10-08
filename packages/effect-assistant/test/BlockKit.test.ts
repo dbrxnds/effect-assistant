@@ -28,7 +28,7 @@ const message = (id: string, block?: AssistantEvent.MessageBlock) =>
 const viewed = (id: string, events: ReadonlyArray<AssistantEvent.AssistantEvent>) =>
   ChatView.fromEntries(
     events.map((event, i) =>
-      AssistantEvent.Entry.make({ chatId: Effect.runSync(ChatId.make), seq: i + 1, at: 0, event })
+      AssistantEvent.Entry.make({ chatId: Effect.runSync(ChatId.make()), seq: i + 1, at: 0, event })
     )
   ).messages.find(
     (shown): shown is ChatView.AssistantMessage => shown.id === id && Predicate.isTagged(shown, "AssistantMessage")
@@ -96,7 +96,7 @@ describe("BlockKit.toClient", () => {
 
 describe("BlockKit.blockStates", () => {
   it("closes a block on its answer, or when the assistant says it was answered in words", () => {
-    const chatId = Effect.runSync(ChatId.make)
+    const chatId = Effect.runSync(ChatId.make())
 
     const events = [
       message("m1", choice(["red", "blue"])),
@@ -125,7 +125,7 @@ describe("BlockKit.blockStates", () => {
   })
 
   it("finds the blocks the user moved on from, and closes them with BlocksClosed", () => {
-    const chatId = Effect.runSync(ChatId.make)
+    const chatId = Effect.runSync(ChatId.make())
 
     const events = [
       message("m1", choice(["red", "blue"])),

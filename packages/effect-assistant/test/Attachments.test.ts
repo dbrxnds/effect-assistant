@@ -5,7 +5,7 @@ import * as Schema from "effect/Schema"
 import { AssistantEvent, ChatId, ChatView, Compaction, InputId } from "../src/index.ts"
 import * as History from "../src/internal/history.ts"
 
-const chatId = Effect.runSync(ChatId.make)
+const chatId = Effect.runSync(ChatId.make())
 
 const flyer = {
   fileId: "3f1c0a52-0000-4000-8000-000000000001",

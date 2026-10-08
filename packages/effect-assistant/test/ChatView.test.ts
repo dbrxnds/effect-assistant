@@ -18,7 +18,7 @@ import {
 } from "./utils/fixtures.ts"
 import * as Scripted from "./utils/scripted.ts"
 
-const chatId = Effect.runSync(ChatId.make)
+const chatId = Effect.runSync(ChatId.make())
 
 const entries = (events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>) =>
   events.map((event, i) => AssistantEvent.Entry.make({ chatId, seq: i + 1, at: (i + 1) * 1000, event }))
@@ -248,4 +248,14 @@ describe("subscribeView", () => {
       expect(since.flatMap((changes) => changes.messages.map((message) => message.text))).toEqual(["It shipped."])
     })
   )
+})
+
+describe("AssistantEvent.UserMessage", () => {
+  it("gets a new id when none is given, and keeps one that is", () => {
+    const [a, b] = [AssistantEvent.UserMessage.make({ text: "a" }), AssistantEvent.UserMessage.make({ text: "b" })]
+    const given = AssistantEvent.UserMessage.make({ id: InputId.fromKey("client:1"), text: "c" })
+
+    expect(a.id).not.toEqual(b.id)
+    expect(given.id).toBe(InputId.fromKey("client:1"))
+  })
 })

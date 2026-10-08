@@ -9,7 +9,7 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import { ChatId } from "./ChatId.ts"
 import { DecisionId } from "./DecisionId.ts"
-import { InputId } from "./InputId.ts"
+import { InputId, make as makeInputId } from "./InputId.ts"
 import { RunId } from "./RunId.ts"
 
 /**
@@ -50,9 +50,12 @@ export const textWithAttachments = (text: string, attachments: ReadonlyArray<Att
     ? text
     : [text, ...attachments.map(attachmentLine)].filter((part) => part.length > 0).join("\n")
 
-/** Text the user typed, and the files they attached. */
+/**
+ * Text the user typed, and the files they attached. `id` defaults to a new
+ * one; pass the client's own to make a retried send store the message once.
+ */
 export class UserMessage extends Schema.TaggedClass<UserMessage>()("UserMessage", {
-  id: InputId,
+  id: InputId.pipe(Schema.withConstructorDefault(makeInputId())),
   text: Schema.String,
   attachments: Schema.optional(Schema.Array(Attachment).check(Schema.isMaxLength(MAX_ATTACHMENTS)))
 }) {}

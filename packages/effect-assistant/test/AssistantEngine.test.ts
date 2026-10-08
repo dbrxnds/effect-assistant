@@ -33,7 +33,7 @@ describe("AssistantEngine.layerMemory", () => {
   it.live("picks up a chat whose turn a restart cut off", () =>
     Effect.gen(function* () {
       const log = yield* ChatLog.ChatLog
-      const [cutOff, otherAssistant, finished] = yield* Effect.all([ChatId.make, ChatId.make, ChatId.make])
+      const [cutOff, otherAssistant, finished] = yield* Effect.all([ChatId.make(), ChatId.make(), ChatId.make()])
 
       // What the log holds after a restart.
       yield* log.append(cutOff, [say("hi"), AssistantEvent.TurnStarted.make({ assistant: "resumer" })])
@@ -60,7 +60,7 @@ describe("AssistantEngine.layerMemory", () => {
 describe("AssistantEngine.layerCluster", () => {
   it.live("reaches a chat from a process that doesn't register the assistant", () =>
     Effect.gen(function* () {
-      const chat = yield* ChatId.make
+      const chat = yield* ChatId.make()
       const Greeter = Assistant.make("greeter")
 
       // The runner hosts the chats; the client, like a web server, only reaches them.
@@ -92,7 +92,7 @@ describe("tool calls after a crash", () => {
   it.live("runs a call the crash cut off again, with the same id and key, before the model goes on", () =>
     Effect.gen(function* () {
       const log = yield* ChatLog.ChatLog
-      const chat = yield* ChatId.make
+      const chat = yield* ChatId.make()
       const ran = yield* Deferred.make<{ readonly callId: string; readonly key: string }>()
 
       const SendReport = Tool.make("send_report", {
@@ -182,7 +182,7 @@ describe("a chat's log", () => {
       )
 
       const entries = yield* Effect.gen(function* () {
-        const chat = yield* ChatId.make
+        const chat = yield* ChatId.make()
         yield* (yield* Resumer).submit(chat, say("go"))
 
         return yield* (yield* Resumer).subscribe(chat).pipe(
@@ -204,7 +204,7 @@ describe("a chat's log", () => {
 
       // Both submits return once their input is stored, or found stored.
       const entries = yield* Effect.gen(function* () {
-        const chat = yield* ChatId.make
+        const chat = yield* ChatId.make()
         const resumer = yield* Resumer
 
         yield* Effect.all([resumer.submit(chat, input), resumer.submit(chat, input)], {
@@ -246,7 +246,7 @@ describe("a chat's log", () => {
       const handler = Resumer.toLayer(simple({ instructions: "Be brief." }))
 
       yield* Effect.gen(function* () {
-        const chat = yield* ChatId.make
+        const chat = yield* ChatId.make()
         yield* (yield* Resumer).submit(chat, say("one"))
         yield* collectUntil(Resumer, chat, (es) => turnsDone(es) >= 1)
         yield* (yield* Resumer).submit(chat, say("two"))
@@ -270,7 +270,7 @@ describe("a chat's log", () => {
       const handler = Resumer.toLayer(() => Stream.empty)
 
       const seqs = yield* Effect.gen(function* () {
-        const chat = yield* ChatId.make
+        const chat = yield* ChatId.make()
         yield* (yield* Resumer).submit(chat, say("one"))
         yield* (yield* Resumer).submit(chat, say("two"))
 
@@ -295,7 +295,7 @@ describe("a chat's log", () => {
       const handler = Resumer.toLayer(() => Stream.empty)
 
       const texts = yield* Effect.gen(function* () {
-        const [chat, other] = yield* Effect.all([ChatId.make, ChatId.make])
+        const [chat, other] = yield* Effect.all([ChatId.make(), ChatId.make()])
         yield* (yield* Resumer).submit(chat, say("stored"))
 
         const collected = yield* (yield* Resumer).subscribe(chat).pipe(
@@ -337,7 +337,7 @@ describe("a handler's build", () => {
         })
       )
 
-      const [chat, other] = yield* Effect.all([ChatId.make, ChatId.make])
+      const [chat, other] = yield* Effect.all([ChatId.make(), ChatId.make()])
 
       yield* Effect.gen(function* () {
         const turnsIn = (chatId: ChatId.ChatId, count: number) =>
