@@ -9,62 +9,7 @@ import { Skill } from "effect-assistant"
 The `Skill` module defines playbooks: step-by-step instructions for a kind
 of task.
 
-A handler gives its loop a catalog of skills (`turn.loop({ skills })` or
-`run.loop({ skills })`). Each skill's name and description ("use when…")
-go in the prompt, and a `load_skill` tool returns a skill's instructions
-when a task matches. The instructions then sit in the history for the rest
-of the work. Load-on-match keeps long playbooks out of the prompt until
-they are needed.
-
-**Example** (A skill)
-
-```ts
-import { Skill } from "effect-assistant"
-
-const onboarding = Skill.make({
-  name: "Onboarding",
-  description: "Use when someone new is joining the team.",
-  instructions: "1. Send the welcome pack. 2. Book a buddy lunch on day one. 3. Set up their laptop."
-})
-```
-
-## Constructors
-
-### make
-
-Creates a skill.
-
-```ts
-const make: <R = never>(skill: Skill<R>) => Skill<R>
-```
-
-<small>Since 0.1.0</small>
-
-### toolkit
-
-Returns the `load_skill` tool for these skills, or no tools when there are
-none.
-
-```ts
-const toolkit: <R>(skills: ReadonlyArray<Skill<R>>) => AssistantLoop.Tools<R>
-```
-
-<small>Since 0.1.0</small>
-
-## Combinators
-
-### withCatalog
-
-Returns the prompt with the skills' catalog appended, or the prompt as is
-when there are none.
-
-```ts
-const withCatalog: <R>(prompt: string, skills: ReadonlyArray<Skill<R>>) => string
-```
-
-<small>Since 0.1.0</small>
-
-## Models
+## Other
 
 ### Skill
 
@@ -82,7 +27,15 @@ interface Skill<R = never> {
 
 <small>Since 0.1.0</small>
 
-## Utility types
+### make
+
+Creates a skill.
+
+```ts
+const make: <R = never>(skill: Skill<R>) => Skill<R>
+```
+
+<small>Since 0.1.0</small>
 
 ### Services
 
@@ -90,6 +43,28 @@ Returns what skills need when they're loaded.
 
 ```ts
 type Services<S> = S extends Skill<infer R> ? R : never
+```
+
+<small>Since 0.1.0</small>
+
+### withCatalog
+
+Returns the prompt with the skills' catalog appended, or the prompt as is
+when there are none.
+
+```ts
+const withCatalog: <R>(prompt: string, skills: ReadonlyArray<Skill<R>>) => string
+```
+
+<small>Since 0.1.0</small>
+
+### toTools
+
+Returns the `load_skill` tool for these skills, or no tools when there are
+none.
+
+```ts
+const toTools: <R>(skills: ReadonlyArray<Skill<R>>) => AssistantLoop.Tools<R>
 ```
 
 <small>Since 0.1.0</small>

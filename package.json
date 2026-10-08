@@ -23,7 +23,7 @@
     "@changesets/cli": "3.0.3",
     "@effect/tsgo": "0.45.0",
     "@oxlint/plugins": "1.85.0",
-    "effect": "4.0.0-rc.117",
+    "effect": "4.0.0",
     "typescript": "7.0.2",
     "vite-plus": "catalog:"
   },

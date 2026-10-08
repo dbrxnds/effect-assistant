@@ -4,14 +4,14 @@
  * engines. How a real model uses it is in `contract.test.ts`.
  */
 import { describe, expect, it } from "@effect/vitest"
+import * as Tool from "effect/ai/Tool"
+import * as Toolkit from "effect/ai/Toolkit"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import * as Tool from "effect/unstable/ai/Tool"
-import * as Toolkit from "effect/unstable/ai/Toolkit"
 import {
   Assistant,
   AssistantActivity,
@@ -47,8 +47,8 @@ import {
   traceEntries,
   turnsDone,
   viewedMessages
-} from "./fixtures.ts"
-import * as Scripted from "./scripted.ts"
+} from "./utils/fixtures.ts"
+import * as Scripted from "./utils/scripted.ts"
 
 const instructions = "You help a small team."
 
@@ -71,7 +71,7 @@ describe("a turn", () => {
       const [request] = yield* model.requests
 
       expect(request?.system).toBe(`${Instructions.protocol}\n\n${instructions}`)
-      expect(request?.toolChoice).toBe("required")
+      expect(request?.toolChoice).toBe("auto")
       expect(request?.tools).toEqual(["send_user_message", "wait"])
     })
   )
@@ -97,7 +97,12 @@ describe("a turn", () => {
       expect(step?.parts.map((part) => part.type)).toEqual(["tool-call"])
       expect(step?.model).toBe(Scripted.model)
       expect(step?.responseId).toBe("response_1")
-      expect(step?.usage?.inputTokens).toEqual({ total: 120, uncached: 20, cacheRead: 100, cacheWrite: 0 })
+      expect(step?.usage?.inputTokens).toEqual({
+        total: 120,
+        uncached: 20,
+        cacheRead: 100,
+        cacheWrite: 0
+      })
       expect(step?.usage?.outputTokens.total).toBe(8)
       expect(step?.durationMillis).toBeGreaterThanOrEqual(0)
     })
@@ -111,7 +116,7 @@ describe("a turn", () => {
         success: Schema.Struct({ orderId: Schema.String, status: Schema.String })
       })
 
-      const lookup = AssistantLoop.tools(Toolkit.make(LookupOrder), {
+      const lookup = AssistantLoop.fromToolkit(Toolkit.make(LookupOrder), {
         lookup_order: ({ orderId }) => Effect.sleep("1 second").pipe(Effect.as({ orderId, status: "shipped" }))
       })
 
@@ -172,8 +177,18 @@ const researchScript: Scripted.Script = (request) => {
   const runId = Scripted.spawnedRunId(request)
 
   return Option.isSome(runId)
-    ? [Scripted.call("message_specialist", { runId: runId.value, message: "Which province is it in?" })]
-    : [Scripted.call("spawn_specialist", { kind: "research", goal: "What's the capital of Canada?" })]
+    ? [
+        Scripted.call("message_specialist", {
+          runId: runId.value,
+          message: "Which province is it in?"
+        })
+      ]
+    : [
+        Scripted.call("spawn_specialist", {
+          kind: "research",
+          goal: "What's the capital of Canada?"
+        })
+      ]
 }
 
 describe("specialist runs", () => {
@@ -221,7 +236,7 @@ describe("specialist runs", () => {
     success: Schema.Struct({ query: Schema.String, results: Schema.Array(Schema.String) })
   })
 
-  const archive = AssistantLoop.tools(Toolkit.make(SearchArchive), {
+  const archive = AssistantLoop.fromToolkit(Toolkit.make(SearchArchive), {
     search_archive: ({ query }) =>
       Effect.sleep("1 second").pipe(Effect.as({ query, results: ["2024: Lisbon", "2025: Porto"] }))
   })
@@ -252,7 +267,12 @@ describe("specialist runs", () => {
       if (Scripted.inputs(request).length === 1) {
         return hasCalled(request, "spawn_specialist")
           ? Scripted.reply("On it.")
-          : [Scripted.call("spawn_specialist", { kind: "archivist", goal: "Where was the 2024 offsite?" })]
+          : [
+              Scripted.call("spawn_specialist", {
+                kind: "archivist",
+                goal: "Where was the 2024 offsite?"
+              })
+            ]
       }
 
       return hasCalled(request, then)
@@ -443,7 +463,13 @@ describe("UI blocks", () => {
     if (last.includes("<answer")) return Scripted.reply(last.includes("blue") ? "Blue it is." : "Red it is.")
 
     if (last === "blue")
-      return [Scripted.call("send_user_message", { text: "Blue it is.", wait: true, closes: [sentId(request)] })]
+      return [
+        Scripted.call("send_user_message", {
+          text: "Blue it is.",
+          wait: true,
+          closes: [sentId(request)]
+        })
+      ]
 
     return [
       Scripted.call("send_user_message", {
@@ -535,7 +561,7 @@ describe("UI blocks", () => {
       expect(toJsonText(results[0]?.result)).toMatch(/Expected/)
       expect(shown(entries)).toBeUndefined()
       // The failed message's `wait` doesn't end the turn: the loop's next step reads the failure.
-      expect((yield* model.requests).map((request) => request.toolChoice)).toEqual(["required", "required"])
+      expect((yield* model.requests).map((request) => request.toolChoice)).toEqual(["auto", "auto"])
     })
   )
 })
@@ -591,7 +617,7 @@ describe("tools found on demand, and skills", () => {
     success: Schema.String
   })
 
-  const officeTools = AssistantLoop.tools(Toolkit.make(Parking, Invoices), {
+  const officeTools = AssistantLoop.fromToolkit(Toolkit.make(Parking, Invoices), {
     parking_availability: ({ office }) => Effect.succeed({ office, freeSpots: 37 }),
     invoice_lookup: () => Effect.succeed("not relevant")
   })
@@ -606,7 +632,12 @@ describe("tools found on demand, and skills", () => {
 
         if (Option.isSome(found)) {
           return found.value.includes("parking_availability")
-            ? [Scripted.call("execute_tool", { name: "parking_availability", input: { office: "Amsterdam" } })]
+            ? [
+                Scripted.call("execute_tool", {
+                  name: "parking_availability",
+                  input: { office: "Amsterdam" }
+                })
+              ]
             : Scripted.reply("Not found.")
         }
 
@@ -638,7 +669,7 @@ describe("tools found on demand, and skills", () => {
         failure: ToolFailure.ToolFailure
       })
 
-      const broken = AssistantLoop.tools(Toolkit.make(BrokenPrinter), {
+      const broken = AssistantLoop.fromToolkit(Toolkit.make(BrokenPrinter), {
         broken_printer: () => ToolFailure.fail("Out of paper.")
       })
 

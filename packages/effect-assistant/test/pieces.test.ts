@@ -1,9 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
+import * as Prompt from "effect/ai/Prompt"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import * as Prompt from "effect/unstable/ai/Prompt"
 import {
   AppEvent,
   Assistant,
@@ -14,8 +14,8 @@ import {
   ChatLog,
   InputId
 } from "../src/index.ts"
-import { collectUntil, failures, newChat, runMemory, say, turnsDone } from "./fixtures.ts"
-import * as Scripted from "./scripted.ts"
+import { collectUntil, failures, newChat, runMemory, say, turnsDone } from "./utils/fixtures.ts"
+import * as Scripted from "./utils/scripted.ts"
 
 class Summary extends Schema.TaggedClass<Summary>()("Summary", {
   throughSeq: Schema.Int,
@@ -35,7 +35,9 @@ const Compacting = Assistant.make("compacting", {
 // Not registered with any assistant.
 const Unknown = Schema.TaggedStruct("Unknown", { n: Schema.Int })
 
-class DraftOpened extends Schema.TaggedClass<DraftOpened>()("DraftOpened", { draftId: Schema.String }) {}
+class DraftOpened extends Schema.TaggedClass<DraftOpened>()("DraftOpened", {
+  draftId: Schema.String
+}) {}
 
 const Drafting = Assistant.make("drafting", {
   events: [AppEvent.make(DraftOpened, { render: (opened) => `The user opened draft ${opened.draftId}.` })]

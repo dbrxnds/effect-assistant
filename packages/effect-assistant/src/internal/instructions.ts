@@ -1,15 +1,7 @@
-/**
- * @since 0.1.0
- * @internal
- */
 import * as Predicate from "effect/Predicate"
 import type * as Instructions from "../Instructions.ts"
 
-/**
- * Instructions with their text changed, keeping their span attributes.
- *
- * @internal
- */
+/** Instructions with their text changed, keeping their span attributes. */
 export const mapText = (
   instructions: string | Instructions.Resolved,
   f: (text: string) => string

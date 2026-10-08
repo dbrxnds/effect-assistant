@@ -8,8 +8,8 @@ engine, so chats survive restarts and a turn cut off by a crash resumes.
 ```ts
 import { AssistantEngine, ChatLog } from "effect-assistant"
 import * as Layer from "effect/Layer"
-import * as ClusterWorkflowEngine from "effect/unstable/cluster/ClusterWorkflowEngine"
-import * as SingleRunner from "effect/unstable/cluster/SingleRunner"
+import * as ClusterWorkflowEngine from "effect/cluster/ClusterWorkflowEngine"
+import * as SingleRunner from "effect/cluster/SingleRunner"
 
 const MyAssistantLive = MyAssistant.toLayer(handler).pipe(Layer.provide(ResearchLive))
 
@@ -36,8 +36,9 @@ to set up.
 
 One `SqlClient` serves everything:
 
-- `ChatLog.layerSql` creates its table (`chat_log`) if it
-  doesn't exist.
+- `ChatLog.layerSql` stores the log in a `chat_log` table you create (see
+  [the log](./events#storage)). It needs a `ChatLog.DeletedChats`: where your
+  app records that a chat was deleted, like a `deleted_at` on its chat table.
 - `SingleRunner` keeps the cluster's messages and shards in the same
   database, so a persisted `submit` survives a crash.
 - `ClusterWorkflowEngine` runs the [workflows](./app-events#long-running-work)

@@ -3,58 +3,64 @@
  * is an append-only log of these events, and the log is the source of truth:
  * a chat client gets what its user sees of it (`ChatView`), and the model's
  * history is rebuilt from it before every model call.
- *
- * - Inputs from the user: {@link UserMessage}, {@link BlockAnswer}. Submitting
- *   one starts a turn, or joins the turn that is running.
- * - What the user sees: {@link AssistantMessage}, optionally with a
- *   {@link MessageBlock}.
- * - What the model did: {@link ModelOutput}, then {@link ToolStarted} and
- *   {@link ToolResult} for each tool call. These are the assistant's own
- *   work: a chat client never gets them (see `ChatView`).
- * - Turn bookkeeping: {@link TurnStarted}, {@link TurnCompleted},
- *   {@link TurnFailed}.
- * - Specialist runs: {@link SpecialistStarted}, {@link SpecialistFinished}. A
- *   finished run is an input too: its report wakes a turn.
- * - Blocks closed without an answer: {@link BlocksClosed}.
- * - Decisions the user is asked to make: {@link DecisionRequested}, when a
- *   tool call waits for one or work asks for one (that one is an input), and
- *   {@link DecisionResolved}, once the user answered its decision block.
- * - The app's own events, like a workflow's progress or a summary for
- *   compaction: {@link StoredAppEvent}, as they're stored. The ones an
- *   assistant registers (see `AppEvent`) decode to their own types, and
- *   those registered with `wakes` start a turn.
- *
- * Turns and specialist runs are the chat's activity: each opens with one event
- * and closes with another (see `AssistantActivity`).
- *
- * @since 0.1.0
  */
+import * as Response from "effect/ai/Response"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import * as Response from "effect/unstable/ai/Response"
 import { ChatId } from "./ChatId.ts"
 import { DecisionId } from "./DecisionId.ts"
 import { InputId } from "./InputId.ts"
 import { RunId } from "./RunId.ts"
 
 /**
- * Text the user typed.
- *
- * @category inputs
- * @since 0.1.0
+ * A file the user attached to a message, by reference: the file itself is
+ * stored elsewhere, so the log never holds its bytes.
  */
+export const Attachment = Schema.Struct({
+  fileId: Schema.String.check(Schema.isMaxLength(64)),
+  name: Schema.String.check(Schema.isMaxLength(255)),
+  mediaType: Schema.String.check(Schema.isMaxLength(127)),
+  /** In bytes. */
+  size: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))
+})
+
+/** The most files one message carries: each is a line in every prompt after it. */
+export const MAX_ATTACHMENTS = 10
+
+/** A file the user attached to a message. */
+export type Attachment = typeof Attachment.Type
+
+/** A byte count for people and the model: `2.1 MB`. */
+export const formatSize = (bytes: number): string =>
+  bytes < 1024
+    ? `${bytes} B`
+    : bytes < 1024 * 1024
+      ? `${(bytes / 1024).toFixed(1)} KB`
+      : bytes < 1024 * 1024 * 1024
+        ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+        : `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
+
+/** The line the model reads for an attachment. It names the file and never holds its content. */
+export const attachmentLine = (attachment: Attachment): string =>
+  `[attached: ${attachment.name}, ${attachment.mediaType}, ${formatSize(attachment.size)}, id ${attachment.fileId}]`
+
+/** The text of a message followed by a line per attached file. */
+export const textWithAttachments = (text: string, attachments: ReadonlyArray<Attachment> | undefined): string =>
+  attachments === undefined || attachments.length === 0
+    ? text
+    : [text, ...attachments.map(attachmentLine)].filter((part) => part.length > 0).join("\n")
+
+/** Text the user typed, and the files they attached. */
 export class UserMessage extends Schema.TaggedClass<UserMessage>()("UserMessage", {
   id: InputId,
-  text: Schema.String
+  text: Schema.String,
+  attachments: Schema.optional(Schema.Array(Attachment).check(Schema.isMaxLength(MAX_ATTACHMENTS)))
 }) {}
 
 /**
  * The user used a block: which message it was on, and the value in the
  * block's answer schema (its JSON form). A chat UI shows it inside the block
  * rather than as a message.
- *
- * @category inputs
- * @since 0.1.0
  */
 export class BlockAnswer extends Schema.TaggedClass<BlockAnswer>()("BlockAnswer", {
   id: InputId,
@@ -67,14 +73,6 @@ export class BlockAnswer extends Schema.TaggedClass<BlockAnswer>()("BlockAnswer"
  * A specialist run finished working on a brief. Unless the assistant stopped
  * it, it's an input: a turn reads its report and decides what to tell the
  * user. Its id is fixed per run and brief, so it's stored once.
- *
- * - `answered`: `report` is its answer.
- * - `failed`: `error` says why.
- * - `stopped`: the assistant stopped it; no turn starts for it.
- * - `cut_off`: a shutdown interrupted it; spawn it again if it's still needed.
- *
- * @category specialists
- * @since 0.1.0
  */
 export class SpecialistFinished extends Schema.TaggedClass<SpecialistFinished>()("SpecialistFinished", {
   id: InputId,
@@ -88,28 +86,15 @@ export class SpecialistFinished extends Schema.TaggedClass<SpecialistFinished>()
   error: Schema.optional(Schema.String)
 }) {}
 
-/**
- * Schema for how the user decided: `"approved"` or `"declined"`.
- *
- * @category decisions
- * @since 0.1.0
- */
+/** Schema for how the user decided: `"approved"` or `"declined"`. */
 export const DecisionOutcome = Schema.Literals(["approved", "declined"])
 
-/**
- * How the user decided.
- *
- * @category decisions
- * @since 0.1.0
- */
+/** How the user decided. */
 export type DecisionOutcome = typeof DecisionOutcome.Type
 
 /**
  * Schema for a decision a tool call waits for: the call, as the model wrote
  * it. Approving it runs exactly this call.
- *
- * @category decisions
- * @since 0.1.0
  */
 export const CallOrigin = Schema.TaggedStruct("Call", {
   callId: Schema.String,
@@ -117,51 +102,23 @@ export const CallOrigin = Schema.TaggedStruct("Call", {
   params: Schema.Json
 })
 
-/**
- * A decision a tool call waits for.
- *
- * @category decisions
- * @since 0.1.0
- */
+/** A decision a tool call waits for. */
 export type CallOrigin = typeof CallOrigin.Type
 
 /**
  * Schema for a decision that running work asks for, like a workflow: who
  * asks (`source`, like `workflow:CreateCampaign`), and, for a workflow waiting on it, the
  * `DurableDeferred` token the answer completes.
- *
- * @category decisions
- * @since 0.1.0
  */
 export const WorkOrigin = Schema.TaggedStruct("Work", {
   source: Schema.String,
   token: Schema.optional(Schema.String)
 })
 
-/**
- * A decision that running work asks for.
- *
- * @category decisions
- * @since 0.1.0
- */
+/** A decision that running work asks for. */
 export type WorkOrigin = typeof WorkOrigin.Type
 
-/**
- * The user is asked to decide something: approve or decline.
- *
- * - From a tool call (`origin: Call`): the model called a tool that needs
- *   the user's decision, and the loop parked the call instead of running it.
- *   The model reads this as the call's result. It's not an input.
- * - From work (`origin: Work`): something already running asks, like a
- *   workflow. It's an input: it wakes a turn.
- *
- * Either way the user sees nothing yet: the model sends a message with a
- * decision block for its id. `preview` is what they decide on, like an
- * order's total, in JSON.
- *
- * @category decisions
- * @since 0.1.0
- */
+/** The user is asked to decide something: approve or decline. */
 export class DecisionRequested extends Schema.TaggedClass<DecisionRequested>()("DecisionRequested", {
   id: DecisionId,
   origin: Schema.Union([CallOrigin, WorkOrigin]),
@@ -172,9 +129,6 @@ export class DecisionRequested extends Schema.TaggedClass<DecisionRequested>()("
  * A decision is made: the user answered a decision block for it (`answer` is
  * that `BlockAnswer`'s id). An approved call runs next, at the turn's next
  * step; a workflow's decision is passed on to it before this is stored.
- *
- * @category decisions
- * @since 0.1.0
  */
 export class DecisionResolved extends Schema.TaggedClass<DecisionResolved>()("DecisionResolved", {
   id: DecisionId,
@@ -186,44 +140,25 @@ export class DecisionResolved extends Schema.TaggedClass<DecisionResolved>()("De
  * Schema for everything `Assistant.submit` accepts. A `DecisionRequested` is
  * one only when work requests it (`origin: Work`); the chat refuses a parked
  * call submitted from outside.
- *
- * @category inputs
- * @since 0.1.0
  */
 export const Input = Schema.Union([UserMessage, BlockAnswer, SpecialistFinished, DecisionRequested])
 
-/**
- * An input to an assistant.
- *
- * @category inputs
- * @since 0.1.0
- */
+/** An input to an assistant. */
 export type Input = typeof Input.Type
 
 /**
  * Schema for the inputs from the chat's user: messages and block answers. A
  * turn owes each one a reply. It's also what a chat client usually may
  * submit; the app's events come from the server.
- *
- * @category inputs
- * @since 0.1.0
  */
 export const UserInput = Schema.Union([UserMessage, BlockAnswer])
 
-/**
- * An input from the chat's user.
- *
- * @category inputs
- * @since 0.1.0
- */
+/** An input from the chat's user. */
 export type UserInput = typeof UserInput.Type
 
 /**
  * The UI shown with a message: a block kind from the assistant's `BlockKit`, and
  * its props.
- *
- * @category models
- * @since 0.1.0
  */
 export class MessageBlock extends Schema.Class<MessageBlock>("effect-assistant/MessageBlock")({
   kind: Schema.String,
@@ -233,9 +168,6 @@ export class MessageBlock extends Schema.Class<MessageBlock>("effect-assistant/M
 /**
  * A message the assistant sent the user with `send_user_message`, optionally with a
  * block.
- *
- * @category models
- * @since 0.1.0
  */
 export class AssistantMessage extends Schema.TaggedClass<AssistantMessage>()("AssistantMessage", {
   id: Schema.String,
@@ -246,56 +178,38 @@ export class AssistantMessage extends Schema.TaggedClass<AssistantMessage>()("As
 }) {}
 
 /**
- * Schema for a tool call the model made: `effect/unstable/ai`'s tool call
+ * Schema for a tool call the model made: `effect/ai`'s tool call
  * part (`Response.ToolCallPart`) for any tool, with its params in JSON, as the
  * model wrote them.
- *
- * @category models
- * @since 0.1.0
  */
 export const ToolCallPart = Schema.Struct({
   ...Response.ToolCallPart("", Schema.Json).fields,
   name: Schema.String
 }).annotate({ identifier: "ToolCallPart" })
 
-/**
- * A tool call the model made.
- *
- * @category models
- * @since 0.1.0
- */
+/** A tool call the model made. */
 export type ToolCallPart = typeof ToolCallPart.Type
 
 /**
- * Schema for what the log keeps of a model call: `effect/unstable/ai`'s
+ * Schema for what the log keeps of a model call: `effect/ai`'s
  * response parts for text, reasoning (with the provider's metadata, like a
  * thinking block's signature), and tool calls.
- *
- * @category models
- * @since 0.1.0
  */
 export const ModelPart = Schema.Union([Response.TextPart, Response.ReasoningPart, ToolCallPart])
 
-/**
- * A part of a model call's output.
- *
- * @category models
- * @since 0.1.0
- */
+/** A part of a model call's output. */
 export type ModelPart = typeof ModelPart.Type
 
 /**
  * What one model call wrote: text, reasoning, and tool calls, as response
  * parts. `Prompt.fromResponseParts` turns them into history.
- *
- * @category models
- * @since 0.1.0
  */
 export class ModelOutput extends Schema.TaggedClass<ModelOutput>()("ModelOutput", {
   parts: Schema.Array(ModelPart),
   /**
    * The last entry the model had read when it wrote this. Inputs after it
-   * arrived while the model was working.
+   * arrived while the model was working. A turn has handled what its
+   * outputs had read.
    */
   seenThroughSeq: Schema.optional(Schema.Int),
   /** The model that wrote it: the provider's id for it, or the name the context gave it. */
@@ -312,9 +226,6 @@ export class ModelOutput extends Schema.TaggedClass<ModelOutput>()("ModelOutput"
  * A tool call is about to run. It's stored before the tool runs, so after a
  * crash the log says which calls may have done something: they run again,
  * with the same call id (see `AssistantToolCall`).
- *
- * @category models
- * @since 0.1.0
  */
 export class ToolStarted extends Schema.TaggedClass<ToolStarted>()("ToolStarted", {
   callId: Schema.String,
@@ -324,27 +235,16 @@ export class ToolStarted extends Schema.TaggedClass<ToolStarted>()("ToolStarted"
 /**
  * Schema for how a tool call went: `"success"`, or `"failure"`, which the
  * model reads as an error.
- *
- * @category models
- * @since 0.1.0
  */
 export const ToolOutcome = Schema.Literals(["success", "failure"])
 
-/**
- * How a tool call went.
- *
- * @category models
- * @since 0.1.0
- */
+/** How a tool call went. */
 export type ToolOutcome = typeof ToolOutcome.Type
 
 /**
  * The result of one tool call, as the model reads it: the tool's success or
  * failure in its encoded (JSON) form, and which one it is. A failure says its
  * kind when it has one: a `ToolFailure`'s `kind`, or its tag.
- *
- * @category models
- * @since 0.1.0
  */
 export class ToolResult extends Schema.TaggedClass<ToolResult>()("ToolResult", {
   callId: Schema.String,
@@ -354,25 +254,19 @@ export class ToolResult extends Schema.TaggedClass<ToolResult>()("ToolResult", {
   kind: Schema.optional(Schema.String)
 }) {}
 
-/**
- * A turn started.
- *
- * @category turns
- * @since 0.1.0
- */
+/** A turn started. */
 export class TurnStarted extends Schema.TaggedClass<TurnStarted>()("TurnStarted", {
   /** The assistant that runs it. */
   assistant: Schema.String,
-  /** The id of the turn's trace, when a tracer records it (not Effect's own, which exports nothing). */
+  /**
+   * The id of the turn's trace, when a tracer records it (not Effect's own, which exports nothing).
+   */
   traceId: Schema.optional(Schema.String)
 }) {}
 
 /**
  * A turn finished. `throughSeq` is the last entry it read; inputs after it
  * still need a turn.
- *
- * @category turns
- * @since 0.1.0
  */
 export class TurnCompleted extends Schema.TaggedClass<TurnCompleted>()("TurnCompleted", {
   throughSeq: Schema.Int
@@ -381,9 +275,6 @@ export class TurnCompleted extends Schema.TaggedClass<TurnCompleted>()("TurnComp
 /**
  * A turn failed. `throughSeq` covers everything stored when it failed, so a
  * failing input isn't retried forever.
- *
- * @category turns
- * @since 0.1.0
  */
 export class TurnFailed extends Schema.TaggedClass<TurnFailed>()("TurnFailed", {
   throughSeq: Schema.Int,
@@ -392,11 +283,8 @@ export class TurnFailed extends Schema.TaggedClass<TurnFailed>()("TurnFailed", {
 
 /**
  * A specialist run started working: spawned, or continued by a follow-up
- * message. The model doesn't see it; it sees the run in "Running now", and
- * its report arrives as a {@link SpecialistFinished}.
- *
- * @category specialists
- * @since 0.1.0
+ * message. The model doesn't see it: the call that started the run says
+ * so, and its report arrives as a {@link SpecialistFinished}.
  */
 export class SpecialistStarted extends Schema.TaggedClass<SpecialistStarted>()("SpecialistStarted", {
   runId: RunId,
@@ -408,20 +296,12 @@ export class SpecialistStarted extends Schema.TaggedClass<SpecialistStarted>()("
 /**
  * Blocks closed without an answer, like the ones `turn.loop`'s
  * `BlockKit.closeStale` closes once the user moved on. The model doesn't see it.
- *
- * @category models
- * @since 0.1.0
  */
 export class BlocksClosed extends Schema.TaggedClass<BlocksClosed>()("BlocksClosed", {
   messageIds: Schema.Array(Schema.String)
 }) {}
 
-/**
- * Schema for every event the library defines.
- *
- * @category schemas
- * @since 0.1.0
- */
+/** Schema for every event the library defines. */
 export const AssistantEvent = Schema.Union([
   UserMessage,
   BlockAnswer,
@@ -439,12 +319,7 @@ export const AssistantEvent = Schema.Union([
   DecisionResolved
 ])
 
-/**
- * An event the library defines.
- *
- * @category models
- * @since 0.1.0
- */
+/** An event the library defines. */
 export type AssistantEvent = typeof AssistantEvent.Type
 
 const libraryTags: ReadonlySet<string> = new Set(AssistantEvent.members.map((member) => member.identifier))
@@ -454,9 +329,6 @@ const libraryTags: ReadonlySet<string> = new Set(AssistantEvent.members.map((mem
  * library's, branded, so narrowing an entry's event to one of the library's
  * events (`Predicate.isTagged(event, "UserMessage")`) never leaves an app
  * event in.
- *
- * @category schemas
- * @since 0.1.0
  */
 export const AppTag = Schema.String.pipe(Schema.brand("effect-assistant/AppTag"))
 
@@ -464,37 +336,21 @@ export const AppTag = Schema.String.pipe(Schema.brand("effect-assistant/AppTag")
  * Schema for one of the app's own events, as it's stored: its `_tag` and its
  * fields in JSON. An assistant made with `events: [AppEvent.make(Summary)]`
  * decodes it to a `Summary` in `turn.entries` and in its `subscribe`.
- *
- * @category models
- * @since 0.1.0
  */
 export const StoredAppEvent = Schema.StructWithRest(Schema.Struct({ _tag: AppTag }), [
   Schema.Record(Schema.String, Schema.Json)
 ]).check(Schema.makeFilter((event) => !libraryTags.has(event._tag) || `${event._tag} is one of the library's events`))
 
-/**
- * One of the app's own events, as it's stored.
- *
- * @category models
- * @since 0.1.0
- */
+/** One of the app's own events, as it's stored. */
 export type StoredAppEvent = typeof StoredAppEvent.Type
 
-/**
- * Returns whether an event is one of the library's, not one of the app's own.
- *
- * @category guards
- * @since 0.1.0
- */
+/** Returns whether an event is one of the library's, not one of the app's own. */
 export const isLibraryEvent = (event: { readonly _tag: string }): event is AssistantEvent => libraryTags.has(event._tag)
 
 /**
  * A chat's entry with any event in it: the library's, or the app's own
  * (decoded or not). What the folds over a chat take, so a client's typed
  * entries fit too.
- *
- * @category models
- * @since 0.1.0
  */
 export interface AnyEntry {
   readonly chatId: ChatId
@@ -506,9 +362,6 @@ export interface AnyEntry {
 /**
  * Schema for a stored event with its position in the chat. `seq` starts at 1
  * and has no gaps; `at` is the time it was stored, in epoch milliseconds.
- *
- * @category schemas
- * @since 0.1.0
  */
 export const Entry = Schema.Struct({
   chatId: ChatId,
@@ -517,12 +370,7 @@ export const Entry = Schema.Struct({
   event: Schema.Union([AssistantEvent, StoredAppEvent])
 })
 
-/**
- * A stored event with its position in the chat.
- *
- * @category models
- * @since 0.1.0
- */
+/** A stored event with its position in the chat. */
 export type Entry = typeof Entry.Type
 
 /**
@@ -530,9 +378,6 @@ export type Entry = typeof Entry.Type
  * a block answer, a finished specialist run, or a decision that work
  * requests. The app's events that wake a turn are inputs too, but only
  * their assistant knows which (see `AppEvent`).
- *
- * @category guards
- * @since 0.1.0
  */
 export const isInput = (event: { readonly _tag: string }): event is Input =>
   Predicate.isTagged(event, "UserMessage") ||
@@ -545,37 +390,19 @@ export const isInput = (event: { readonly _tag: string }): event is Input =>
 /**
  * Returns whether an input starts a turn: every one but a run the assistant
  * stopped itself.
- *
- * @category guards
- * @since 0.1.0
  */
-export const wakes = (input: Input): boolean =>
+export const isWaking = (input: Input): boolean =>
   !(Predicate.isTagged(input, "SpecialistFinished") && input.status === "stopped")
 
-/**
- * Returns whether an input came from the chat's user, and so is owed a reply.
- *
- * @category guards
- * @since 0.1.0
- */
+/** Returns whether an input came from the chat's user, and so is owed a reply. */
 export const isUserInput = (input: Input): input is UserInput =>
   Predicate.isTagged(input, "UserMessage") || Predicate.isTagged(input, "BlockAnswer")
 
-/**
- * Returns whether an event ends a turn, and so says how far the assistant has read.
- *
- * @category guards
- * @since 0.1.0
- */
+/** Returns whether an event ends a turn, and so says how far the assistant has read. */
 export const isTurnEnd = (event: { readonly _tag: string }): event is TurnCompleted | TurnFailed =>
   Predicate.isTagged(event, "TurnCompleted") || Predicate.isTagged(event, "TurnFailed")
 
-/**
- * Returns the text of every message the user was shown, in order.
- *
- * @category getters
- * @since 0.1.0
- */
+/** Returns the text of every message the user was shown, in order. */
 export const assistantTexts = (entries: ReadonlyArray<AnyEntry>): ReadonlyArray<string> =>
   entries.flatMap(({ event }) =>
     isLibraryEvent(event) && Predicate.isTagged(event, "AssistantMessage") ? [event.text] : []

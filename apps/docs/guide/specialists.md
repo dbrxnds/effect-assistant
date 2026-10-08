@@ -24,7 +24,7 @@ const Research = Specialist.make("research", {
 
 const ResearchLive = Research.toLayer(
   Effect.gen(function* () {
-    const toolkit = AssistantLoop.tools(yield* ResearchTools) // a native toolkit
+    const toolkit = AssistantLoop.fromToolkit(yield* ResearchTools) // a native toolkit
 
     return (run) =>
       run.loop({
@@ -98,7 +98,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Semaphore from "effect/Semaphore"
 import * as Stream from "effect/Stream"
-import * as Toolkit from "effect/unstable/ai/Toolkit"
+import * as Toolkit from "effect/ai/Toolkit"
 
 const Analyst = Specialist.make("analyst", {
   description: "Writes reports on spend, budgets, and campaigns."
@@ -116,7 +116,7 @@ const AnalystLive = Analyst.toLayer(
 
           return run.loop({
             instructions: "Write the report the colleague asked for, with the numbers.",
-            toolkit: AssistantLoop.tools(Toolkit.make(SpendReport), { spend_report: spendReport }),
+            toolkit: AssistantLoop.fromToolkit(Toolkit.make(SpendReport), { spend_report: spendReport }),
             maxSteps: 12 // model calls per brief; default 8
           })
         })

@@ -11,7 +11,7 @@
     "test": "vp test run"
   },
   "dependencies": {
-    "effect": "4.0.0-rc.117",
+    "effect": "4.0.0",
     "effect-assistant": "workspace:*"
   },
   "devDependencies": {

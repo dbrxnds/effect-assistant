@@ -1,20 +1,6 @@
 /**
  * The `ChatLog` module stores each chat as an append-only list of
  * `AssistantEvent`s.
- *
- * It's the storage: `append` numbers entries after the chat's last `seq`,
- * and `read` returns them in order, all of them or those after a `seq`. An
- * open chat reads its log once and keeps its entries in memory. The engine's chats write through it one
- * at a time (each chat has a lock) and send new entries to the chat's
- * subscribers; an assistant's `subscribe` streams them. One process writes
- * each chat: the cluster engine sends a chat to one entity.
- *
- * `delete` removes a chat's entries and remembers that it was deleted, so
- * nothing is stored in it again. Delete through the assistant
- * (`MyAssistant.delete`), which also has an open chat drop its state; use
- * `delete` on its own only for a chat nothing has open.
- *
- * @since 0.1.0
  */
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
@@ -22,16 +8,11 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
-import * as SqlClient from "effect/unstable/sql/SqlClient"
+import * as SqlClient from "effect/sql/SqlClient"
 import * as AssistantEvent from "./AssistantEvent.ts"
 import { ChatId } from "./ChatId.ts"
 
-/**
- * Service that stores each chat's events.
- *
- * @category services
- * @since 0.1.0
- */
+/** Service that stores each chat's events. */
 export class ChatLog extends Context.Service<
   ChatLog,
   {
@@ -42,21 +23,20 @@ export class ChatLog extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
     /** Reads a chat's stored entries, in order: all of them, or those after a `seq`. */
     readonly read: (chatId: ChatId, options?: ReadOptions) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
-    /** Chats whose last entry doesn't end a turn: the ones that may still owe one, after a restart. */
+    /**
+     * Chats whose last entry doesn't end a turn: the ones that may still owe one, after a restart.
+     */
     readonly unfinished: Effect.Effect<ReadonlyArray<ChatId>>
     /** Removes a chat's entries, and remembers it was deleted. Deleting it again does nothing. */
     readonly delete: (chatId: ChatId) => Effect.Effect<void>
-    /** Whether the chat was deleted. A chat the engine opens reads this first: a deleted one takes nothing. */
+    /**
+     * Whether the chat was deleted. A chat the engine opens reads this first: a deleted one takes nothing.
+     */
     readonly isDeleted: (chatId: ChatId) => Effect.Effect<boolean>
   }
 >()("effect-assistant/ChatLog") {}
 
-/**
- * Which of a chat's entries to read.
- *
- * @category models
- * @since 0.1.0
- */
+/** Which of a chat's entries to read. */
 export interface ReadOptions {
   /** Only the entries after this `seq`. */
   readonly after?: number | undefined
@@ -65,9 +45,6 @@ export interface ReadOptions {
 /**
  * The storage a `ChatLog` is built on: read a chat, find its last `seq`,
  * write new entries, find every chat's last entry, and delete a chat.
- *
- * @category models
- * @since 0.1.0
  */
 export interface Storage {
   readonly read: (chatId: ChatId, options?: ReadOptions) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
@@ -75,32 +52,18 @@ export interface Storage {
   readonly write: (chatId: ChatId, entries: ReadonlyArray<AssistantEvent.Entry>) => Effect.Effect<void>
   /** Every chat's last entry. */
   readonly lastEntries: Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
-  /** Removes the chat's entries and keeps a record that it was deleted, at this time (epoch milliseconds). */
+  /**
+   * Removes the chat's entries and keeps a record that it was deleted, at this time (epoch milliseconds).
+   */
   readonly delete: (chatId: ChatId, at: number) => Effect.Effect<void>
   readonly isDeleted: (chatId: ChatId) => Effect.Effect<boolean>
 }
 
-/**
- * Creates a `ChatLog` from a {@link Storage}.
- *
- * **When to use**
- *
- * Use to back the log with a store other than memory or SQL.
- *
- * **Details**
- *
- * `append` numbers entries after the chat's last `seq`. It takes no lock:
- * the engine's chats write through their own, which also sends the entries
- * to the chat's subscribers. Write a chat outside its engine only while
- * nothing else writes it.
- *
- * @category constructors
- * @since 0.1.0
- */
+/** Creates a `ChatLog` from a {@link Storage}. */
 export const make = (storage: Storage): ChatLog["Service"] =>
   ChatLog.of({
     read: storage.read,
-    append: Effect.fn(function* (
+    append: Effect.fn("ChatLog.append")(function* (
       chatId: ChatId,
       events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>
     ) {
@@ -114,19 +77,20 @@ export const make = (storage: Storage): ChatLog["Service"] =>
 
       return entries
     }),
-    unfinished: Effect.map(storage.lastEntries, (last) =>
-      last.flatMap((entry) => (AssistantEvent.isTurnEnd(entry.event) ? [] : [entry.chatId]))
-    ),
-    delete: (chatId) => Effect.flatMap(Clock.currentTimeMillis, (at) => storage.delete(chatId, at)),
+    unfinished: Effect.gen(function* () {
+      const last = yield* storage.lastEntries
+
+      return last.flatMap((entry) => (AssistantEvent.isTurnEnd(entry.event) ? [] : [entry.chatId]))
+    }),
+    delete: Effect.fn("ChatLog.delete")(function* (chatId: ChatId) {
+      const at = yield* Clock.currentTimeMillis
+
+      yield* storage.delete(chatId, at)
+    }),
     isDeleted: storage.isDeleted
   })
 
-/**
- * Layer that keeps every chat in memory.
- *
- * @category layers
- * @since 0.1.0
- */
+/** Layer that keeps every chat in memory. */
 export const layerMemory: Layer.Layer<ChatLog> = Layer.effect(
   ChatLog,
   Effect.gen(function* () {
@@ -134,25 +98,37 @@ export const layerMemory: Layer.Layer<ChatLog> = Layer.effect(
     const deleted = yield* Ref.make(new Set<ChatId>())
 
     return make({
-      read: (chatId, options) =>
-        Effect.map(Ref.get(chats), (all) =>
-          (all.get(chatId) ?? []).filter((entry) => entry.seq > (options?.after ?? 0))
-        ),
-      lastSeq: (chatId) => Effect.map(Ref.get(chats), (all) => all.get(chatId)?.at(-1)?.seq ?? 0),
+      read: Effect.fnUntraced(function* (chatId: ChatId, options?: ReadOptions) {
+        const all = yield* Ref.get(chats)
+
+        return (all.get(chatId) ?? []).filter((entry) => entry.seq > (options?.after ?? 0))
+      }),
+      lastSeq: Effect.fnUntraced(function* (chatId: ChatId) {
+        const all = yield* Ref.get(chats)
+
+        return all.get(chatId)?.at(-1)?.seq ?? 0
+      }),
       write: (chatId, entries) =>
         Ref.update(chats, (all) => new Map(all).set(chatId, [...(all.get(chatId) ?? []), ...entries])),
-      lastEntries: Effect.map(Ref.get(chats), (all) => [...all.values()].flatMap((entries) => entries.slice(-1))),
-      delete: (chatId) =>
-        Effect.andThen(
-          Ref.update(deleted, (all) => new Set(all).add(chatId)),
-          Ref.update(chats, (all) => {
-            const next = new Map(all)
-            next.delete(chatId)
+      lastEntries: Effect.gen(function* () {
+        const all = yield* Ref.get(chats)
 
-            return next
-          })
-        ),
-      isDeleted: (chatId) => Effect.map(Ref.get(deleted), (all) => all.has(chatId))
+        return [...all.values()].flatMap((entries) => entries.slice(-1))
+      }),
+      delete: Effect.fnUntraced(function* (chatId: ChatId) {
+        yield* Ref.update(deleted, (all) => new Set(all).add(chatId))
+        yield* Ref.update(chats, (all) => {
+          const next = new Map(all)
+          next.delete(chatId)
+
+          return next
+        })
+      }),
+      isDeleted: Effect.fnUntraced(function* (chatId: ChatId) {
+        const all = yield* Ref.get(deleted)
+
+        return all.has(chatId)
+      })
     })
   })
 )
@@ -167,74 +143,68 @@ const Row = Schema.Struct({ chat_id: ChatId, seq: SqlNumber, at: SqlNumber, even
 const decodeLastSeq = Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ seq: Schema.NullOr(SqlNumber) })))
 
 /**
- * Layer that stores chats in a SQL table, `chat_log`, and creates it if it
- * doesn't exist.
- *
- * **Details**
- *
- * One row per entry: `chat_id`, `seq`, `at`, and `event` as JSON, keyed by
- * `(chat_id, seq)`. Deleting a chat removes its rows and records it in
- * `chat_log_deleted` (`chat_id`, `at`), created the same way.
- *
- * @category layers
- * @since 0.1.0
+ * Where the record that a chat was deleted lives. An app that keeps its chats
+ * in a table keeps it there, as a flag on the chat.
  */
-export const layerSql: Layer.Layer<ChatLog, never, SqlClient.SqlClient> = Layer.effect(
+export class DeletedChats extends Context.Service<
+  DeletedChats,
+  {
+    readonly isDeleted: (chatId: ChatId) => Effect.Effect<boolean>
+    /** Records that the chat was deleted, at this time (epoch milliseconds). Doing it again does nothing. */
+    readonly markDeleted: (chatId: ChatId, at: number) => Effect.Effect<void>
+  }
+>()("effect-assistant/ChatLog/DeletedChats") {}
+
+/**
+ * Layer that stores chats in a SQL table, `chat_log` (`chat_id`, `seq`, `at`,
+ * `event`; primary key `chat_id, seq`), which must exist.
+ */
+export const layerSql: Layer.Layer<ChatLog, never, SqlClient.SqlClient | DeletedChats> = Layer.effect(
   ChatLog,
   Effect.gen(function* () {
     const sql = (yield* SqlClient.SqlClient).withoutTransforms()
+    const deleted = yield* DeletedChats
 
-    yield* sql`
-      CREATE TABLE IF NOT EXISTS chat_log (
-        chat_id TEXT NOT NULL,
-        seq INTEGER NOT NULL,
-        at DOUBLE PRECISION NOT NULL,
-        event TEXT NOT NULL,
-        PRIMARY KEY (chat_id, seq)
-      )
-    `.pipe(Effect.orDie)
-
-    yield* sql`
-      CREATE TABLE IF NOT EXISTS chat_log_deleted (
-        chat_id TEXT NOT NULL PRIMARY KEY,
-        at DOUBLE PRECISION NOT NULL
-      )
-    `.pipe(Effect.orDie)
-
-    const isDeleted = Effect.fn(function* (chatId: ChatId) {
-      const rows = yield* sql`SELECT chat_id FROM chat_log_deleted WHERE chat_id = ${chatId}`
-
-      return rows.length > 0
-    }, Effect.orDie)
-
-    const toEntries = Effect.fn(function* (rows: ReadonlyArray<unknown>) {
+    const toEntries = Effect.fnUntraced(function* (rows: ReadonlyArray<unknown>) {
       const decoded = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(rows)
 
       return decoded.map((row) =>
-        AssistantEvent.Entry.make({ chatId: row.chat_id, seq: row.seq, at: row.at, event: row.event })
+        AssistantEvent.Entry.make({
+          chatId: row.chat_id,
+          seq: row.seq,
+          at: row.at,
+          event: row.event
+        })
       )
     })
 
     const encodeEvent = Schema.encodeEffect(EventJson)
 
     return make({
-      read: Effect.fn(function* (chatId: ChatId, options?: ReadOptions) {
+      read: Effect.fnUntraced(function* (chatId: ChatId, options?: ReadOptions) {
         const rows = yield* sql`
           SELECT chat_id, seq, at, event FROM chat_log WHERE chat_id = ${chatId} AND seq > ${options?.after ?? 0} ORDER BY seq
         `
 
         return yield* toEntries(rows)
       }, Effect.orDie),
-      lastSeq: Effect.fn(function* (chatId: ChatId) {
-        const rows = yield* sql`
+      lastSeq: Effect.fnUntraced(function* (chatId: ChatId) {
+        const result = yield* sql`
           SELECT MAX(seq) AS seq FROM chat_log WHERE chat_id = ${chatId}
-        `.pipe(Effect.flatMap(decodeLastSeq))
+        `
+
+        const rows = yield* decodeLastSeq(result)
 
         return rows[0]?.seq ?? 0
       }, Effect.orDie),
-      write: Effect.fn(function* (chatId: ChatId, entries: ReadonlyArray<AssistantEvent.Entry>) {
-        const rows = yield* Effect.forEach(entries, (entry) =>
-          Effect.map(encodeEvent(entry.event), (event) => ({ chat_id: chatId, seq: entry.seq, at: entry.at, event }))
+      write: Effect.fnUntraced(function* (chatId: ChatId, entries: ReadonlyArray<AssistantEvent.Entry>) {
+        const rows = yield* Effect.forEach(
+          entries,
+          Effect.fnUntraced(function* (entry: AssistantEvent.Entry) {
+            const event = yield* encodeEvent(entry.event)
+
+            return { chat_id: chatId, seq: entry.seq, at: entry.at, event }
+          })
         )
 
         yield* sql`INSERT INTO chat_log ${sql.insert(rows)}`
@@ -248,14 +218,15 @@ export const layerSql: Layer.Layer<ChatLog, never, SqlClient.SqlClient> = Layer.
 
         return yield* toEntries(rows)
       }).pipe(Effect.orDie),
-      delete: (chatId, at) =>
-        Effect.gen(function* () {
-          if (!(yield* isDeleted(chatId)))
-            yield* sql`INSERT INTO chat_log_deleted ${sql.insert({ chat_id: chatId, at })}`
-
+      delete: Effect.fnUntraced(
+        function* (chatId: ChatId, at: number) {
+          yield* deleted.markDeleted(chatId, at)
           yield* sql`DELETE FROM chat_log WHERE chat_id = ${chatId}`
-        }).pipe(sql.withTransaction, Effect.orDie),
-      isDeleted
+        },
+        sql.withTransaction,
+        Effect.orDie
+      ),
+      isDeleted: deleted.isDeleted
     })
   })
 )

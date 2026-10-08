@@ -17,9 +17,9 @@ import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import * as Response from "effect/unstable/ai/Response"
-import * as Tool from "effect/unstable/ai/Tool"
-import * as Toolkit from "effect/unstable/ai/Toolkit"
+import * as Response from "effect/ai/Response"
+import * as Tool from "effect/ai/Tool"
+import * as Toolkit from "effect/ai/Toolkit"
 import {
   Assistant,
   AssistantEngine,
@@ -41,7 +41,6 @@ import {
   memoryAssistant,
   newChat,
   notWorking,
-  realModel,
   runMemory,
   say,
   simple,
@@ -51,7 +50,8 @@ import {
   traceEntries,
   turnsDone,
   viewedMessages
-} from "./fixtures.ts"
+} from "./utils/fixtures.ts"
+import { realModel } from "./utils/realModel.ts"
 
 const instructions = "You help a small team. Be brief."
 
@@ -61,7 +61,7 @@ const GetWeather = Tool.make("get_weather", {
   success: Schema.Struct({ city: Schema.String, weather: Schema.String })
 })
 
-const weather = AssistantLoop.tools(Toolkit.make(GetWeather), {
+const weather = AssistantLoop.fromToolkit(Toolkit.make(GetWeather), {
   get_weather: ({ city }) => Effect.succeed({ city, weather: "hail, 3 degrees celsius" })
 })
 
@@ -175,7 +175,7 @@ describe("with a real model", () => {
     return Effect.gen(function* () {
       const ran = yield* Deferred.make<string>()
 
-      const toolkit = AssistantLoop.tools(
+      const toolkit = AssistantLoop.fromToolkit(
         Toolkit.make(PlaceOrder),
         {
           place_order: ({ product, quantity }) =>
@@ -240,7 +240,7 @@ describe("with a real model", () => {
         dependencies: [AssistantToolCall.AssistantToolCall]
       })
 
-      const sendReport = AssistantLoop.tools(Toolkit.make(SendReport), {
+      const sendReport = AssistantLoop.fromToolkit(Toolkit.make(SendReport), {
         send_report: () =>
           Effect.gen(function* () {
             yield* Deferred.succeed(ran, (yield* AssistantToolCall.AssistantToolCall).callId)

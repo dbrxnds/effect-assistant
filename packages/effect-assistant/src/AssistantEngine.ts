@@ -3,33 +3,10 @@
  * `toLayer` registers it with the engine, and its `submit` and
  * `subscribe` go through it. Pick one engine for the app, like a workflow
  * engine:
- *
- * - {@link layerCluster} runs each chat as a cluster entity. `submit` sends
- *   the chat's entity a persisted message and returns; the entity stores the
- *   input and runs turns until nothing is pending. A crash mid-turn leaves
- *   the message unprocessed, so the cluster redelivers it and the work
- *   resumes.
- * - {@link layerMemory} runs each chat in the process: `submit` stores the
- *   input, and a fiber runs turns until nothing is pending.
- *
- * Either one runs one turn per chat at a time, and keeps the chat's
- * specialist runs with it. A run's answer is stored in the chat and gets a
- * turn, like an input.
- *
- * **Example** (One engine for the app)
- *
- * ```ts
- * import * as Layer from "effect/Layer"
- * import { AssistantEngine, ChatLog } from "effect-assistant"
- *
- * const AppLive = Layer.mergeAll(MyAssistantLive, ResearchLive).pipe(
- *   Layer.provide(AssistantEngine.layerCluster),
- *   Layer.provide([ChatLog.layerSql, SingleRunnerLive])
- * )
- * ```
- *
- * @since 0.1.0
  */
+import * as ClusterSchema from "effect/cluster/ClusterSchema"
+import * as Entity from "effect/cluster/Entity"
+import * as Sharding from "effect/cluster/Sharding"
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
@@ -39,13 +16,10 @@ import * as MutableHashMap from "effect/MutableHashMap"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as RcMap from "effect/RcMap"
+import * as Rpc from "effect/rpc/Rpc"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
-import * as ClusterSchema from "effect/unstable/cluster/ClusterSchema"
-import * as Entity from "effect/unstable/cluster/Entity"
-import * as Sharding from "effect/unstable/cluster/Sharding"
-import * as Rpc from "effect/unstable/rpc/Rpc"
 import * as AssistantEvent from "./AssistantEvent.ts"
 import { ChatId } from "./ChatId.ts"
 import { ChatLog } from "./ChatLog.ts"
@@ -56,9 +30,6 @@ import type * as Turns from "./internal/turns.ts"
 /**
  * Service that runs assistants' chats. `toLayer` registers an assistant with
  * it; the assistant's `submit` and `subscribe` use it.
- *
- * @category services
- * @since 0.1.0
  */
 export class AssistantEngine extends Context.Service<
   AssistantEngine,
@@ -87,17 +58,6 @@ const notRegistered = (assistant: string) =>
 /**
  * Layer that runs chats in the process. Each chat's turns are fibers, one at
  * a time.
- *
- * **Details**
- *
- * When an assistant registers, the engine picks up the chats it was working
- * on when the process stopped: a turn cut off mid-way, or an input no turn
- * read, gets a turn. The log keeps every step, so the turn goes on from the
- * last one recorded. Run it in one process only: two would run the same
- * chat's turns and write its log at once.
- *
- * @category layers
- * @since 0.1.0
  */
 export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.effect(
   AssistantEngine,
@@ -110,12 +70,12 @@ export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.e
 
     // One entry per open chat, like a cluster entity: opened when used, closed five minutes after the last use.
     const chats: RcMap.RcMap<ChatKey, Chat.Chat> = yield* RcMap.make({
-      lookup: Effect.fn(function* (key: ChatKey) {
+      lookup: Effect.fnUntraced(function* (key: ChatKey) {
         const registration = registered.get(key.assistant)
 
         if (registration === undefined) return yield* notRegistered(key.assistant)
 
-        return yield* Chat.makeChat({
+        return yield* Chat.make({
           registration,
           chatId: key.chatId,
           keepAlive: (enabled) => keepAlive(key, enabled)
@@ -125,7 +85,7 @@ export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.e
     })
 
     // On: a hold on the chat's entry, in a scope of its own. Off: closing that scope lets the entry go idle.
-    const keepAlive = Effect.fn(function* (key: ChatKey, enabled: boolean) {
+    const keepAlive = Effect.fnUntraced(function* (key: ChatKey, enabled: boolean) {
       if (enabled) {
         const scope = yield* Scope.make()
 
@@ -141,11 +101,20 @@ export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.e
       if (Option.isSome(scope)) yield* Scope.close(scope.value, Exit.void)
     })
 
-    const withChat = <A>(assistant: string, chatId: ChatId, f: (chat: Chat.Chat) => Effect.Effect<A>) =>
-      Effect.scoped(RcMap.get(chats, new ChatKey({ assistant, chatId })).pipe(Effect.flatMap(f)))
+    const withChat = Effect.fnUntraced(function* <A>(
+      assistant: string,
+      chatId: ChatId,
+      f: (chat: Chat.Chat) => Effect.Effect<A>
+    ) {
+      const chat = yield* RcMap.get(chats, new ChatKey({ assistant, chatId }))
 
-    /** Runs turns for the assistant's chats that owe one: its last turn was cut off, or an input came after. */
-    const resumeAll = Effect.fn(function* (registration: Turns.Registration) {
+      return yield* f(chat)
+    }, Effect.scoped)
+
+    /**
+     * Runs turns for the assistant's chats that owe one: its last turn was cut off, or an input came after.
+     */
+    const resumeAll = Effect.fnUntraced(function* (registration: Turns.Registration) {
       const { name, app } = registration.definition
 
       for (const chatId of yield* log.unfinished) {
@@ -159,21 +128,25 @@ export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.e
     })
 
     return AssistantEngine.of({
-      register: Effect.fn(function* (registration: Turns.Registration) {
+      register: Effect.fn("AssistantEngine.register")(function* (registration: Turns.Registration) {
         registered.set(registration.definition.name, registration)
         // Chats this assistant was working on when the process stopped: pick them up again.
         yield* Effect.forkScoped(resumeAll(registration))
       }),
       submit: (assistant, chatId, input) => withChat(assistant, chatId, (chat) => chat.submitInBackground(input)),
       // The chat deletes itself, so a chat that's open stops; the entry goes, and the next open finds it deleted.
-      delete: (assistant, chatId) =>
-        withChat(assistant, chatId, (chat) => chat.delete).pipe(
-          Effect.andThen(RcMap.invalidate(chats, new ChatKey({ assistant, chatId })))
-        ),
+      delete: Effect.fn("AssistantEngine.delete")(function* (assistant: string, chatId: ChatId) {
+        yield* withChat(assistant, chatId, (chat) => chat.delete)
+        yield* RcMap.invalidate(chats, new ChatKey({ assistant, chatId }))
+      }),
       // The subscriber holds the chat open while it streams.
       subscribe: (assistant, chatId, after) =>
         Stream.unwrap(
-          RcMap.get(chats, new ChatKey({ assistant, chatId })).pipe(Effect.map((chat) => chat.stream(after)))
+          Effect.gen(function* () {
+            const chat = yield* RcMap.get(chats, new ChatKey({ assistant, chatId }))
+
+            return chat.stream(after)
+          })
         )
     })
   })
@@ -198,21 +171,12 @@ const Subscribe = Rpc.make("Subscribe", {
 
 const Delete = Rpc.make("Delete")
 
+const chatEntity = (assistant: string) => Entity.make(`Assistant/${assistant}`, [Submit, Subscribe, Delete])
+
 /**
  * Layer that runs chats as cluster entities, one per chat, keyed by chat id.
- * Needs `Sharding`: a `SingleRunner` for one process with SQL storage, or
- * `TestRunner` in tests.
- *
- * **Details**
- *
- * A chat's specialist runs live in its entity, which keeps itself alive
- * while they (or turns for their answers) work. A run cut off by a shutdown
- * answers that it was, and the entity starts again after the restart: when
- * an entity starts, it runs a turn for any input no turn has read. An entity
- * with no work and no subscribers stops after 5 minutes.
- *
- * @category layers
- * @since 0.1.0
+ * Needs `Sharding`: a `SingleRunner` for one process with SQL storage, a
+ * runner of the app's cluster, or `TestRunner` in tests.
  */
 export const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Sharding.Sharding> = Layer.effect(
   AssistantEngine,
@@ -221,8 +185,8 @@ export const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Shardin
     const sharding = yield* Sharding.Sharding
     const clients = new Map<string, EntityClient>()
 
-    const register = Effect.fn(function* (registration: Turns.Registration) {
-      const ChatEntity = Entity.make(`Assistant/${registration.definition.name}`, [Submit, Subscribe, Delete])
+    const register = Effect.fnUntraced(function* (registration: Turns.Registration) {
+      const ChatEntity = chatEntity(registration.definition.name)
 
       const handlers = Effect.gen(function* () {
         const address = yield* Entity.CurrentAddress
@@ -239,7 +203,7 @@ export const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Shardin
         // A keep-alive left on from before a restart (by a run cut off) has done its job: it started the entity.
         yield* keepAlive(false)
 
-        const chat = yield* Chat.makeChat({ registration, chatId, keepAlive })
+        const chat = yield* Chat.make({ registration, chatId, keepAlive })
         yield* chat.resume
 
         return ChatEntity.of({
@@ -254,29 +218,51 @@ export const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Shardin
         maxIdleTime: "5 minutes",
         concurrency: "unbounded"
       })
+    })
 
-      const makeClient = yield* ChatEntity.client
+    // Made on first use, so a process that registers no assistant can still reach its chats.
+    const clientOf = Effect.fnUntraced(function* (assistant: string) {
+      const known = clients.get(assistant)
 
-      clients.set(registration.definition.name, {
+      if (known !== undefined) return known
+
+      const makeClient = yield* chatEntity(assistant).client.pipe(Effect.provide(context))
+
+      const client: EntityClient = {
         submit: (chatId, input) => makeClient(chatId).Submit({ input }, { discard: true }).pipe(Effect.orDie),
         subscribe: (chatId, after) => makeClient(chatId).Subscribe({ after }).pipe(Stream.orDie),
         delete: (chatId) => makeClient(chatId).Delete().pipe(Effect.orDie)
-      })
+      }
+
+      clients.set(assistant, client)
+
+      return client
     })
-
-    const clientOf = (assistant: string) => {
-      const client = clients.get(assistant)
-
-      return client === undefined ? notRegistered(assistant) : Effect.succeed(client)
-    }
 
     return AssistantEngine.of({
       register: (registration) => register(registration).pipe(Effect.provide(context)),
-      submit: (assistant, chatId, input) =>
-        clientOf(assistant).pipe(Effect.flatMap((client) => client.submit(chatId, input))),
+      submit: Effect.fn("AssistantEngine.submit")(function* (
+        assistant: string,
+        chatId: ChatId,
+        input: AssistantEvent.Input | AssistantEvent.StoredAppEvent
+      ) {
+        const client = yield* clientOf(assistant)
+
+        yield* client.submit(chatId, input)
+      }),
       subscribe: (assistant, chatId, after) =>
-        Stream.unwrap(Effect.map(clientOf(assistant), (client) => client.subscribe(chatId, after))),
-      delete: (assistant, chatId) => clientOf(assistant).pipe(Effect.flatMap((client) => client.delete(chatId)))
+        Stream.unwrap(
+          Effect.gen(function* () {
+            const client = yield* clientOf(assistant)
+
+            return client.subscribe(chatId, after)
+          })
+        ),
+      delete: Effect.fn("AssistantEngine.delete")(function* (assistant: string, chatId: ChatId) {
+        const client = yield* clientOf(assistant)
+
+        yield* client.delete(chatId)
+      })
     })
   })
 )

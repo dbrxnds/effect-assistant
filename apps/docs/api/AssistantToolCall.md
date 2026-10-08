@@ -9,51 +9,7 @@ import { AssistantToolCall } from "effect-assistant"
 The `AssistantToolCall` module gives a tool the call it runs for: its id,
 and a key for anything it does outside the chat.
 
-A tool call runs at least once. If the process stops while a call runs,
-the next turn runs it again, with the same call id, before the model goes
-on. A tool that orders, sends, or writes something passes
-`idempotencyKey` to whatever does it (a workflow's idempotency key,
-a payment's key), so the second run finds the first one's work instead of
-doing it twice.
-
-A side effect that can't take a key, like sending an email, belongs in a
-workflow step (it runs once per key, however often the tool call does) or
-behind the user's approval, with a block.
-
-A tool whose handler uses it declares it as a dependency, like any service
-its handler needs.
-
-**Example** (A tool that starts a workflow once per call)
-
-```ts
-import * as Effect from "effect/Effect"
-import * as Schema from "effect/Schema"
-import * as Tool from "effect/unstable/ai/Tool"
-import * as Toolkit from "effect/unstable/ai/Toolkit"
-import { AssistantToolCall, RunId } from "effect-assistant"
-
-const PlaceOrder = Tool.make("place_order", {
-  description: "Places the order the user confirmed.",
-  parameters: OrderInput,
-  success: Schema.Struct({ runId: RunId.RunId }),
-  dependencies: [AssistantToolCall.AssistantToolCall]
-})
-
-const OrderTools = Toolkit.make(PlaceOrder)
-
-const OrderToolsLive = OrderTools.toLayer({
-  place_order: (input) =>
-    Effect.gen(function*() {
-      // The same run id every time this call runs.
-      const runId = RunId.fromKey(yield* AssistantToolCall.idempotencyKey)
-      yield* ProductOrder.execute({ runId, ...input }, { discard: true })
-
-      return { runId }
-    })
-})
-```
-
-## Services
+## Other
 
 ### AssistantToolCall
 
@@ -73,8 +29,6 @@ class AssistantToolCall extends Context.Service<
 ```
 
 <small>Since 0.1.0</small>
-
-## Accessors
 
 ### idempotencyKey
 

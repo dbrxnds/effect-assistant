@@ -1,13 +1,22 @@
 import { describe, expect, it } from "@effect/vitest"
+import * as Response from "effect/ai/Response"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import * as Response from "effect/unstable/ai/Response"
 import { AssistantEvent, ChatId, ChatView, Decision, DecisionId, InputId, RunId } from "../src/index.ts"
-import { collectUntil, newChat, say, storedUpdate, turnsDone, update, Updating, updatingAssistant } from "./fixtures.ts"
-import * as Scripted from "./scripted.ts"
+import {
+  collectUntil,
+  newChat,
+  say,
+  storedUpdate,
+  turnsDone,
+  update,
+  Updating,
+  updatingAssistant
+} from "./utils/fixtures.ts"
+import * as Scripted from "./utils/scripted.ts"
 
 const chatId = Effect.runSync(ChatId.make)
 
@@ -27,7 +36,7 @@ const call = Response.makePart("tool-call", {
 })
 
 const request = AssistantEvent.DecisionRequested.make({
-  id: DecisionId.forCall("toolu_quote"),
+  id: DecisionId.fromCallId("toolu_quote"),
   origin: AssistantEvent.CallOrigin.make({
     callId: "toolu_quote",
     tool: "quote_order",
@@ -39,7 +48,10 @@ const request = AssistantEvent.DecisionRequested.make({
 const ask = AssistantEvent.AssistantMessage.make({
   id: "m1",
   text: "Place the order for $1,200?",
-  block: AssistantEvent.MessageBlock.make({ kind: Decision.kind, props: { decisionIds: [request.id] } })
+  block: AssistantEvent.MessageBlock.make({
+    kind: Decision.kind,
+    props: { decisionIds: [request.id] }
+  })
 })
 
 const approve = AssistantEvent.BlockAnswer.make({
@@ -93,7 +105,10 @@ describe("ChatView.fromEntries", () => {
     const choose = AssistantEvent.AssistantMessage.make({
       id: "m2",
       text: "Red or blue?",
-      block: AssistantEvent.MessageBlock.make({ kind: "choose_one", props: { options: ["red", "blue"] } })
+      block: AssistantEvent.MessageBlock.make({
+        kind: "choose_one",
+        props: { options: ["red", "blue"] }
+      })
     })
 
     const status = (events: ReadonlyArray<AssistantEvent.AssistantEvent>) =>
@@ -111,10 +126,17 @@ describe("ChatView.fromEntries", () => {
     const working = view([
       hi,
       AssistantEvent.TurnStarted.make({ assistant: "test" }),
-      AssistantEvent.SpecialistStarted.make({ runId, specialist: "research", goal: "internal brief" })
+      AssistantEvent.SpecialistStarted.make({
+        runId,
+        specialist: "research",
+        goal: "internal brief"
+      })
     ])
 
-    expect(working.activity).toEqual({ working: true, specialists: [{ specialist: "research", since: 3000 }] })
+    expect(working.activity).toEqual({
+      working: true,
+      specialists: [{ specialist: "research", since: 3000 }]
+    })
     expect(JSON.stringify(working)).not.toContain("internal brief")
 
     const failed = view([

@@ -35,9 +35,9 @@ import * as Predicate from "effect/Predicate"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import * as RpcClient from "effect/unstable/rpc/RpcClient"
-import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization"
-import * as Socket from "effect/unstable/socket/Socket"
+import * as RpcClient from "effect/rpc/RpcClient"
+import * as RpcSerialization from "effect/rpc/RpcSerialization"
+import * as Socket from "effect/socket/Socket"
 
 const base = (process.argv[2] ?? "http://127.0.0.1:8787").replace(/\/$/, "")
 

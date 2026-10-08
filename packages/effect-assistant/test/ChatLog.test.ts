@@ -1,14 +1,10 @@
-import * as SqliteClient from "@effect/sql-sqlite-node/SqliteClient"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import * as Layer from "effect/Layer"
 import { AssistantEvent, ChatId, ChatLog } from "../src/index.ts"
-import { say } from "./fixtures.ts"
+import { say } from "./utils/fixtures.ts"
 
-const stores = {
-  layerMemory: ChatLog.layerMemory,
-  layerSql: ChatLog.layerSql.pipe(Layer.provide(SqliteClient.layer({ filename: ":memory:" })))
-}
+// The monorepo has no SQLite driver, so layerSql is tested upstream only.
+const stores = { layerMemory: ChatLog.layerMemory }
 
 for (const [name, store] of Object.entries(stores)) {
   describe(`ChatLog.${name}`, () => {

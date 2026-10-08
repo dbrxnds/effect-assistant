@@ -14,9 +14,9 @@ import * as Predicate from "effect/Predicate"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import * as ClusterWorkflowEngine from "effect/unstable/cluster/ClusterWorkflowEngine"
-import * as TestRunner from "effect/unstable/cluster/TestRunner"
-import * as LanguageModel from "effect/unstable/ai/LanguageModel"
+import * as ClusterWorkflowEngine from "effect/cluster/ClusterWorkflowEngine"
+import * as TestRunner from "effect/cluster/TestRunner"
+import * as LanguageModel from "effect/ai/LanguageModel"
 import { AcmeAssistant } from "../src/AcmeAssistant.ts"
 import * as Campaign from "../src/Campaign.ts"
 import * as LiveOrders from "../src/LiveOrders.ts"
@@ -37,7 +37,7 @@ const quietAcme = AcmeAssistant.toLayer(() =>
   Stream.fromEffect(
     Effect.gen(function* () {
       const chat = yield* AssistantChat.AssistantChat
-      const states = [...Decision.states(yield* chat.entries).values()]
+      const states = [...Decision.fromEntries(yield* chat.entries).values()]
       const waiting = states.flatMap((state) => (state.outcome === undefined ? [state.request.id] : []))
 
       if (waiting.length === 0) return

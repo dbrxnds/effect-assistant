@@ -2,53 +2,16 @@
  * The `Block` module defines UI blocks: a bit of UI the assistant can put in a
  * message when a structured answer is easier than typing, such as options to
  * pick from, approve/deny, or a small input.
- *
- * A host defines a fixed catalog of blocks, shared by server and client (see
- * `BlockKit`). The assistant adds one to a message with
- * `send_user_message({ text, block: { kind, props } })`. Using it sends a
- * `BlockAnswer` input, shown in the block rather than as a message. A block is
- * only a shortcut: the user can always type instead, and the assistant reads either.
- *
- * **Example** (Defining blocks)
- *
- * ```ts
- * import * as Schema from "effect/Schema"
- * import { Block, BlockKit } from "effect-assistant"
- *
- * const ChooseOne = Block.make("choose_one", {
- *   description: "Buttons for picking one of a few options.",
- *   props: Schema.Struct({ options: Schema.Array(Schema.String) }),
- *   answer: Schema.Struct({ choice: Schema.String })
- * })
- *
- * const Confirm = Block.make("confirm", {
- *   description: "Approve / deny buttons for a yes-or-no decision.",
- *   props: Schema.Struct({ confirmLabel: Schema.String, denyLabel: Schema.String }),
- *   answer: Schema.Struct({ confirmed: Schema.Boolean })
- * })
- *
- * export const Blocks = BlockKit.make([ChooseOne, Confirm])
- * ```
- *
- * @since 0.1.0
  */
 import type * as Schema from "effect/Schema"
 
 /**
  * A schema a block's props or answer can use: any codec that needs no
  * services, since the client decodes and encodes with it too.
- *
- * @category models
- * @since 0.1.0
  */
 export type Codec = Schema.Codec<any, any>
 
-/**
- * A kind of UI block.
- *
- * @category models
- * @since 0.1.0
- */
+/** A kind of UI block. */
 export interface Block<Kind extends string = string, Props extends Codec = Codec, Answer extends Codec = Codec> {
   readonly kind: Kind
   /** When to use it. The assistant sees this. */
@@ -59,26 +22,10 @@ export interface Block<Kind extends string = string, Props extends Codec = Codec
   readonly answer: Answer | undefined
 }
 
-/**
- * Any block, for generic constraints.
- *
- * @category utility types
- * @since 0.1.0
- */
+/** Any block, for generic constraints. */
 export type Any = Block
 
-/**
- * Creates a block.
- *
- * **Details**
- *
- * The assistant fills in `props`; the props schema is checked when it sends the
- * message. `answer` is what the client sends back when the block is used.
- * Leave it out for display-only cards.
- *
- * @category constructors
- * @since 0.1.0
- */
+/** Creates a block. */
 export const make = <const Kind extends string, Props extends Codec, Answer extends Codec = Schema.Never>(
   kind: Kind,
   options: {

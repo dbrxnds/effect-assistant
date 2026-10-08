@@ -1,9 +1,6 @@
 /**
  * One chat of an assistant: its writer, its turns, and its specialist runs.
  * Both engines run chats with this.
- *
- * @since 0.1.0
- * @internal
  */
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
@@ -43,7 +40,9 @@ const idOf = (event: { readonly _tag: string }): string | undefined =>
       ? event.id
       : undefined
 
-/** Whether an input is a workflow's decision: the answer completes its deferred, which takes a workflow engine. */
+/**
+ * Whether an input is a workflow's decision: the answer completes its deferred, which takes a workflow engine.
+ */
 const needsWorkflows = (input: AssistantEvent.Input | AssistantEvent.StoredAppEvent) =>
   AssistantEvent.isLibraryEvent(input) &&
   Predicate.isTagged(input, "DecisionRequested") &&
@@ -62,15 +61,29 @@ const makeChannelPubSub = Effect.acquireRelease(PubSub.unbounded<AssistantEvent.
  * interrupted (a shutdown) keeps its hold, so the chat starts again and
  * picks up where it was cut off.
  */
-const makeHolding = Effect.fn(function* (keepAlive: (enabled: boolean) => Effect.Effect<void>) {
+const makeHolding = Effect.fnUntraced(function* (keepAlive: (enabled: boolean) => Effect.Effect<void>) {
   const holds = yield* SynchronizedRef.make(0)
 
-  const acquire = SynchronizedRef.updateEffect(holds, (n) =>
-    n === 0 ? Effect.as(keepAlive(true), 1) : Effect.succeed(n + 1)
+  const acquire = SynchronizedRef.updateEffect(
+    holds,
+    Effect.fnUntraced(function* (n: number) {
+      if (n !== 0) return n + 1
+
+      yield* keepAlive(true)
+
+      return 1
+    })
   )
 
-  const release = SynchronizedRef.updateEffect(holds, (n) =>
-    n === 1 ? Effect.as(keepAlive(false), 0) : Effect.succeed(n - 1)
+  const release = SynchronizedRef.updateEffect(
+    holds,
+    Effect.fnUntraced(function* (n: number) {
+      if (n !== 1) return n - 1
+
+      yield* keepAlive(false)
+
+      return 0
+    })
   )
 
   return (effect: Effect.Effect<void>) =>
@@ -81,19 +94,19 @@ const makeHolding = Effect.fn(function* (keepAlive: (enabled: boolean) => Effect
     )
 })
 
-/**
- * One open chat of an assistant: what the engines do with it.
- *
- * @internal
- */
+/** One open chat of an assistant: what the engines do with it. */
 export interface Chat {
   /** Stores the input, then runs turns until nothing is pending. */
   readonly submit: (input: AssistantEvent.Input | AssistantEvent.StoredAppEvent) => Effect.Effect<void>
   /** Stores the input, and runs turns for it in the background. */
   readonly submitInBackground: (input: AssistantEvent.Input | AssistantEvent.StoredAppEvent) => Effect.Effect<void>
-  /** Runs turns in the background for inputs no turn has read, like a report stored during a shutdown. */
+  /**
+   * Runs turns in the background for inputs no turn has read, like a report stored during a shutdown.
+   */
   readonly resume: Effect.Effect<void>
-  /** The chat's entries after `after` (all of them by default), then new ones as they're appended. */
+  /**
+   * The chat's entries after `after` (all of them by default), then new ones as they're appended.
+   */
   readonly stream: (after: number) => Stream.Stream<AssistantEvent.Entry>
   /** Deletes the chat: its log, what works in it, and what it holds. */
   readonly delete: Effect.Effect<void>
@@ -114,26 +127,8 @@ const refusedDeleted = (input: { readonly _tag: string }) =>
 /**
  * Opens one chat of an assistant, in the current scope: runs the handlers'
  * builds, and returns how to submit to it and stream it.
- *
- * **Details**
- *
- * `submit` stores an input and runs turns until nothing is pending;
- * `submitInBackground` returns once the input is stored. A run's report is
- * stored and gets a turn in the background, like an input. Turns run one at
- * a time, and the chat's writes go one at a time through its
- * `AssistantChat`, which also sends them to its subscribers.
- *
- * `keepAlive` is on while anything works in the background: a run, or turns
- * no request waits on.
- *
- * Everything that works in the chat (the builds' resources, turns, runs)
- * lives in a scope of its own, which `delete` closes: after it, the chat
- * stores nothing, and what reported into it finds it gone, quietly. A chat
- * deleted before it opened takes nothing.
- *
- * @internal
  */
-export const makeChat = Effect.fn(function* (options: {
+export const make = Effect.fnUntraced(function* (options: {
   readonly registration: Turns.Registration
   readonly chatId: ChatId
   readonly keepAlive: (enabled: boolean) => Effect.Effect<void>
@@ -151,7 +146,7 @@ export const makeChat = Effect.fn(function* (options: {
   const storing = yield* Semaphore.make(1)
   const turnsLock = yield* Semaphore.make(1)
   const holding = yield* makeHolding(options.keepAlive)
-  const deleted = yield* Deferred.make<void>()
+  const deleted = yield* Deferred.make<undefined>()
   // What works in the chat, so deleting it stops all of it: its turns, runs, and the builds' resources.
   const working = yield* Scope.fork(yield* Effect.scope)
   const inWorking = Effect.provideService(Scope.Scope, working)
@@ -165,21 +160,31 @@ export const makeChat = Effect.fn(function* (options: {
 
   // Every writer (the turn's loop, specialist runs, a handler's own appends) goes through here, one at a time: each
   // append is numbered after the last, and its entries go to the chat's subscribers. After a delete it stores nothing.
-  const write = (events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>) => {
+  const write = Effect.fnUntraced(function* (
+    events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>
+  ) {
     const unknown = events.find((event) => !AssistantEvent.isLibraryEvent(event) && !AppEvents.isRegistered(app, event))
 
-    return unknown === undefined
-      ? Effect.flatMap(isDeleted, (gone) => (gone ? Effect.succeed([]) : stored(events)))
-      : Effect.die(`${unknown._tag} isn't one of the ${registration.definition.name} assistant's events.`)
-  }
+    if (unknown !== undefined) {
+      return yield* Effect.die(`${unknown._tag} isn't one of the ${registration.definition.name} assistant's events.`)
+    }
+
+    if (yield* isDeleted) return []
+
+    return yield* stored(events)
+  })
 
   // Uninterruptible: a stored append must reach memory and the subscribers too, or a turn misses it and replies twice.
-  const stored = (events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>) =>
-    storage.append(chatId, events).pipe(
-      Effect.tap((stored) => Ref.update(entries, (all) => [...all, ...stored])),
-      Effect.tap((stored) => PubSub.publishAll(channel, stored)),
-      Effect.uninterruptible
-    )
+  const stored = Effect.fnUntraced(function* (
+    events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>
+  ) {
+    const stored = yield* storage.append(chatId, events)
+
+    yield* Ref.update(entries, (all) => [...all, ...stored])
+    yield* PubSub.publishAll(channel, stored)
+
+    return stored
+  }, Effect.uninterruptible)
 
   const chat = AssistantChat.of({
     chatId,
@@ -188,21 +193,20 @@ export const makeChat = Effect.fn(function* (options: {
   })
 
   /** Passes a workflow's decision on: completes the deferred it waits on. */
-  const deliver = ({ request, outcome }: Decisions.Decided) => {
+  const deliver = Effect.fnUntraced(function* ({ request, outcome }: Decisions.Decided) {
     const { origin } = request
 
-    if (!Predicate.isTagged(origin, "Work") || origin.token === undefined) return Effect.void
+    if (!Predicate.isTagged(origin, "Work") || origin.token === undefined) return
 
     const token = origin.token
 
-    return Option.match(registration.workflows, {
-      onNone: () => Effect.die(noWorkflows(request)),
-      onSome: (workflows) => Effect.provideContext(Decisions.complete(token, outcome), workflows)
-    })
-  }
+    if (Option.isNone(registration.workflows)) return yield* Effect.die(noWorkflows(request))
+
+    yield* Effect.provideContext(Decisions.complete(token, outcome), registration.workflows.value)
+  })
 
   /** Records what an answer decided, once any workflow waiting on it has it. */
-  const resolve = Effect.fn(function* (decided: ReadonlyArray<Decisions.Decided>, answer: InputId) {
+  const resolve = Effect.fnUntraced(function* (decided: ReadonlyArray<Decisions.Decided>, answer: InputId) {
     yield* Effect.forEach(decided, deliver, { discard: true })
     yield* chat.append(
       decided.map(({ request, outcome }) => AssistantEvent.DecisionResolved.make({ id: request.id, outcome, answer }))
@@ -214,7 +218,7 @@ export const makeChat = Effect.fn(function* (options: {
    * decision answer that doesn't fit its block or what's still waiting. A decision answer's decisions are resolved
    * before the next input.
    */
-  const store = Effect.fn(function* (input: AssistantEvent.Input | AssistantEvent.StoredAppEvent) {
+  const store = Effect.fnUntraced(function* (input: AssistantEvent.Input | AssistantEvent.StoredAppEvent) {
     if (yield* isDeleted) return yield* refusedDeleted(input)
 
     if (needsWorkflows(input) && Option.isNone(registration.workflows)) return yield* Effect.die(noWorkflows(input))
@@ -263,30 +267,32 @@ export const makeChat = Effect.fn(function* (options: {
   // deleted.
   const handler = yield* inWorking(Effect.provideService(registration.open, AssistantChat, chat))
 
-  const specialists = yield* Effect.forEach(registration.specialists, ({ specialist, built }) =>
-    Effect.map(inWorking(Effect.provideService(built.open, AssistantChat, chat)), (runHandler) => ({
-      specialist,
-      handler: runHandler
-    }))
+  const specialists = yield* Effect.forEach(
+    registration.specialists,
+    Effect.fnUntraced(function* ({ specialist, built }) {
+      const handler = yield* inWorking(Effect.provideService(built.open, AssistantChat, chat))
+
+      return { specialist, handler }
+    })
   )
 
   const inBackground = (effect: Effect.Effect<void>) => FiberSet.run(background, holding(effect)).pipe(Effect.asVoid)
 
   // A request's turns run in the working scope too, so a delete stops them; the request ends quietly then.
-  const inRequest = (effect: Effect.Effect<void>) =>
-    FiberSet.run(requests, effect).pipe(
-      Effect.flatMap((fiber) => Fiber.await(fiber).pipe(Effect.onInterrupt(() => Fiber.interrupt(fiber)))),
-      Effect.flatMap((exit) =>
-        Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause) ? Effect.failCause(exit.cause) : Effect.void
-      ),
-      Effect.orDie
-    )
+  const inRequest = Effect.fnUntraced(function* (effect: Effect.Effect<void>) {
+    const fiber = yield* FiberSet.run(requests, effect)
+    const exit = yield* Fiber.await(fiber).pipe(Effect.onInterrupt(() => Fiber.interrupt(fiber)))
+
+    if (Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)) {
+      return yield* Effect.failCause(exit.cause)
+    }
+  }, Effect.orDie)
 
   /** Runs turns, one at a time, until no input is left unhandled. */
   const drain: Effect.Effect<void> = Semaphore.withPermit(turnsLock)(
     Effect.gen(function* () {
       while (!(yield* isDeleted) && History.needsTurn(yield* chat.entries, wakes)) {
-        yield* Turns.runTurn({ registration, handler, chat, services })
+        yield* Turns.run({ registration, handler, chat, services })
       }
     })
   )
@@ -297,26 +303,42 @@ export const makeChat = Effect.fn(function* (options: {
       specialists,
       model: registration.model,
       holding,
-      report: (finished) => store(finished).pipe(Effect.andThen(inBackground(drain)))
+      report: Effect.fnUntraced(function* (finished) {
+        yield* store(finished)
+        yield* inBackground(drain)
+      })
     })
   )
 
   const services = Context.make(AssistantChat, chat).pipe(
     Context.add(SpecialistService.Runner, runner),
-    Context.add(Decisions.TurnDecisions, Option.some({ approved: Effect.map(chat.entries, Decisions.approvedCalls) })),
+    Context.add(
+      Decisions.TurnDecisions,
+      Option.some({
+        approved: Effect.gen(function* () {
+          const all = yield* chat.entries
+
+          return Decisions.approvedCalls(all)
+        })
+      })
+    ),
     Context.merge(registration.model)
   )
 
-  /** Declines what workflows still wait on: no one can answer them now, and declining runs nothing. */
+  /**
+   * Declines what workflows still wait on: no one can answer them now, and declining runs nothing.
+   */
   const declineWaiting = Effect.gen(function* () {
     if (Option.isNone(registration.workflows)) return
 
-    const waiting = [...Decision.states(yield* Ref.get(entries)).values()].filter(
+    const waiting = [...Decision.fromEntries(yield* Ref.get(entries)).values()].filter(
       ({ request, outcome }) =>
         outcome === undefined && Predicate.isTagged(request.origin, "Work") && request.origin.token !== undefined
     )
 
-    yield* Effect.forEach(waiting, ({ request }) => deliver({ request, outcome: "declined" }), { discard: true })
+    yield* Effect.forEach(waiting, ({ request }) => deliver({ request, outcome: "declined" }), {
+      discard: true
+    })
   })
 
   const remove = Effect.gen(function* () {
@@ -338,15 +360,24 @@ export const makeChat = Effect.fn(function* (options: {
     // Its own fiber: a tool that deletes its own chat is in the working scope, and closing it interrupts that tool.
     // Interrupted work keeps its hold (see `makeHolding`), so the chat lets go of it here.
     const closing = yield* Effect.forkDetach(
-      Scope.close(working, Exit.void).pipe(Effect.andThen(options.keepAlive(false)))
+      Effect.gen(function* () {
+        yield* Scope.close(working, Exit.void)
+        yield* options.keepAlive(false)
+      })
     )
 
     yield* Fiber.await(closing)
   })
 
   const chatApi: Chat = {
-    submit: (input) => store(input).pipe(Effect.andThen(inRequest(drain))),
-    submitInBackground: (input) => store(input).pipe(Effect.andThen(inBackground(drain))),
+    submit: Effect.fnUntraced(function* (input) {
+      yield* store(input)
+      yield* inRequest(drain)
+    }),
+    submitInBackground: Effect.fnUntraced(function* (input) {
+      yield* store(input)
+      yield* inBackground(drain)
+    }),
     resume: Effect.gen(function* () {
       if (History.needsTurn(yield* chat.entries, wakes)) yield* inBackground(drain)
     }),

@@ -12,9 +12,9 @@
   "dependencies": {
     "@acme/demo-shared": "workspace:*",
     "@assistant-ui/react": "^0.15.21",
-    "@effect/atom-react": "4.0.0-beta.107",
+    "@effect/atom-react": "4.0.0",
     "@tanstack/react-router": "^1.170.38",
-    "effect": "4.0.0-rc.117",
+    "effect": "4.0.0",
     "effect-assistant": "workspace:*",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",

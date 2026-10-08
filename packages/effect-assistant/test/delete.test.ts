@@ -5,8 +5,8 @@ import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Stream from "effect/Stream"
 import { Assistant, ChatLog, Specialist } from "../src/index.ts"
-import { collectUntil, newChat, runEntity, runMemory, say, turnsDone, update, UpdateEvent } from "./fixtures.ts"
-import * as Scripted from "./scripted.ts"
+import { collectUntil, newChat, runEntity, runMemory, say, turnsDone, update, UpdateEvent } from "./utils/fixtures.ts"
+import * as Scripted from "./utils/scripted.ts"
 
 const engines = { memory: runMemory, cluster: runEntity }
 

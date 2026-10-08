@@ -13,8 +13,8 @@ import * as AssistantEvent from "effect-assistant/AssistantEvent"
 import * as ChatId from "effect-assistant/ChatId"
 import * as ChatView from "effect-assistant/ChatView"
 import * as Schema from "effect/Schema"
-import * as Rpc from "effect/unstable/rpc/Rpc"
-import * as RpcGroup from "effect/unstable/rpc/RpcGroup"
+import * as Rpc from "effect/rpc/Rpc"
+import * as RpcGroup from "effect/rpc/RpcGroup"
 import { ChatList } from "./ChatList.ts"
 
 /**

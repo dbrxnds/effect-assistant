@@ -12,12 +12,13 @@ import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as SqlClient from "effect/sql/SqlClient"
 import * as Redacted from "effect/Redacted"
-import type * as MessageStorage from "effect/unstable/cluster/MessageStorage"
-import * as RunnerAddress from "effect/unstable/cluster/RunnerAddress"
-import type * as Sharding from "effect/unstable/cluster/Sharding"
-import * as SingleRunner from "effect/unstable/cluster/SingleRunner"
-import * as TestRunner from "effect/unstable/cluster/TestRunner"
+import type * as MessageStorage from "effect/cluster/MessageStorage"
+import * as RunnerAddress from "effect/cluster/RunnerAddress"
+import type * as Sharding from "effect/cluster/Sharding"
+import * as SingleRunner from "effect/cluster/SingleRunner"
+import * as TestRunner from "effect/cluster/TestRunner"
 import { createHash, randomBytes } from "node:crypto"
 import * as Chats from "./Chats.ts"
 import * as LiveOrders from "./LiveOrders.ts"
@@ -58,6 +59,23 @@ const layerNodeCrypto = Layer.sync(Crypto.Crypto, () =>
   })
 )
 
+// ChatLog.layerSql expects its table; the demo creates it on start, an app would migrate it.
+const layerChatLogTable = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+
+    yield* sql`
+      CREATE TABLE IF NOT EXISTS chat_log (
+        chat_id TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        at DOUBLE PRECISION NOT NULL,
+        event TEXT NOT NULL,
+        PRIMARY KEY (chat_id, seq)
+      )
+    `
+  })
+)
+
 /** One runner that owns every shard, with SQL storage. */
 const layerSqlRunner = SingleRunner.layer({
   runnerStorage: "sql",
@@ -74,9 +92,12 @@ type Services =
 const layerFor = (url: Option.Option<string>, maxConnections: number): Layer.Layer<Services, unknown> =>
   Option.isNone(url)
     ? Layer.mergeAll(ChatLog.layerMemory, Chats.layerMemory, LiveOrders.layerMemory, TestRunner.layer)
-    : Layer.mergeAll(ChatLog.layerSql, Chats.layerSql, LiveOrders.layerSql, layerSqlRunner).pipe(
-        Layer.provideMerge(layerPg(url.value, maxConnections))
-      )
+    : Layer.mergeAll(
+        ChatLog.layerSql.pipe(Layer.provide([Chats.layerDeletedChats, layerChatLogTable])),
+        Chats.layerSql,
+        LiveOrders.layerSql,
+        layerSqlRunner
+      ).pipe(Layer.provideMerge(layerPg(url.value, maxConnections)))
 
 /**
  * Layer that provides the event log, the thread list, and the cluster runner:

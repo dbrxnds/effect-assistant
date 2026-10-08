@@ -11,39 +11,11 @@ doesn't carry every definition: `search_tools` finds tools by what the
 model needs to do (name, description, input schema), and `execute_tool`
 validates an input and runs one.
 
-Use it for tools that change at runtime (MCP servers, plugins) or catalogs
-too big for the prompt. Fixed, frequently used tools belong in the toolkit
-directly.
-
-**Example** (Common tools up front, the rest on demand)
-
-```ts
-import { AssistantLoop, ToolDiscovery } from "effect-assistant"
-
-const MyAssistantLive = MyAssistant.toLayer(Effect.gen(function*() {
-  const toolkit = AssistantLoop.merge(
-    AssistantLoop.tools(yield* OrderTools),
-    ToolDiscovery.make(AssistantLoop.tools(yield* OfficeTools))
-  )
-
-  return (turn) => turn.loop({ instructions: "You help a small team.", toolkit })
-}))
-```
-
-## Constructors
+## Other
 
 ### make
 
 Creates `search_tools` and `execute_tool` for these tools.
-
-**Details**
-
-Search scores the query's words against tool names and descriptions and
-returns the top five. `execute_tool` runs the tool the way a model call
-would, so its input is validated, and a failure of the tool is a failure
-of `execute_tool`, with the tool's result. It doesn't run a tool that
-needs the user's decision (see `Decision`): put those in the toolkit
-itself.
 
 ```ts
 const make: <R>(tools: AssistantLoop.Tools<R>) => AssistantLoop.Tools<R>

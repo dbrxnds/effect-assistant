@@ -3,34 +3,13 @@
  * doesn't carry every definition: `search_tools` finds tools by what the
  * model needs to do (name, description, input schema), and `execute_tool`
  * validates an input and runs one.
- *
- * Use it for tools that change at runtime (MCP servers, plugins) or catalogs
- * too big for the prompt. Fixed, frequently used tools belong in the toolkit
- * directly.
- *
- * **Example** (Common tools up front, the rest on demand)
- *
- * ```ts
- * import { AssistantLoop, ToolDiscovery } from "effect-assistant"
- *
- * const MyAssistantLive = MyAssistant.toLayer(Effect.gen(function*() {
- *   const toolkit = AssistantLoop.merge(
- *     AssistantLoop.tools(yield* OrderTools),
- *     ToolDiscovery.make(AssistantLoop.tools(yield* OfficeTools))
- *   )
- *
- *   return (turn) => turn.loop({ instructions: "You help a small team.", toolkit })
- * }))
- * ```
- *
- * @since 0.1.0
  */
+import * as Response from "effect/ai/Response"
+import * as Tool from "effect/ai/Tool"
+import * as Toolkit from "effect/ai/Toolkit"
 import type * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import * as Tool from "effect/unstable/ai/Tool"
-import * as Toolkit from "effect/unstable/ai/Toolkit"
-import * as Response from "effect/unstable/ai/Response"
 import type * as AssistantLoop from "./AssistantLoop.ts"
 import { toJson } from "./internal/schema.ts"
 import * as Toolkits from "./internal/toolkit.ts"
@@ -76,33 +55,26 @@ const SearchTools = Tool.make("search_tools", {
     query: Schema.String.annotate({ description: "What you need to do, in a few words." })
   }),
   success: Schema.Array(
-    Schema.Struct({ name: Schema.String, description: Schema.optional(Schema.String), inputSchema: Schema.Json })
+    Schema.Struct({
+      name: Schema.String,
+      description: Schema.optional(Schema.String),
+      inputSchema: Schema.Json
+    })
   )
 })
 
 const ExecuteTool = Tool.make("execute_tool", {
   description: "Run a tool found with search_tools. Pass its name and an input matching its input schema.",
-  parameters: Schema.Struct({ name: Schema.String, input: Schema.Record(Schema.String, Schema.Json) }),
+  parameters: Schema.Struct({
+    name: Schema.String,
+    input: Schema.Record(Schema.String, Schema.Json)
+  }),
   success: Schema.Json,
   // The tool's failure is this call's, so the loop sees it failed (a `wait: true` message doesn't end the turn).
   failure: Schema.Json
 })
 
-/**
- * Creates `search_tools` and `execute_tool` for these tools.
- *
- * **Details**
- *
- * Search scores the query's words against tool names and descriptions and
- * returns the top five. `execute_tool` runs the tool the way a model call
- * would, so its input is validated, and a failure of the tool is a failure
- * of `execute_tool`, with the tool's result. It doesn't run a tool that
- * needs the user's decision (see `Decision`): put those in the toolkit
- * itself.
- *
- * @category constructors
- * @since 0.1.0
- */
+/** Creates `search_tools` and `execute_tool` for these tools. */
 export const make = <R>(tools: AssistantLoop.Tools<R>): AssistantLoop.Tools<R> =>
   Toolkits.withContext(Toolkit.make(SearchTools, ExecuteTool), (context: Context.Context<R>) => ({
     search_tools: ({ query }) =>
@@ -113,27 +85,24 @@ export const make = <R>(tools: AssistantLoop.Tools<R>): AssistantLoop.Tools<R> =
           inputSchema: toJson(Tool.getJsonSchema(tool))
         }))
       ),
-    execute_tool: ({ name, input }) =>
-      Effect.gen(function* () {
-        const call = Response.makePart("tool-call", {
-          id: `execute_${yield* Uuid.random}`,
-          name,
-          params: input,
-          providerExecuted: false
-        })
+    execute_tool: Effect.fnUntraced(function* ({ name, input }) {
+      const call = Response.makePart("tool-call", {
+        id: `execute_${yield* Uuid.make}`,
+        name,
+        params: input,
+        providerExecuted: false
+      })
 
-        // A call that needs the user's decision parks only as a call the model made itself, where it can ask for it.
-        if (yield* Toolkits.needsDecisionOf(tools, call, [])) {
-          return yield* Effect.fail(
-            Toolkits.failed(
-              `${name} needs the user's decision, so it can't run through execute_tool.`,
-              "needs_decision"
-            ).result
-          )
-        }
+      // A call that needs the user's decision parks only as a call the model made itself, where it can ask for it.
+      if (yield* Toolkits.needsDecisionOf(tools, call, [])) {
+        return yield* Effect.fail(
+          Toolkits.failed(`${name} needs the user's decision, so it can't run through execute_tool.`, "needs_decision")
+            .result
+        )
+      }
 
-        const { outcome, result } = yield* tools.run(call)
+      const { outcome, result } = yield* tools.run(call)
 
-        return outcome === "failure" ? yield* Effect.fail(result) : result
-      }).pipe(Effect.provideContext(context))
+      return outcome === "failure" ? yield* Effect.fail(result) : result
+    }, Effect.provideContext(context))
   }))

@@ -71,8 +71,8 @@ work reports back with events that wake a turn.
 ```ts
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import * as Tool from "effect/unstable/ai/Tool"
-import * as Toolkit from "effect/unstable/ai/Toolkit"
+import * as Tool from "effect/ai/Tool"
+import * as Toolkit from "effect/ai/Toolkit"
 import { AssistantChat, AssistantToolCall, RunId } from "effect-assistant"
 
 const StartCampaign = Tool.make("start_campaign", {
@@ -93,7 +93,7 @@ const CampaignToolsLive = Toolkit.make(StartCampaign).toLayer({
 })
 ```
 
-With an Effect workflow (`effect/unstable/workflow`), report each step in an
+With an Effect workflow (`effect/workflow`), report each step in an
 `Activity`, so it runs once even when the workflow replays:
 
 ```ts

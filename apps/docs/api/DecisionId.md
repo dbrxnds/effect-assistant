@@ -10,11 +10,27 @@ The `DecisionId` module defines the id of one decision the user is asked
 to make: `decision:` followed by a UUID. The model passes it to a decision
 block, and the user's answer names it.
 
-A decision's id comes from what it's about, so asking again finds the same
-decision: a parked tool call's from its call id, and one that work
-requests from its key.
+## Other
 
-## Constructors
+### DecisionId
+
+Schema for decision ids: `` `decision:${uuid}` ``, branded.
+
+```ts
+const DecisionId = Schema.TemplateLiteral(["decision:", Uuid.Uuid]).pipe( …
+```
+
+<small>Since 0.1.0</small>
+
+### DecisionId
+
+A decision id.
+
+```ts
+type DecisionId = typeof DecisionId.Type
+```
+
+<small>Since 0.1.0</small>
 
 ### fromKey
 
@@ -27,36 +43,12 @@ const fromKey: (key: string) => DecisionId
 
 <small>Since 0.1.0</small>
 
-### forCall
+### fromCallId
 
 The decision id of a tool call that waits for the user's decision.
 
 ```ts
-const forCall: (callId: string) => DecisionId
-```
-
-<small>Since 0.1.0</small>
-
-## Models
-
-### DecisionId
-
-A decision id.
-
-```ts
-type DecisionId = typeof DecisionId.Type
-```
-
-<small>Since 0.1.0</small>
-
-## Schemas
-
-### DecisionId
-
-Schema for decision ids: `` `decision:${uuid}` ``, branded.
-
-```ts
-const DecisionId = Schema.TemplateLiteral(["decision:", Uuid.Uuid]).pipe( …
+const fromCallId: (callId: string) => DecisionId
 ```
 
 <small>Since 0.1.0</small>

@@ -11,72 +11,7 @@ The `AssistantEngine` module runs assistants' chats. An assistant's
 `subscribe` go through it. Pick one engine for the app, like a workflow
 engine:
 
-- `layerCluster` runs each chat as a cluster entity. `submit` sends
-  the chat's entity a persisted message and returns; the entity stores the
-  input and runs turns until nothing is pending. A crash mid-turn leaves
-  the message unprocessed, so the cluster redelivers it and the work
-  resumes.
-- `layerMemory` runs each chat in the process: `submit` stores the
-  input, and a fiber runs turns until nothing is pending.
-
-Either one runs one turn per chat at a time, and keeps the chat's
-specialist runs with it. A run's answer is stored in the chat and gets a
-turn, like an input.
-
-**Example** (One engine for the app)
-
-```ts
-import * as Layer from "effect/Layer"
-import { AssistantEngine, ChatLog } from "effect-assistant"
-
-const AppLive = Layer.mergeAll(MyAssistantLive, ResearchLive).pipe(
-  Layer.provide(AssistantEngine.layerCluster),
-  Layer.provide([ChatLog.layerSql, SingleRunnerLive])
-)
-```
-
-## Layers
-
-### layerMemory
-
-Layer that runs chats in the process. Each chat's turns are fibers, one at
-a time.
-
-**Details**
-
-When an assistant registers, the engine picks up the chats it was working
-on when the process stopped: a turn cut off mid-way, or an input no turn
-read, gets a turn. The log keeps every step, so the turn goes on from the
-last one recorded. Run it in one process only: two would run the same
-chat's turns and write its log at once.
-
-```ts
-const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog>
-```
-
-<small>Since 0.1.0</small>
-
-### layerCluster
-
-Layer that runs chats as cluster entities, one per chat, keyed by chat id.
-Needs `Sharding`: a `SingleRunner` for one process with SQL storage, or
-`TestRunner` in tests.
-
-**Details**
-
-A chat's specialist runs live in its entity, which keeps itself alive
-while they (or turns for their answers) work. A run cut off by a shutdown
-answers that it was, and the entity starts again after the restart: when
-an entity starts, it runs a turn for any input no turn has read. An entity
-with no work and no subscribers stops after 5 minutes.
-
-```ts
-const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Sharding.Sharding>
-```
-
-<small>Since 0.1.0</small>
-
-## Services
+## Other
 
 ### AssistantEngine
 
@@ -101,6 +36,29 @@ class AssistantEngine extends Context.Service<
     readonly delete: (assistant: string, chatId: ChatId) => Effect.Effect<void>
   }
 >()("effect-assistant/AssistantEngine")
+```
+
+<small>Since 0.1.0</small>
+
+### layerMemory
+
+Layer that runs chats in the process. Each chat's turns are fibers, one at
+a time.
+
+```ts
+const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog>
+```
+
+<small>Since 0.1.0</small>
+
+### layerCluster
+
+Layer that runs chats as cluster entities, one per chat, keyed by chat id.
+Needs `Sharding`: a `SingleRunner` for one process with SQL storage, a
+runner of the app's cluster, or `TestRunner` in tests.
+
+```ts
+const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Sharding.Sharding>
 ```
 
 <small>Since 0.1.0</small>

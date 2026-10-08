@@ -1,44 +1,25 @@
 /**
  * The `BlockKit` module groups the blocks an assistant may put in its messages, and
  * renders them on the client.
- *
- * - Server: `Assistant.make(name, { blocks: kit })` lets `send_user_message`
- *   take a block from the kit. Answers need no server code: they arrive as
- *   `BlockAnswer` inputs.
- * - Client: {@link toClient} maps each kind to a renderer, type-checked so
- *   every kind is covered, and renders the blocks of a chat's view
- *   (`ChatView`), which says where each one stands. {@link blockStates}
- *   folds the same from the log, for server-side code.
- *
- * @since 0.1.0
  */
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import * as AssistantEvent from "./AssistantEvent.ts"
 import { AssistantChat } from "./AssistantChat.ts"
+import * as AssistantEvent from "./AssistantEvent.ts"
 import type * as Block from "./Block.ts"
 import type * as ChatView from "./ChatView.ts"
+import * as Decision from "./Decision.ts"
 import * as InputId from "./InputId.ts"
 
-/**
- * A catalog of blocks.
- *
- * @category models
- * @since 0.1.0
- */
+/** A catalog of blocks. */
 export interface BlockKit<Blocks extends Block.Any = Block.Any> {
   readonly blocks: ReadonlyArray<Blocks>
   readonly byKind: ReadonlyMap<string, Blocks>
 }
 
-/**
- * Creates a kit from blocks.
- *
- * @category constructors
- * @since 0.1.0
- */
+/** Creates a kit from blocks. */
 export const make = <const Blocks extends ReadonlyArray<Block.Any>>(blocks: Blocks): BlockKit<Blocks[number]> => ({
   blocks,
   byKind: new Map(blocks.map((block) => [block.kind, block]))
@@ -52,38 +33,14 @@ type PropsOf<B> = B extends { readonly props: Schema.Top } ? B["props"]["Type"] 
 
 type AnswerOf<B> = B extends { readonly answer: infer A } ? (A extends Schema.Top ? A["Type"] : never) : never
 
-/**
- * Where a message's block stands.
- *
- * **Details**
- *
- * A block stays open until it's answered: with the block itself, or in words,
- * which the assistant marks by listing the message in a later message's `closes`.
- * Anything else the user sends, like another block's answer or a question
- * about something else, leaves it open. {@link closeStale}, run from a turn,
- * closes the ones the user moved on from, with a `BlocksClosed` event.
- *
- * @category models
- * @since 0.1.0
- */
+/** Where a message's block stands. */
 export interface BlockState {
   readonly open: boolean
   /** Its answer, if the user used it. */
   readonly answer: AssistantEvent.BlockAnswer | undefined
 }
 
-/**
- * Returns the block states after one more event.
- *
- * **When to use**
- *
- * Use when a client folds the event stream one entry at a time.
- *
- * @see {@link blockStates} for the states of a whole log
- *
- * @category folding
- * @since 0.1.0
- */
+/** Returns the block states after one more event. */
 export const nextBlockStates = (
   states: ReadonlyMap<string, BlockState>,
   event: { readonly _tag: string }
@@ -115,12 +72,7 @@ export const nextBlockStates = (
   return new Map(states).set(event.messageId, { open: false, answer: event })
 }
 
-/**
- * Returns the state of every message's block, by message id.
- *
- * @category folding
- * @since 0.1.0
- */
+/** Returns the state of every message's block, by message id. */
 export const blockStates = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): ReadonlyMap<string, BlockState> => {
   let states: ReadonlyMap<string, BlockState> = new Map()
 
@@ -131,10 +83,8 @@ export const blockStates = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): Re
 
 /**
  * Returns the blocks still open after the user typed this many messages
- * without using them: the ones {@link closeStale} closes.
- *
- * @category folding
- * @since 0.1.0
+ * without using them: the ones {@link closeStale} closes. Decision blocks
+ * never go stale: work waits on them, and closing one would leave it waiting.
  */
 export const staleBlocks = (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
@@ -148,9 +98,19 @@ export const staleBlocks = (
         AssistantEvent.isLibraryEvent(event) && Predicate.isTagged(event, "AssistantMessage") && event.id === id
     )
 
+    const message = entries[shown]?.event
+
+    if (
+      message === undefined ||
+      (AssistantEvent.isLibraryEvent(message) &&
+        Predicate.isTagged(message, "AssistantMessage") &&
+        message.block?.kind === Decision.kind)
+    )
+      return false
+
     const typed = entries.slice(shown + 1).filter(({ event }) => Predicate.isTagged(event, "UserMessage")).length
 
-    return shown !== -1 && typed >= options.messages
+    return typed >= options.messages
   })
 }
 
@@ -158,19 +118,6 @@ export const staleBlocks = (
  * Closes the blocks the user moved on from: still open after this many typed
  * messages. Run it from a turn, before or after its loop; it records a
  * `BlocksClosed` event, so every client folds them closed.
- *
- * **Example** (Closing stale blocks before each turn's loop)
- *
- * ```ts
- * const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
- *   Stream.unwrap(
- *     BlockKit.closeStale({ messages: 3 }).pipe(Effect.as(turn.loop({ instructions })))
- *   )
- * )
- * ```
- *
- * @category turns
- * @since 0.1.0
  */
 export const closeStale = Effect.fn(function* (options: { readonly messages: number }) {
   const chat = yield* AssistantChat
@@ -179,12 +126,7 @@ export const closeStale = Effect.fn(function* (options: { readonly messages: num
   if (stale.length > 0) yield* chat.append([AssistantEvent.BlocksClosed.make({ messageIds: stale })])
 })
 
-/**
- * What a renderer gets for one block.
- *
- * @category models
- * @since 0.1.0
- */
+/** What a renderer gets for one block. */
 export interface RenderArgs<B> {
   readonly text: string
   readonly props: PropsOf<B>
@@ -192,28 +134,20 @@ export interface RenderArgs<B> {
   readonly open: boolean
   /** The user's answer, if they used the block. */
   readonly answer: AnswerOf<B> | undefined
-  /** For the decision block: what each decision is about (its preview), and how it was decided. Empty otherwise. */
+  /**
+   * For the decision block: what each decision is about (its preview), and how it was decided. Empty otherwise.
+   */
   readonly decisions: ReadonlyArray<ChatView.Decision>
   /** Sends an answer. Only call it while `open`. */
   readonly respond: (answer: AnswerOf<B>) => void
 }
 
-/**
- * A renderer for every kind in a kit.
- *
- * @category models
- * @since 0.1.0
- */
+/** A renderer for every kind in a kit. */
 export type Renderers<Kit extends BlockKit, Out> = {
   readonly [K in KindOf<Kit["blocks"][number]>]: (args: RenderArgs<BlockOf<Kit, K>>) => Out
 }
 
-/**
- * Options for rendering one message's block.
- *
- * @category models
- * @since 0.1.0
- */
+/** Options for rendering one message's block. */
 export interface RenderOptions {
   /** Submits an answer, for example over RPC. */
   readonly respond: (answer: AssistantEvent.BlockAnswer) => void
@@ -222,38 +156,6 @@ export interface RenderOptions {
 /**
  * Creates a client-side renderer for the blocks on a chat view's messages
  * (`ChatView.AssistantMessage`).
- *
- * **Details**
- *
- * The renderer returns `undefined` when a message has no block, or one this
- * client can't show (an unknown kind, or props that don't decode). Show just
- * the text then. A block is `open` while its status is, and its `answer` is
- * the user's, decoded with the block's answer schema. `respond` encodes the answer with the block's answer schema
- * and passes a `BlockAnswer` to {@link RenderOptions.respond}. Answers cross
- * the wire in their schema's JSON form, so dates and the like survive.
- *
- * **Example** (Rendering blocks in React)
- *
- * ```tsx
- * import { BlockKit } from "effect-assistant"
- * import type { ReactNode } from "react"
- * import { Blocks } from "./blocks"
- *
- * const render = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
- *   choose_one: ({ props, open, answer, respond }) =>
- *     props.options.map((option) => (
- *       <button key={option} disabled={!open} onClick={() => respond({ choice: option })}>
- *         {answer?.choice === option ? `✓ ${option}` : option}
- *       </button>
- *     )),
- *   confirm: ({ props, open, respond }) => (
- *     <button disabled={!open} onClick={() => respond({ confirmed: true })}>{props.confirmLabel}</button>
- *   )
- * })
- * ```
- *
- * @category constructors
- * @since 0.1.0
  */
 export function toClient<Kit extends BlockKit, Out>(
   kit: Kit,

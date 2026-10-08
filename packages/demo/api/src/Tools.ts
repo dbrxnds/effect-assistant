@@ -16,8 +16,8 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
-import * as Tool from "effect/unstable/ai/Tool"
-import * as Toolkit from "effect/unstable/ai/Toolkit"
+import * as Tool from "effect/ai/Tool"
+import * as Toolkit from "effect/ai/Toolkit"
 import * as LiveOrders from "./LiveOrders.ts"
 import * as PrintOrders from "./PrintOrders.ts"
 import * as Prompts from "./Prompts.ts"
@@ -222,7 +222,10 @@ export const layerResearchTools = ResearchTools.toLayer({
 export const layerResearch = Research.toLayer(
   Effect.gen(function* () {
     const prompts = yield* Prompts.Prompts
-    const toolkit = AssistantLoop.tools(yield* Toolkit.merge(ResearchTools, Toolkit.make(OrderHistory, OfficeBudget)))
+
+    const toolkit = AssistantLoop.fromToolkit(
+      yield* Toolkit.merge(ResearchTools, Toolkit.make(OrderHistory, OfficeBudget))
+    )
 
     return Effect.fn(function* (run) {
       return run.loop({ instructions: yield* prompts.get("acme-specialist-research"), toolkit, maxSteps: 24 })

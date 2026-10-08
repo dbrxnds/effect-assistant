@@ -8,7 +8,7 @@
  */
 import type * as ChatId from "effect-assistant/ChatId"
 import * as ChatView from "effect-assistant/ChatView"
-import * as Atom from "effect/unstable/reactivity/Atom"
+import * as Atom from "effect/reactivity/Atom"
 
 /** A chat's view, and whether anything works in it: the assistant's turn, or a specialist. */
 export type ChatState = ChatView.View & { readonly working: boolean }

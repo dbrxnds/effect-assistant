@@ -1,8 +1,8 @@
 # Tools
 
 Tools are how the assistant looks things up and gets things done. They're
-Effect's own tools (`effect/unstable/ai/Tool`), grouped in a toolkit
-(`effect/unstable/ai/Toolkit`) with a handler for each, and passed to
+Effect's own tools (`effect/ai/Tool`), grouped in a toolkit
+(`effect/ai/Toolkit`) with a handler for each, and passed to
 `turn.loop` as a `toolkit`, next to the assistant's own.
 
 Tool calls and their results are the assistant's own work: they're in the
@@ -15,8 +15,8 @@ assistant tells them with `send_user_message`.
 import { AssistantLoop, ToolFailure } from "effect-assistant"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import * as Tool from "effect/unstable/ai/Tool"
-import * as Toolkit from "effect/unstable/ai/Toolkit"
+import * as Tool from "effect/ai/Tool"
+import * as Toolkit from "effect/ai/Toolkit"
 
 const ListProducts = Tool.make("list_products", {
   description: "Products we sell, optionally in one category.",
@@ -25,7 +25,7 @@ const ListProducts = Tool.make("list_products", {
   failure: ToolFailure.ToolFailure
 })
 
-const toolkit = AssistantLoop.tools(Toolkit.make(ListProducts), {
+const toolkit = AssistantLoop.fromToolkit(Toolkit.make(ListProducts), {
   list_products: ({ category }) => Effect.succeed([{ name: "Flyers", category: category ?? "print" }])
 })
 
@@ -38,13 +38,13 @@ Names must be unique in a turn, including the assistant's own tools
 (`send_user_message`, `wait`, `load_skill`, and the specialist tools): a
 clash fails the turn.
 
-`AssistantLoop.tools` takes a toolkit in one of three ways:
+`AssistantLoop.fromToolkit` takes a toolkit in one of three ways:
 
-- `AssistantLoop.tools(toolkit, handlers)`: the handlers inline, as above.
-- `AssistantLoop.tools(yield* MyToolkit)`: resolved in the handler's build,
+- `AssistantLoop.fromToolkit(toolkit, handlers)`: the handlers inline, as above.
+- `AssistantLoop.fromToolkit(yield* MyToolkit)`: resolved in the handler's build,
   from the handlers' layer (`MyToolkit.toLayer(...)`), which the assistant's
   layer is then given.
-- `AssistantLoop.tools(MyToolkit)`: resolved at every call, when the loop
+- `AssistantLoop.fromToolkit(MyToolkit)`: resolved at every call, when the loop
   has the handlers' layer.
 
 `AssistantLoop.merge(a, b)` puts two together.
@@ -73,7 +73,7 @@ const OrderToolsLive = OrderTools.toLayer(
 
 const MyAssistantHandlers = MyAssistant.toLayer(
   Effect.gen(function* () {
-    const toolkit = AssistantLoop.tools(yield* OrderTools)
+    const toolkit = AssistantLoop.fromToolkit(yield* OrderTools)
 
     return (turn) => turn.loop({ instructions, toolkit })
   })
@@ -217,8 +217,8 @@ import { AssistantLoop, ToolDiscovery } from "effect-assistant"
 const MyAssistantHandlers = MyAssistant.toLayer(
   Effect.gen(function* () {
     const toolkit = AssistantLoop.merge(
-      AssistantLoop.tools(yield* CommonTools), // common: always in the prompt
-      ToolDiscovery.make(AssistantLoop.tools(yield* OfficeTools)) // rare: found when needed
+      AssistantLoop.fromToolkit(yield* CommonTools), // common: always in the prompt
+      ToolDiscovery.make(AssistantLoop.fromToolkit(yield* OfficeTools)) // rare: found when needed
     )
 
     return (turn) => turn.loop({ instructions, toolkit })

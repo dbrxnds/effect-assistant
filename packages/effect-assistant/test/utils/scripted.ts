@@ -3,6 +3,9 @@
  * what the model answers to a request, and checks what the library does with
  * it. Tests of how a real model uses the library are in `contract.test.ts`.
  */
+import * as LanguageModel from "effect/ai/LanguageModel"
+import type * as Prompt from "effect/ai/Prompt"
+import type * as Response from "effect/ai/Response"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -10,10 +13,7 @@ import * as Predicate from "effect/Predicate"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import * as LanguageModel from "effect/unstable/ai/LanguageModel"
-import type * as Prompt from "effect/unstable/ai/Prompt"
-import type * as Response from "effect/unstable/ai/Response"
-import { toJsonText } from "../src/internal/schema.ts"
+import { toJsonText } from "../../src/internal/schema.ts"
 
 /** One model call, as the script sees it. */
 export interface Request {
@@ -153,7 +153,10 @@ export const make = Effect.fn(function* (script: Script) {
     const finish: Response.FinishPartEncoded = {
       type: "finish",
       reason: toolCalls ? "tool-calls" : "stop",
-      usage: { inputTokens: { total: 120, uncached: 20, cacheRead: 100, cacheWrite: 0 }, outputTokens: { total: 8 } }
+      usage: {
+        inputTokens: { total: 120, uncached: 20, cacheRead: 100, cacheWrite: 0 },
+        outputTokens: { total: 8 }
+      }
     }
 
     return [metadata, ...parts, finish]

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { AssistantActivity, AssistantEvent, ChatId, DecisionId, InputId, RunId } from "../src/index.ts"
-import { say, storedUpdate } from "./fixtures.ts"
+import { say, storedUpdate } from "./utils/fixtures.ts"
 
 const { SpecialistFinished, SpecialistStarted, TurnCompleted, TurnFailed, TurnStarted } = AssistantEvent
 

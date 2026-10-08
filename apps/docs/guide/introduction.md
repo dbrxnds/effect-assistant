@@ -41,7 +41,7 @@ nothing the model writes reaches you unless it chooses to send it.
 | [`Instructions`](/api/Instructions)                                | Prompts: text, optionally with span attributes (for prompt management). |
 
 It's built on [Effect](https://effect.website) (v4), with Effect's AI modules
-(`effect/unstable/ai`) for model calls and tools: any `LanguageModel`
+(`effect/ai`) for model calls and tools: any `LanguageModel`
 provider, and native `Tool`s.
 Every module follows Effect's conventions: services, layers, and schemas.
 

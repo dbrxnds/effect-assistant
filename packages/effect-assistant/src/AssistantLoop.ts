@@ -1,46 +1,17 @@
 /**
  * The `AssistantLoop` module is the agent loop: call the model, run its tool
- * calls, repeat. {@link stream} runs it as a `Stream` of what happened, one
+ * calls, repeat. {@link run} runs it as a `Stream` of what happened, one
  * step at a time. An assistant's handler and a specialist's handler both
  * return one, usually through `turn.loop` or `run.loop`, which wire in the
  * rest.
- *
- * Each step is one call of `effect/unstable/ai`'s `LanguageModel`, whichever
- * provider the context has (`AnthropicLanguageModel.model(...)`, say). The
- * loop runs the calls the model makes itself, so it can store each one as
- * started before it runs.
- *
- * History is read fresh before every model call, so a message the user sends
- * mid-turn is seen at the next step. That is what makes an assistant a
- * colleague you can interrupt rather than a request/response endpoint.
- *
- * **Pull-based**
- *
- * The stream runs a step only when it is pulled, and whoever consumes it
- * (the assistant's runner) records each event before pulling the next. That
- * is how the next step's `history` includes the last one. Don't buffer it
- * ahead (`Stream.buffer`) or run it twice.
- *
- * **Example** (A handler that runs the loop itself)
- *
- * ```ts
- * import { AssistantLoop } from "effect-assistant"
- *
- * const MyAssistantHandlers = MyAssistant.toLayer(Effect.gen(function*() {
- *   const tools = AssistantLoop.tools(yield* MyToolkit)
- *
- *   return (turn) =>
- *     AssistantLoop.stream({
- *       instructions: turn.instructions("You help a small team."),
- *       toolkit: AssistantLoop.merge(turn.tools, tools),
- *       history: turn.history(),
- *       toolChoice: "required"
- *     })
- * }))
- * ```
- *
- * @since 0.1.0
  */
+import type * as AiError from "effect/ai/AiError"
+import * as LanguageModel from "effect/ai/LanguageModel"
+import * as Model from "effect/ai/Model"
+import * as Prompt from "effect/ai/Prompt"
+import type * as Response from "effect/ai/Response"
+import type * as Tool from "effect/ai/Tool"
+import type * as Toolkit from "effect/ai/Toolkit"
 import * as Clock from "effect/Clock"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
@@ -48,13 +19,6 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import type * as AiError from "effect/unstable/ai/AiError"
-import * as LanguageModel from "effect/unstable/ai/LanguageModel"
-import * as Model from "effect/unstable/ai/Model"
-import * as Prompt from "effect/unstable/ai/Prompt"
-import type * as Response from "effect/unstable/ai/Response"
-import type * as Tool from "effect/unstable/ai/Tool"
-import type * as Toolkit from "effect/unstable/ai/Toolkit"
 import * as AssistantEvent from "./AssistantEvent.ts"
 import type { AssistantToolCall } from "./AssistantToolCall.ts"
 import * as DecisionId from "./DecisionId.ts"
@@ -63,16 +27,13 @@ import * as Decisions from "./internal/decisions.ts"
 import * as History from "./internal/history.ts"
 import * as Telemetry from "./internal/telemetry.ts"
 import * as Toolkits from "./internal/toolkit.ts"
-import { endsTurn } from "./internal/tools.ts"
+import { isTurnEnding } from "./internal/tools.ts"
 import type * as ToolFailure from "./ToolFailure.ts"
 
 /**
  * What the loop produces: each model call's output, then for each of its tool
  * calls a `ToolStarted` before it runs and its result, or, for a call that
  * waits for the user's decision, its `DecisionRequested`.
- *
- * @category models
- * @since 0.1.0
  */
 export type Event =
   | AssistantEvent.ModelOutput
@@ -83,9 +44,6 @@ export type Event =
 /**
  * How a tool call went: success or failure, its result in JSON, as the model
  * reads it, and a failure's kind when it has one.
- *
- * @category models
- * @since 0.1.0
  */
 export interface CallResult {
   readonly outcome: AssistantEvent.ToolOutcome
@@ -96,17 +54,8 @@ export interface CallResult {
 /**
  * Tools the loop can run, with their handlers: the tools' definitions, as
  * the model sees them, and how to run a call to one. `R` is what the handlers
- * need. {@link tools} makes them from a native toolkit, {@link merge} puts two
+ * need. {@link fromToolkit} makes them from a native toolkit, {@link merge} puts two
  * together; `turn.tools` are the assistant's own.
- *
- * **Details**
- *
- * A call never fails the loop: a call to a tool that isn't there, params
- * that don't fit, and the tool's own failure are all a failed {@link CallResult}
- * the model reads. Only a defect fails it.
- *
- * @category models
- * @since 0.1.0
  */
 export interface Tools<out R = never> {
   readonly definitions: ReadonlyArray<Tool.Any>
@@ -126,12 +75,7 @@ export interface Tools<out R = never> {
   readonly preview?: ((call: AssistantEvent.ToolCallPart) => Effect.Effect<CallResult, never, R>) | undefined
 }
 
-/**
- * What a toolkit's handlers need to run, besides the call the loop provides.
- *
- * @category utility types
- * @since 0.1.0
- */
+/** What a toolkit's handlers need to run, besides the call the loop provides. */
 export type ToolServices<Tools extends Record<string, Tool.Any>> =
   | Exclude<Tool.HandlerServices<Tools[keyof Tools]>, AssistantToolCall>
   // Already in the handlers' services; stated for the loop, which decodes params to decide on a call.
@@ -143,9 +87,6 @@ export type ToolServices<Tools extends Record<string, Tool.Any>> =
  * total, run when the call is parked. It may use the services its tool
  * declares, and `AssistantToolCall`. Its value is stored in JSON; its
  * `ToolFailure` goes to the model instead, and the call isn't parked.
- *
- * @category models
- * @since 0.1.0
  */
 export type Previews<Tools extends Record<string, Tool.Any>, R = never> = {
   readonly [Name in keyof Tools]?: (
@@ -153,12 +94,7 @@ export type Previews<Tools extends Record<string, Tool.Any>, R = never> = {
   ) => Effect.Effect<unknown, ToolFailure.ToolFailure, R>
 }
 
-/**
- * Options for {@link tools}.
- *
- * @category models
- * @since 0.1.0
- */
+/** Options for {@link fromToolkit}. */
 export interface ToolsOptions<Tools extends Record<string, Tool.Any>, R = never> {
   /** What the user sees before they decide on a call that needs their decision (see `Decision`). */
   readonly previews?: Previews<Tools, R> | undefined
@@ -167,56 +103,21 @@ export interface ToolsOptions<Tools extends Record<string, Tool.Any>, R = never>
 /**
  * Tools from a native toolkit: with its handlers, resolved (`yield* MyToolkit`
  * in a layer that has them), or not, when the loop has its handlers' layer.
- *
- * **Details**
- *
- * A handler may use the services its tool declares (`dependencies`), like
- * `AssistantChat`, `AssistantToolCall`, or the app's user; the loop needs
- * them, except `AssistantToolCall`, which it provides to every call.
- *
- * **Example** (A toolkit and its handlers)
- *
- * ```ts
- * import * as Effect from "effect/Effect"
- * import * as Schema from "effect/Schema"
- * import * as Tool from "effect/unstable/ai/Tool"
- * import * as Toolkit from "effect/unstable/ai/Toolkit"
- * import { AssistantLoop, ToolFailure } from "effect-assistant"
- *
- * const Weather = Tool.make("get_weather", {
- *   description: "Current weather for a city.",
- *   parameters: Schema.Struct({ city: Schema.String }),
- *   success: Schema.String,
- *   failure: ToolFailure.ToolFailure
- * })
- *
- * const toolkit = AssistantLoop.tools(Toolkit.make(Weather), {
- *   get_weather: ({ city }) => Effect.succeed(`Sunny in ${city}`)
- * })
- *
- * const MyAssistantLive = MyAssistant.toLayer((turn) => turn.loop({ instructions: "You help a small team.", toolkit }))
- * ```
- *
- * A tool whose `needsApproval` says so waits for the user's decision instead
- * of running (see `Decision`); `previews` says what the user decides on.
- *
- * @category constructors
- * @since 0.1.0
  */
-export function tools<T extends Record<string, Tool.Any>, RP = never>(
+export function fromToolkit<T extends Record<string, Tool.Any>, RP = never>(
   toolkit: Toolkit.Toolkit<T>,
   handlers: Toolkit.HandlersFrom<T>,
   options?: ToolsOptions<T, RP>
 ): Tools<ToolServices<T> | Exclude<RP, AssistantToolCall>>
-export function tools<T extends Record<string, Tool.Any>, RP = never>(
+export function fromToolkit<T extends Record<string, Tool.Any>, RP = never>(
   toolkit: Toolkit.WithHandler<T>,
   options?: ToolsOptions<T, RP>
 ): Tools<ToolServices<T> | Exclude<RP, AssistantToolCall>>
-export function tools<T extends Record<string, Tool.Any>>(
+export function fromToolkit<T extends Record<string, Tool.Any>>(
   toolkit: Toolkit.Toolkit<T>
 ): Tools<ToolServices<T> | Tool.HandlersFor<T>>
 // Each overload states what the tools need; an unresolved toolkit is an Effect, which resolves it with its handlers.
-export function tools<T extends Record<string, Tool.Any>, RP>(
+export function fromToolkit<T extends Record<string, Tool.Any>, RP>(
   ...args: ToolsArgs<T, RP>
 ): Tools<ToolServices<T> | Tool.HandlersFor<T> | Exclude<RP, AssistantToolCall>> {
   if (isResolved(args)) return Toolkits.fromWithHandler(args[0], args[1]?.previews)
@@ -241,56 +142,60 @@ type ToolsArgs<T extends Record<string, Tool.Any>, RP> =
 const isResolved = <T extends Record<string, Tool.Any>, RP>(args: ToolsArgs<T, RP>): args is ResolvedArgs<T, RP> =>
   !Effect.isEffect(args[0])
 
-/**
- * Two sets of tools together, like the assistant's own and the app's.
- *
- * @category combinators
- * @since 0.1.0
- */
+/** Two sets of tools together, like the assistant's own and the app's. */
 export const merge: <A, B>(self: Tools<A>, that: Tools<B>) => Tools<A | B> = Toolkits.merge
 
 /**
- * No tools.
- *
- * @category constructors
- * @since 0.1.0
+ * Only the tools `allowed` admits, like the ones a user may use: the model
+ * doesn't see the others, and a call to one fails as if it didn't exist.
  */
+export const only: <R>(tools: Tools<R>, allowed: (tool: Tool.Any) => boolean) => Tools<R> = Toolkits.only
+
+/** No tools. */
 export const empty: Tools = Toolkits.empty
 
 /**
- * Options for {@link step}.
- *
- * @category models
- * @since 0.1.0
+ * A chat's history as the model reads it: its messages, and the last `seq`
+ * of the chat they cover.
  */
+export interface ChatHistory {
+  readonly messages: ReadonlyArray<Prompt.Message>
+  readonly throughSeq: number
+}
+
+/** The messages of a history, and how far into the chat they go, if they're a chat's. */
+const readHistory = (read: ReadonlyArray<Prompt.Message> | ChatHistory) =>
+  "messages" in read
+    ? { messages: read.messages, throughSeq: read.throughSeq }
+    : { messages: read, throughSeq: undefined }
+
+/** Options for {@link step}. */
 export interface StepOptions<R = never> {
   /** The full system prompt, like `turn.instructions(text)`, optionally with span attributes. */
   readonly instructions: string | Instructions.Resolved
   /** The tools the model can call. Default: none. */
   readonly toolkit?: Tools<R> | undefined
-  /** The current history, read at the start of the step. */
-  readonly history: Effect.Effect<ReadonlyArray<Prompt.Message>>
-  /** `"required"` makes every step a tool call: assistants talk only through tools. */
+  /**
+   * The current history, read at the start of the step: messages, or a
+   * chat's history (`turn.history()`), whose `throughSeq` the step's
+   * `ModelOutput` records as how far the model had read.
+   */
+  readonly history: Effect.Effect<ReadonlyArray<Prompt.Message> | ChatHistory>
+  /**
+   * Default `"auto"`: a step without a tool call ends the loop. Forcing a
+   * call (`"required"`, or a tool by name) is refused by newer models, and
+   * with extended thinking.
+   */
   readonly toolChoice?: LanguageModel.ToolChoice<string> | undefined
 }
 
-/**
- * Options for {@link stream}.
- *
- * @category models
- * @since 0.1.0
- */
+/** Options for {@link run}. */
 export interface Options<R = never> extends StepOptions<R> {
   /** Model calls allowed. Default 16. */
   readonly maxSteps?: number | undefined
 }
 
-/**
- * How a step went, for deciding what comes next.
- *
- * @category models
- * @since 0.1.0
- */
+/** How a step went, for deciding what comes next. */
 export interface StepResult {
   /** The model's output; unset when the step only ran calls a crash cut off. */
   readonly output: AssistantEvent.ModelOutput | undefined
@@ -299,7 +204,9 @@ export interface StepResult {
    * with `wait: true`) and none of the step's calls failed.
    */
   readonly done: boolean
-  /** The history's length with this step's output and results: a longer one got something new meanwhile. */
+  /**
+   * The history's length with this step's output and results: a longer one got something new meanwhile.
+   */
   readonly historyLength: number
 }
 
@@ -331,7 +238,9 @@ const generate = (
 
 const decodePart = Schema.decodeUnknownOption(AssistantEvent.ModelPart)
 
-/** The parts the log keeps: text, reasoning, and the calls the loop runs (not those the provider ran). */
+/**
+ * The parts the log keeps: text, reasoning, and the calls the loop runs (not those the provider ran).
+ */
 const modelParts = (content: ReadonlyArray<Response.AllParts<Record<string, Tool.Any>>>) =>
   content.flatMap((part) =>
     Option.toArray(decodePart(part)).filter((decoded) => !(decoded.type === "tool-call" && decoded.providerExecuted))
@@ -341,12 +250,17 @@ const toolCalls = (parts: ReadonlyArray<AssistantEvent.ModelPart>): ReadonlyArra
   parts.flatMap((part) => (part.type === "tool-call" ? [part] : []))
 
 /** Runs one call, in its own span. */
-const runCall = <R>(tools: Tools<R>, call: AssistantEvent.ToolCallPart) =>
-  tools.run(call).pipe(
-    Effect.tap((result) => Telemetry.toolOutput(result.result)),
-    Telemetry.toolSpan(call),
-    Effect.map((result) => AssistantEvent.ToolResult.make({ callId: call.id, tool: call.name, ...result }))
-  )
+const runCall = Effect.fnUntraced(function* <R>(tools: Tools<R>, call: AssistantEvent.ToolCallPart) {
+  const result = yield* Effect.gen(function* () {
+    const result = yield* tools.run(call)
+
+    yield* Telemetry.toolOutput(result.result)
+
+    return result
+  }).pipe(Telemetry.toolSpan(call))
+
+  return AssistantEvent.ToolResult.make({ callId: call.id, tool: call.name, ...result })
+})
 
 /** A call to run: `approved` when the user approved it, so it runs without asking again. */
 interface Pending {
@@ -358,8 +272,8 @@ interface Pending {
  * Parks a call that needs the user's decision: its preview, then its `DecisionRequested`. Only a turn parks: a
  * specialist's call fails instead, and so does one whose preview fails.
  */
-const park = <R>(tools: Tools<R>, call: AssistantEvent.ToolCallPart) =>
-  Effect.gen(function* () {
+const park = Effect.fnUntraced(
+  function* <R>(tools: Tools<R>, call: AssistantEvent.ToolCallPart) {
     const failure = (result: CallResult) =>
       AssistantEvent.ToolResult.make({ callId: call.id, tool: call.name, ...result })
 
@@ -377,11 +291,17 @@ const park = <R>(tools: Tools<R>, call: AssistantEvent.ToolCallPart) =>
     if (preview.outcome === "failure") return failure(preview)
 
     return AssistantEvent.DecisionRequested.make({
-      id: DecisionId.forCall(call.id),
-      origin: AssistantEvent.CallOrigin.make({ callId: call.id, tool: call.name, params: call.params }),
+      id: DecisionId.fromCallId(call.id),
+      origin: AssistantEvent.CallOrigin.make({
+        callId: call.id,
+        tool: call.name,
+        params: call.params
+      }),
       preview: preview.result
     })
-  }).pipe(Telemetry.toolSpan(call))
+  },
+  (effect, _tools, call) => effect.pipe(Telemetry.toolSpan(call))
+)
 
 /**
  * Runs the calls: first a `ToolStarted` for each that runs (stored before any runs), then their results
@@ -414,7 +334,11 @@ const runCalls = <R, S, E, R2>(
       return Stream.fromIterable(started).pipe(
         Stream.concat(
           Stream.unwrap(
-            Effect.map(results, (done) => Stream.fromIterable(done.map(value)).pipe(Stream.concat(then(reread(done)))))
+            Effect.gen(function* () {
+              const done = yield* results
+
+              return Stream.fromIterable(done.map(value)).pipe(Stream.concat(then(reread(done))))
+            })
           )
         )
       )
@@ -423,16 +347,11 @@ const runCalls = <R, S, E, R2>(
 
 const isFailure = (event: Event) => Predicate.isTagged(event, "ToolResult") && event.outcome === "failure"
 
-/**
- * What a loop body emits: a value, or what to do next.
- *
- * @category models
- * @since 0.1.0
- */
+/** What a loop body emits: a value, or what to do next. */
 export type Step<A, S> = Data.TaggedEnum<{
   Value: { readonly value: A }
   Next: { readonly state: S }
-  Stop: {}
+  Stop: Record<never, never>
 }>
 
 interface StepDefinition extends Data.TaggedEnum.WithGenerics<2> {
@@ -441,28 +360,14 @@ interface StepDefinition extends Data.TaggedEnum.WithGenerics<2> {
 
 const Steps = Data.taggedEnum<StepDefinition>()
 
-/**
- * Emits a value from a loop body.
- *
- * @category constructors
- * @since 0.1.0
- */
+/** Emits a value from a loop body. */
 export const value = <A>(value: A): Step<A, never> => Steps.Value({ value })
 
-/**
- * Ends a loop body's step and goes on with this state.
- *
- * @category constructors
- * @since 0.1.0
- */
+/** Ends a loop body's step and goes on with this state. */
 export const next = <S>(state: S): Stream.Stream<Step<never, S>> => Stream.succeed(Steps.Next({ state }))
 
-/**
- * Ends the loop.
- *
- * @category constructors
- * @since 0.1.0
- */
+/** Ends the loop. */
+// oxlint-disable-next-line no-unnecessary-type-parameters -- `stop<number>()` types a loop's state where inference can't.
 export const stop = <S = never>(): Stream.Stream<Step<never, S>> => Stream.succeed(Steps.Stop())
 
 const isValue = <A, S>(step: Step<A, S>): step is Data.TaggedEnum.Value<Step<A, S>, "Value"> =>
@@ -472,9 +377,6 @@ const isValue = <A, S>(step: Step<A, S>): step is Data.TaggedEnum.Value<Step<A, 
  * Runs a loop body from a state: emits its values, and runs it again with the
  * state it goes `next` with, until it `stop`s. A body that ends without
  * either stops too.
- *
- * @category constructors
- * @since 0.1.0
  */
 export const loop = <S, A, E, R>(
   initial: S,
@@ -504,32 +406,6 @@ export const loop = <S, A, E, R>(
  * or a `DecisionRequested` for one that waits for the user's decision.
  * `then` decides what comes next: `AssistantLoop.next(state)` or
  * `AssistantLoop.stop()`.
- *
- * **Details**
- *
- * A step whose history has calls a crash cut off runs those first, with the
- * same ids, and doesn't call the model; so does one in a turn with calls the
- * user approved (see `Decision`), as the model made them. Whoever consumes the loop records each event
- * before pulling the next, so the next step's history has it; `then` runs
- * after the step's events are recorded.
- *
- * **Example** (A loop of your own)
- *
- * ```ts
- * import { AssistantLoop } from "effect-assistant"
- *
- * const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
- *   AssistantLoop.loop({ steps: 0 }, (state) =>
- *     AssistantLoop.step(
- *       { instructions: turn.instructions("You help a small team."), toolkit: turn.tools, history: turn.history(), toolChoice: "required" },
- *       (result) => result.done || state.steps >= 12 ? AssistantLoop.stop() : AssistantLoop.next({ steps: state.steps + 1 })
- *     )
- *   )
- * )
- * ```
- *
- * @category constructors
- * @since 0.1.0
  */
 export const step = <R, S, E2 = never, R2 = never>(
   options: StepOptions<R>,
@@ -542,18 +418,18 @@ export const step = <R, S, E2 = never, R2 = never>(
 
   return Stream.unwrap(
     Effect.gen(function* () {
-      const history = yield* options.history
+      const { messages: history, throughSeq } = readHistory(yield* options.history)
       // Calls a crash cut off, with no result: they run again, with the same ids, before the model goes on.
       const cutOff = History.unansweredCalls(history)
 
       // Calls the user approved: they run as the model made them, before the model goes on. Not in a loop without them.
-      const approved = yield* Option.match(yield* Decisions.TurnDecisions, {
-        onNone: () => Effect.succeed([]),
-        onSome: (decisions) =>
-          Effect.map(decisions.approved, (calls) =>
-            calls.filter((call) => toolkit.definitions.some((tool) => tool.name === call.name))
+      const decisions = yield* Decisions.TurnDecisions
+
+      const approved = Option.isNone(decisions)
+        ? []
+        : (yield* decisions.value.approved).filter((call) =>
+            toolkit.definitions.some((tool) => tool.name === call.name)
           )
-      })
 
       if (cutOff.length > 0 || approved.length > 0) {
         const pending = [
@@ -578,6 +454,7 @@ export const step = <R, S, E2 = never, R2 = never>(
 
       const output = AssistantEvent.ModelOutput.make({
         parts: modelParts(response.content),
+        seenThroughSeq: throughSeq,
         model: metadata?.modelId ?? Option.getOrUndefined(name),
         responseId: metadata?.id,
         usage: response.usage,
@@ -598,7 +475,7 @@ export const step = <R, S, E2 = never, R2 = never>(
             (reread) =>
               after({
                 output,
-                done: calls.length === 0 || (!reread && calls.some(endsTurn)),
+                done: calls.length === 0 || (!reread && calls.some(isTurnEnding)),
                 historyLength
               })
           )
@@ -612,22 +489,8 @@ export const step = <R, S, E2 = never, R2 = never>(
  * Runs the agent loop as a stream: {@link step} after step, until the model
  * is done (see {@link StepResult}) and nothing new arrived while it worked,
  * or after `maxSteps` model calls.
- *
- * **Details**
- *
- * Each tool call is stored as started before it runs, and a call a crash cut
- * off (in the history with no result) runs again, with the same call id,
- * before the next model call. So a tool call runs at least once: a tool
- * that changes something outside the chat uses
- * `AssistantToolCall.idempotencyKey`.
- * The tools run only once the output is pulled, and the next model call only
- * once the results are: whoever consumes the stream records each event before
- * the next step reads the history.
- *
- * @category constructors
- * @since 0.1.0
  */
-export const stream = <R = never>(
+export const run = <R = never>(
   options: Options<R>
 ): Stream.Stream<Event, AiError.AiError, LanguageModel.LanguageModel | R> => {
   const maxSteps = options.maxSteps ?? 16
@@ -635,7 +498,11 @@ export const stream = <R = never>(
   // Done: stop, unless something arrived while the model was working; then it reads that first.
   const afterDone = (steps: number, historyLength: number) =>
     Stream.unwrap(
-      Effect.map(options.history, (history) => (history.length > historyLength ? next(steps) : stop<number>()))
+      Effect.gen(function* () {
+        const read = yield* options.history
+
+        return readHistory(read).messages.length > historyLength ? next(steps) : stop<number>()
+      })
     )
 
   return loop(0, (steps: number) =>
