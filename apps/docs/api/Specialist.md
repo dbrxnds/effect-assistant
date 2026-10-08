@@ -117,16 +117,10 @@ type RunServices = AssistantChat | Runner | LanguageModel.LanguageModel
 Options for `run.loop`.
 
 ```ts
-interface LoopOptions<
-  T extends Record<string, Tool.Any> = Record<never, never>,
-  RS = never,
-  C extends Record<string, Tool.Any> = Record<never, never>
-> {
+interface LoopOptions<T extends Record<string, Tool.Any> = Record<never, never>, RS = never> {
   readonly instructions: string | Instructions.Resolved
   /** Its tools: a native toolkit, with its handlers from the layer. */
   readonly toolkit?: Toolkit.Toolkit<T> | undefined
-  /** Tools it finds when it needs them: `search_tools` and `execute_tool` over this toolkit. */
-  readonly catalog?: Toolkit.Toolkit<C> | undefined
   /** Playbooks: a catalog in the prompt, loaded with `load_skill` when a task matches. */
   readonly skills?: ReadonlyArray<Skill<RS>> | undefined
   /** Model calls per brief. Default 8. */
@@ -153,16 +147,12 @@ interface Run {
    */
   readonly history: Effect.Effect<ReadonlyArray<Prompt.Message>>
   /** The agent loop over the run's history, with these instructions, tools, and skills. */
-  readonly loop: <
-    T extends Record<string, Tool.Any> = Record<never, never>,
-    RS = never,
-    C extends Record<string, Tool.Any> = Record<never, never>
-  >(
-    options: LoopOptions<T, RS, C>
+  readonly loop: <T extends Record<string, Tool.Any> = Record<never, never>, RS = never>(
+    options: LoopOptions<T, RS>
   ) => Stream.Stream<
     AssistantLoop.Event,
     AiError.AiError,
-    LanguageModel.LanguageModel | AssistantLoop.ToolkitServices<T> | AssistantLoop.ToolkitServices<C> | RS
+    LanguageModel.LanguageModel | AssistantLoop.ToolkitServices<T> | RS
   >
 }
 

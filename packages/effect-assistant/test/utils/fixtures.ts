@@ -93,23 +93,6 @@ export const withTools =
     )
   }
 
-/** A handler that runs `turn.loop` with a catalog the model searches, its handlers provided. */
-export const withCatalog =
-  <C extends Record<string, Tool.Any>, RS = never>(
-    options: Omit<Assistant.LoopOptions<Record<never, never>, RS, never, C>, "catalog"> & {
-      readonly catalog: WithHandlers<C>
-    }
-  ) =>
-  (turn: Assistant.Turn) => {
-    const { catalog, ...rest } = options
-
-    return Stream.unwrap(
-      Effect.map(catalog.toolkit.toHandlers(catalog.handlers), (handlers) =>
-        turn.loop({ ...rest, catalog: catalog.toolkit }).pipe(Stream.provideContext(handlers))
-      )
-    )
-  }
-
 /** An in-memory `TestAssistant` with this handler, its own event log, and this model. */
 export const memoryAssistant = (
   handler: Assistant.Handler<Assistant.TurnServices | LanguageModel.LanguageModel>,

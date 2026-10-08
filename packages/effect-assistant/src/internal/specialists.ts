@@ -27,7 +27,6 @@ import * as Loop from "./loop.ts"
 import * as InputId from "../InputId.ts"
 import * as RunId from "../RunId.ts"
 import * as Skill from "../Skill.ts"
-import * as Discovery from "./discovery.ts"
 import * as Skills from "./skills.ts"
 import * as Specialist from "../Specialist.ts"
 import * as ToolFailure from "../ToolFailure.ts"
@@ -96,10 +95,7 @@ export const runBrief = Effect.fnUntraced(
 
         return Loop.run({
           instructions: mapText(loop.instructions, (text) => Skill.withCatalog(text, skills)),
-          toolkit: Toolkits.merge(
-            Skills.toTools(skills),
-            Toolkits.merge(Toolkits.fromToolkitOrEmpty(loop.toolkit), Toolkits.catalogOf(loop.catalog, Discovery.make))
-          ),
+          toolkit: Toolkits.merge(Skills.toTools(skills), Toolkits.fromToolkitOrEmpty(loop.toolkit)),
           history: current,
           maxSteps: loop.maxSteps ?? 8
         })

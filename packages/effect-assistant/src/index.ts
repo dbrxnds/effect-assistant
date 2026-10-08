@@ -46,4 +46,6 @@ export * as Skill from "./Skill.ts"
 
 export * as Specialist from "./Specialist.ts"
 
+export * as ToolDiscovery from "./ToolDiscovery.ts"
+
 export * as ToolFailure from "./ToolFailure.ts"
