@@ -37,7 +37,7 @@ nothing the model writes reaches you unless it chooses to send it.
 | [`ToolDiscovery`](/api/ToolDiscovery)                              | Search-and-run for tool catalogs too big for the prompt.                |
 | [`ToolFailure`](/api/ToolFailure)                                  | A tool's failure, as a message the model reads.                         |
 | [`Block`](/api/Block), [`BlockKit`](/api/BlockKit)                 | Small UI in messages: options, inputs.                                  |
-| [`Decision`](/api/Decision)                                        | What the user approves or declines: a parked call, or work that asks.   |
+| [`Decision`](/api/Decision)                                        | What the user approves or declines: a parked tool call.                 |
 | [`Instructions`](/api/Instructions)                                | Prompts: text, optionally with span attributes (for prompt management). |
 
 It's built on [Effect](https://effect.website) (v4), with Effect's AI modules

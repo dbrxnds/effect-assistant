@@ -52,8 +52,9 @@ export const model = Config.String("ACME_MODEL").pipe(Config.withDefault("claude
 export const layer = AcmeAssistant.toLayer(
   Effect.gen(function* () {
     const prompts = yield* Prompts.Prompts
-    // A product order waits for the user's decision; its quote is what they approve.
-    const toolkit = AssistantLoop.fromToolkit(yield* AcmeTools, { previews: yield* PrintOrders.previews })
+    // Orders wait for the user's decision; their previews are what they approve.
+    const previews = { ...(yield* PrintOrders.previews), ...(yield* Campaign.previews) }
+    const toolkit = AssistantLoop.fromToolkit(yield* AcmeTools, { previews })
 
     return Effect.fn(function* (turn) {
       const prompt = yield* prompts.get("acme")

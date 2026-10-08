@@ -16,8 +16,8 @@ ask for reports.
 - `api/src/Prompts.ts`: the prompts, from Langfuse (label `production`), with defaults in code.
   `pnpm --filter @acme/demo-api prompts:push` uploads the defaults.
 - `api/src/Tools.ts`: order history and status, offices, budgets, and the `research` specialist.
-- `api/src/Campaign.ts`: `start_campaign` and the `CreateCampaign` workflow, which asks for the
-  user's decision (`Decision.durable`) before the campaign goes ahead.
+- `api/src/Campaign.ts`: `start_campaign`, which waits for the user's decision with the campaign
+  and budget as the preview, and the `CreateCampaign` workflow.
 - `api/src/PrintOrders.ts`: `order_products`, which waits for the user's decision with its quote as
   the preview, and the `PrintOrder` workflow.
 - `api/src/WorkflowStep.ts`: a workflow's step, one of Acme's own events: it wakes a turn, and the
@@ -54,8 +54,8 @@ The empty thread shows these as suggestions:
 3. **"How much budget does Amsterdam have left this quarter?"**. Ask again after an order, and
    the order counts.
 4. **"I want to run a campaign for the London office"**. Acme offers campaign types as
-   buttons, and asks for the audience and budget. The campaign's workflow then asks for your
-   decision, and Acme shows it with Approve / Decline. Approve, and the campaign moves on:
+   buttons, and asks for the audience and budget. Starting it waits for your decision, and Acme
+   shows it with Approve / Decline. Approve, and the campaign moves on:
    creative, scheduled, live, first results.
 5. **"Have research compare this year's campaigns and suggest Q4 budgets"**. The research
    specialist runs in the background. Keep chatting meanwhile; the report arrives when it's

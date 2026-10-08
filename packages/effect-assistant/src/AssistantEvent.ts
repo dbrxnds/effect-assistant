@@ -105,30 +105,17 @@ export const CallOrigin = Schema.TaggedStruct("Call", {
 /** A decision a tool call waits for. */
 export type CallOrigin = typeof CallOrigin.Type
 
-/**
- * Schema for a decision that running work asks for, like a workflow: who
- * asks (`source`, like `workflow:CreateCampaign`), and, for a workflow waiting on it, the
- * `DurableDeferred` token the answer completes.
- */
-export const WorkOrigin = Schema.TaggedStruct("Work", {
-  source: Schema.String,
-  token: Schema.optional(Schema.String)
-})
-
-/** A decision that running work asks for. */
-export type WorkOrigin = typeof WorkOrigin.Type
-
 /** The user is asked to decide something: approve or decline. */
 export class DecisionRequested extends Schema.TaggedClass<DecisionRequested>()("DecisionRequested", {
   id: DecisionId,
-  origin: Schema.Union([CallOrigin, WorkOrigin]),
+  origin: CallOrigin,
   preview: Schema.Json
 }) {}
 
 /**
  * A decision is made: the user answered a decision block for it (`answer` is
  * that `BlockAnswer`'s id). An approved call runs next, at the turn's next
- * step; a workflow's decision is passed on to it before this is stored.
+ * step.
  */
 export class DecisionResolved extends Schema.TaggedClass<DecisionResolved>()("DecisionResolved", {
   id: DecisionId,
@@ -136,12 +123,8 @@ export class DecisionResolved extends Schema.TaggedClass<DecisionResolved>()("De
   answer: InputId
 }) {}
 
-/**
- * Schema for everything `Assistant.submit` accepts. A `DecisionRequested` is
- * one only when work requests it (`origin: Work`); the chat refuses a parked
- * call submitted from outside.
- */
-export const Input = Schema.Union([UserMessage, BlockAnswer, SpecialistFinished, DecisionRequested])
+/** Schema for everything `Assistant.submit` accepts. */
+export const Input = Schema.Union([UserMessage, BlockAnswer, SpecialistFinished])
 
 /** An input to an assistant. */
 export type Input = typeof Input.Type
@@ -375,17 +358,13 @@ export type Entry = typeof Entry.Type
 
 /**
  * Returns whether an event is one of the library's inputs: a user message,
- * a block answer, a finished specialist run, or a decision that work
- * requests. The app's events that wake a turn are inputs too, but only
+ * a block answer, or a finished specialist run. The app's events that wake a turn are inputs too, but only
  * their assistant knows which (see `AppEvent`).
  */
 export const isInput = (event: { readonly _tag: string }): event is Input =>
   Predicate.isTagged(event, "UserMessage") ||
   Predicate.isTagged(event, "BlockAnswer") ||
-  Predicate.isTagged(event, "SpecialistFinished") ||
-  (Predicate.isTagged(event, "DecisionRequested") &&
-    Predicate.hasProperty(event, "origin") &&
-    Predicate.isTagged(event.origin, "Work"))
+  Predicate.isTagged(event, "SpecialistFinished")
 
 /**
  * Returns whether an input starts a turn: every one but a run the assistant

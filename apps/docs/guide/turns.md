@@ -74,8 +74,7 @@ const NeedsDate = AppEvent.make(DeliveryQuestion, {
 ```
 
 The assistant writes the message, and can attach a [block](./blocks). An
-approval is a [decision](./decisions): the workflow asks for one, and the
-assistant asks the user with the decision block.
+approval is a [decision](./decisions), on the tool call that starts the work.
 
 ## A reply to every message
 

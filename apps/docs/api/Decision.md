@@ -6,9 +6,10 @@
 import { Decision } from "effect-assistant"
 ```
 
-The `Decision` module is how the user approves or declines what the
-assistant can't do on its own, like placing an order or publishing a post.
-One primitive, asked for from two places, answered one way:
+The `Decision` module is how the user approves or declines a tool call the
+assistant can't make on its own, like placing an order or publishing a
+post: a tool with Effect's `needsApproval` is parked when the model calls
+it, and the user's answer to the decision block runs it or declines it.
 
 ## Other
 
@@ -127,88 +128,6 @@ Returns every decision in the log and where it stands, by id.
 
 ```ts
 const fromEntries: (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => ReadonlyMap<string, State>
-```
-
-<small>Since 0.1.0</small>
-
-### Submitter
-
-What asking needs of an assistant: its `submit`.
-
-```ts
-interface Submitter {
-  readonly submit: (chatId: ChatId, input: AssistantEvent.Input) => Effect.Effect<void, never, AssistantEngine>
-}
-```
-
-<small>Since 0.1.0</small>
-
-### RequestOptions
-
-Options for a decision that work asks for.
-
-```ts
-interface RequestOptions {
-  /** Who asks, like `workflow:CreateCampaign`. */
-  readonly source: string
-  /** What the user decides on, like the order: any value with a JSON form. */
-  readonly preview: unknown
-}
-```
-
-<small>Since 0.1.0</small>
-
-### request
-
-Asks the chat's user for a decision, from work that's already running:
-stores a `DecisionRequested`, which wakes a turn, and returns its id. The
-key makes asking again harmless: it gives the same id, and the request is
-stored once.
-
-```ts
-const request: (
-  assistant: Submitter,
-  chatId: ChatId,
-  options: RequestOptions & { readonly key: string }
-) => Effect.Effect<DecisionId.DecisionId, never, AssistantEngine>
-```
-
-<small>Since 0.1.0</small>
-
-### outcome
-
-Waits until a decision is made, and returns how: reads the chat's log,
-then follows it.
-
-```ts
-const outcome: (
-  assistant: {
-    readonly subscribe: (
-      chatId: ChatId
-    ) => Stream.Stream<{ readonly event: { readonly _tag: string } }, never, AssistantEngine>
-  },
-  chatId: ChatId,
-  id: DecisionId.DecisionId
-) => Effect.Effect<AssistantEvent.DecisionOutcome, never, AssistantEngine>
-```
-
-<small>Since 0.1.0</small>
-
-### durable
-
-Asks the chat's user for a decision from a workflow, and waits for it: the
-workflow suspends until the user answers, across restarts, and resumes
-with the outcome. `name` tells a workflow's decisions apart.
-
-```ts
-const durable: (
-  assistant: Submitter,
-  options: RequestOptions & { readonly chatId: ChatId; readonly name: string }
-) => Effect.Effect<
-  AssistantEvent.DecisionOutcome,
-  never,
-  AssistantEngine | WorkflowEngine.WorkflowEngine | WorkflowEngine.WorkflowInstance
->
 ```
 
 <small>Since 0.1.0</small>

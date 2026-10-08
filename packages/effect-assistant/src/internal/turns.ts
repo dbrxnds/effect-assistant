@@ -14,7 +14,6 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
-import * as WorkflowEngine from "effect/workflow/WorkflowEngine"
 import type * as Assistant from "../Assistant.ts"
 import type { AssistantChat } from "../AssistantChat.ts"
 import * as AssistantEvent from "../AssistantEvent.ts"
@@ -81,10 +80,6 @@ export interface Registration {
   }>
   /** The assistant's own tools: `send_user_message`, `wait`, and the specialist tools. */
   readonly builtins: AssistantLoop.Tools<Assistant.TurnServices>
-  /**
-   * The workflow engine the assistant's layer was given, if any: an answer completes a workflow's decision with it.
-   */
-  readonly workflows: Option.Option<Context.Context<WorkflowEngine.WorkflowEngine>>
 }
 
 /**
@@ -96,10 +91,6 @@ export const register = Effect.fnUntraced(function* (
   options: { readonly open: Registration["open"] }
 ) {
   const model = yield* Effect.context<LanguageModel.LanguageModel>()
-
-  const workflows = Option.map(yield* Effect.serviceOption(WorkflowEngine.WorkflowEngine), (engine) =>
-    Context.make(WorkflowEngine.WorkflowEngine, engine)
-  )
 
   const decisionBlock = definition.blocks?.byKind.get(Decision.kind)
 
@@ -132,8 +123,7 @@ export const register = Effect.fnUntraced(function* (
     model,
     open: options.open,
     specialists,
-    builtins,
-    workflows
+    builtins
   }
 
   return registration

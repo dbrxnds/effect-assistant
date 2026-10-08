@@ -217,9 +217,8 @@ const deleteChat = (userId: string, chatId: ChatId.ChatId) =>
 After that the chat stores nothing, also after a restart: a later `submit`,
 a specialist's report, or a workflow's event for it is dropped, quietly (no
 failure, no turn). Work that reports into it, like a workflow, goes on and
-ends as it would; what it reports does nothing. A workflow waiting on one
-of the chat's [decisions](./decisions) gets `"declined"`: no one can answer
-it now, and declining runs nothing. Deleting a chat again does nothing.
+ends as it would; what it reports does nothing. Deleting a chat again does
+nothing.
 
 Your own records about the chat (orders it placed, say) are yours to
 delete. The demo deletes a thread's orders with it

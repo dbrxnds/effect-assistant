@@ -144,19 +144,10 @@ export const parkedResult = (
     ]
   })
 
-const workRequestText = (request: AssistantEvent.DecisionRequested, origin: AssistantEvent.WorkOrigin) =>
-  `<decision id="${request.id}" source="${origin.source}" status="requested">\nWork that's running needs the user's decision. The user hasn't seen it: send them a message with a decision block for this id that says what they decide on.\n${toJsonText(request.preview)}\n</decision>`
-
 const whatDecided = (request: AssistantEvent.DecisionRequested, outcome: AssistantEvent.DecisionOutcome) =>
-  Match.value(request.origin).pipe(
-    Match.tagsExhaustive({
-      Call: ({ tool }) =>
-        outcome === "approved"
-          ? `approved: ${tool} runs now, and its result follows.`
-          : `declined: ${tool} didn't run, and won't.`,
-      Work: ({ source }) => `${outcome}: ${source} is told.`
-    })
-  )
+  outcome === "approved"
+    ? `approved: ${request.origin.tool} runs now, and its result follows.`
+    : `declined: ${request.origin.tool} didn't run, and won't.`
 
 const decodeDecisionAnswer = Schema.decodeUnknownOption(Decision.Answer)
 
@@ -270,18 +261,10 @@ export const fromEntries = (
         },
         DecisionRequested: (request) => {
           requests.set(request.id, request)
-
-          Match.value(request.origin).pipe(
-            Match.tagsExhaustive({
-              Call: (origin) => {
-                parked.set(origin.callId, request)
-                history.push(parkedResult(request, origin))
-                open.delete(origin.callId)
-                flushIfClosed()
-              },
-              Work: (origin) => input(index, userText(workRequestText(request, origin)))
-            })
-          )
+          parked.set(request.origin.callId, request)
+          history.push(parkedResult(request, request.origin))
+          open.delete(request.origin.callId)
+          flushIfClosed()
         },
         DecisionResolved: () => undefined,
         AssistantMessage: () => undefined,

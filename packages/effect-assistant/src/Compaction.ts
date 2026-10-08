@@ -42,10 +42,6 @@ export const inputTokens = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): nu
     : 0
 }
 
-/** What asks for a decision: the tool its call is for, or the work that asks. */
-const originOf = (request: AssistantEvent.DecisionRequested): string =>
-  Predicate.isTagged(request.origin, "Call") ? request.origin.tool : request.origin.source
-
 /**
  * Returns what was still open at `throughSeq` and still is: decisions waiting
  * for the user, blocks the user hasn't answered, and specialists working. As
@@ -70,7 +66,7 @@ export const openItems = (
           event.id === state.request.id
       )
     )
-      ? [`- decision ${state.request.id}, for ${originOf(state.request)}: ${toJsonText(state.request.preview)}`]
+      ? [`- decision ${state.request.id}, for ${state.request.origin.tool}: ${toJsonText(state.request.preview)}`]
       : []
   )
 
