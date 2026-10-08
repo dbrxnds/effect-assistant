@@ -125,11 +125,17 @@ and whether the assistant is working. `subscribe` streams the whole log,
 including model calls and tool results, and is meant for server code and
 tests.
 
+That's outside a chat. Code that runs inside one (the handler, a tool its
+turns run) uses the chat itself, `yield* MyAssistant.Chat`: its id, its
+entries typed with the assistant's events, and `append`. See
+[code in a chat](#code-in-a-chat).
+
 ## Going further
 
 Each section below adds one thing to the simplest setup. They combine
-freely. The code is trimmed to what changes. `instructions`, `toolkit`, and
-`ModelLive` are the ones from above. The [docs](./apps/docs/guide) cover each
+freely. The code is trimmed to what changes. `MyAssistant`, `WeatherTools`,
+`WeatherToolsLive`, and `ModelLive` are the ones from above, and
+`instructions` is the assistant's prompt. The [docs](./apps/docs/guide) cover each
 topic in depth.
 
 ### Keep chats in Postgres and survive restarts
@@ -169,7 +175,15 @@ CREATE TABLE chat_log (
 ```
 
 With several processes, use a multi-runner cluster in place of
-`SingleRunner`. `layerMemory` assumes one process. See
+`SingleRunner`. `layerMemory` assumes one process.
+
+A process can also reach chats without running them. The assistant's
+service only calls the engine: with the cluster engine, `submit` sends the
+chat's entity a message and `subscribe` streams from it, wherever that
+entity runs. So a web server in front of the runners provides
+`MyAssistant.layerClient` (the service, no handler) with
+`AssistantEngine.layerCluster` on the same cluster, and the runners provide
+`MyAssistant.toLayer(...)`. See
 [deploying](./apps/docs/guide/deploying.md) and
 [engines](./apps/docs/guide/engines.md).
 
@@ -233,23 +247,20 @@ Whom a chat belongs to is your app's data. At the edge, check that the
 signed-in user may use the chat, then pass the call through:
 
 ```ts
-const assistant = yield * MyAssistant
-
 // The client makes the InputId, so a retried send is stored once.
 const send = (chatId: ChatId.ChatId, inputId: InputId.InputId, text: string) =>
-  assistant.submit(chatId, AssistantEvent.UserMessage.make({ id: inputId, text }))
+  MyAssistant.use((assistant) => assistant.submit(chatId, AssistantEvent.UserMessage.make({ id: inputId, text })))
 
 // A client that already has the view up to some seq passes it as `after`.
-const watch = (chatId: ChatId.ChatId, after?: number) => assistant.subscribeView(chatId, { after })
+const watch = (chatId: ChatId.ChatId, after?: number) =>
+  Stream.unwrap(MyAssistant.useSync((assistant) => assistant.subscribeView(chatId, { after })))
 ```
 
 On the client, fold the updates with `ChatView.apply` starting from
 `ChatView.empty`. Show a working indicator while `view.activity` says
 something is working, and close the chat when `view.deleted` is true. The
 demo serves all of this over an Effect RPC WebSocket
-(`packages/demo/shared/src/Rpc.ts`). A process that only serves clients, in
-front of a cluster that runs the chats, provides `MyAssistant.layerClient`
-instead of the handler's layer. See
+(`packages/demo/shared/src/Rpc.ts`). See
 [the chat client](./apps/docs/guide/client.md) and
 [chats and users](./apps/docs/guide/chats.md).
 
@@ -354,13 +365,13 @@ const Research = Specialist.make("research", {
 })
 
 const ResearchLive = Research.toLayer((run) =>
-  run.loop({ instructions: "Answer in a few lines.", toolkit: researchTools, maxSteps: 24 })
-)
+  run.loop({ instructions: "Answer in a few lines.", toolkit: ResearchTools, maxSteps: 24 })
+).pipe(Layer.provide(ResearchToolsLive))
 
 export const MyAssistant = Assistant.make("my-assistant", { specialists: [Research] })
 
-const MyAssistantHandlers = MyAssistant.toLayer((turn) => turn.loop({ instructions, toolkit })).pipe(
-  Layer.provide(ResearchLive)
+const MyAssistantHandlers = MyAssistant.toLayer((turn) => turn.loop({ instructions, toolkit: WeatherTools })).pipe(
+  Layer.provide([WeatherToolsLive, ResearchLive])
 )
 ```
 
@@ -397,6 +408,45 @@ example from a prompt store. To give a user fewer tools, build a smaller
 `Toolkit.make(...)` for their turn. See [skills](./apps/docs/guide/skills.md) and
 [tools](./apps/docs/guide/tools.md).
 
+### Code in a chat
+
+Outside a chat, code uses the assistant (`yield* MyAssistant`). Inside one,
+it uses the chat. The handler, its build, and any tool its turns run get the
+assistant's chat, typed with its events:
+
+```ts
+import { AppEvent } from "effect-assistant"
+
+class Note extends Schema.TaggedClass<Note>()("Note", { text: Schema.String }) {}
+
+export const MyAssistant = Assistant.make("my-assistant", { events: [AppEvent.make(Note)] })
+
+const NoteSummary = Tool.make("note_summary", {
+  description: "Notes something about the chat.",
+  parameters: Schema.Struct({ text: Schema.String }),
+  success: Schema.String,
+  dependencies: [MyAssistant.Chat] // the turn provides it
+})
+
+const NoteToolsLive = Toolkit.make(NoteSummary).toLayer({
+  note_summary: ({ text }) =>
+    Effect.gen(function* () {
+      const chat = yield* MyAssistant.Chat
+      const entries = yield* chat.entries // the library's events and this assistant's own, typed
+      const notes = entries.flatMap(({ event }) => (Predicate.isTagged(event, "Note") ? [event.text] : []))
+
+      // Only the library's events and this assistant's own: anything else is a type error.
+      yield* chat.append(Note.make({ text }))
+
+      return `noted (${notes.length + 1} so far)`
+    })
+})
+```
+
+Code that doesn't know the assistant, like a tool shared by several or a
+specialist's run, uses `yield* AssistantChat`: the same chat, untyped. See
+[assistants and handlers](./apps/docs/guide/assistant.md).
+
 ### Your own events: webhooks, workflows, drafts
 
 Register your own tagged schemas with the assistant. An event with
@@ -424,10 +474,12 @@ export const MyAssistant = Assistant.make("my-assistant", {
 })
 
 // From a webhook. The keyed id makes a redelivered webhook harmless.
-yield *
-  (yield * MyAssistant).submit(
-    chatId,
-    ShipmentUpdated.make({ id: InputId.fromKey(`shipment:${orderId}:${status}`), orderId, status })
+const onShipment = (chatId: ChatId.ChatId, orderId: string, status: string) =>
+  MyAssistant.use((assistant) =>
+    assistant.submit(
+      chatId,
+      ShipmentUpdated.make({ id: InputId.fromKey(`shipment:${orderId}:${status}`), orderId, status })
+    )
   )
 ```
 
@@ -528,13 +580,13 @@ view. See [assistants and handlers](./apps/docs/guide/assistant.md) and
 
 ## This repository
 
-| Path                        | What                                                                                                  |
-| --------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `packages/effect-assistant` | The library.                                                                                          |
-| `packages/demo/api`         | A demo server for a fictional company, Acme: tools, prompts, a durable workflow with a decision, RPC. |
-| `packages/demo/shared`      | What the demo's web app and API share: RPCs, UI blocks, ids, demo data.                               |
-| `apps/web`                  | The demo's chat UI. One RPC WebSocket per tab.                                                        |
-| `apps/docs`                 | The docs site: guides, and an API reference generated from the library's JSDoc.                       |
+| Path                        | What                                                                                            |
+| --------------------------- | ----------------------------------------------------------------------------------------------- |
+| `packages/effect-assistant` | The library.                                                                                    |
+| `packages/demo/api`         | A demo server for a fictional company, Acme: tools, approvals, prompts, durable workflows, RPC. |
+| `packages/demo/shared`      | What the demo's web app and API share: RPCs, UI blocks, ids, demo data.                         |
+| `apps/web`                  | The demo's chat UI. One RPC WebSocket per tab.                                                  |
+| `apps/docs`                 | The docs site: guides, and an API reference generated from the library's JSDoc.                 |
 
 ```bash
 pnpm install
