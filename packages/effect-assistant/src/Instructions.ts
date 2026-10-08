@@ -64,12 +64,9 @@ export type Instructions<R = never> = string | Effect.Effect<string | Resolved, 
  * @category utils
  * @since 0.1.0
  */
-export const resolve = Effect.fnUntraced(
-  function* <R = never>(instructions: Instructions<R>) {
-    return Predicate.isString(instructions) ? { text: instructions } : toResolved(yield* instructions)
-  },
-  (effect) => Effect.withSpan(effect, "Instructions.resolve", { captureStackTrace: false })
-)
+export const resolve = Effect.fn("Instructions.resolve")(function* <R = never>(instructions: Instructions<R>) {
+  return Predicate.isString(instructions) ? { text: instructions } : toResolved(yield* instructions)
+})
 
 const toResolved = (resolved: string | Resolved): Resolved =>
   Predicate.isString(resolved) ? { text: resolved } : resolved

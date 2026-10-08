@@ -522,14 +522,11 @@ export const make = <
     const chats = yield* Chats.Chats
 
     return Key.of({
-      submit: Effect.fnUntraced(
-        function* (chatId: ChatId, input: AssistantEvent.Input | OwnEvents) {
-          // Checked here, where the caller can handle it: the chat checks again when it stores the input.
-          yield* chats.get(chatId)
-          yield* engine.submit(name, chatId, yield* stored(input))
-        },
-        (effect) => Effect.withSpan(effect, "Assistant.submit", { captureStackTrace: false })
-      ),
+      submit: Effect.fn("Assistant.submit")(function* (chatId: ChatId, input: AssistantEvent.Input | OwnEvents) {
+        // Checked here, where the caller can handle it: the chat checks again when it stores the input.
+        yield* chats.get(chatId)
+        yield* engine.submit(name, chatId, yield* stored(input))
+      }),
       subscribe: (chatId, options) =>
         engine
           .subscribe(name, chatId, options?.after ?? 0)
