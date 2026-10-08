@@ -74,7 +74,7 @@ Effect.runPromise(program.pipe(Effect.provide(AppLive)))
 
 | Piece                 | What it is                                                                                                           |
 | --------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `Assistant.make`      | The definition. `yield* MyAssistant` gives `submit`, `subscribe`, `subscribeView`, `delete`.                         |
+| `Assistant.make`      | The definition. `yield* MyAssistant` gives `submit`, `subscribe`, `delete`.                                          |
 | `MyAssistant.toLayer` | The handler: what runs each turn, usually `turn.loop(...)`. It provides the assistant.                               |
 | `turn.loop`           | The agent loop: model call, tool calls, repeat. The model talks to the user only through a `send_user_message` tool. |
 | `AssistantEngine`     | Runs the chats: `layerMemory` in one process, `layerCluster` with one entity per chat.                               |
@@ -92,8 +92,8 @@ Effect.runPromise(program.pipe(Effect.provide(AppLive)))
 4. **The model talks only through a tool.** Its plain text never reaches the user. It sends a message by
    calling `send_user_message`, and ends its turn with `wait`. Tool output and the model's
    working notes stay out of the chat; the user sees only what it chose to say.
-5. **Readers follow the log.** `subscribe` streams every event, for your server and tests. `subscribeView`
-   streams what the user sees: messages, blocks, and whether something is working.
+5. **Readers follow the log.** `subscribe` streams every event, for your server and tests. Piped through
+   `ChatView.updates`, it streams what the user sees: messages, blocks, and whether something is working.
 
 Because a turn is a stream, you change it with ordinary stream code: run something after the reply with
 `Stream.concat`, provide services with `Stream.provideService`. Don't buffer it: events would run ahead of the
@@ -116,11 +116,15 @@ const send = (chatId: ChatId.ChatId, inputId: InputId.InputId, text: string) =>
   MyAssistant.use((assistant) => assistant.submit(chatId, AssistantEvent.UserMessage.make({ id: inputId, text })))
 
 const watch = (chatId: ChatId.ChatId, after?: number) =>
-  Stream.unwrap(MyAssistant.useSync((assistant) => assistant.subscribeView(chatId, { after })))
+  Stream.unwrap(
+    MyAssistant.useSync((assistant) => assistant.subscribe(chatId).pipe(ChatView.updates(MyAssistant, { after })))
+  )
 ```
 
-- `subscribeView` streams the chat as the user sees it: messages, blocks, `activity`, `deleted`. The client
-  folds it with `ChatView.apply`, from `ChatView.empty`.
+- `ChatView.updates` turns the chat's log into the chat as the user sees it: messages, blocks, `activity`,
+  `deleted`. The client folds it with `ChatView.apply`, from `ChatView.empty`.
+- `after` goes to `ChatView.updates`, not to `subscribe`: the view is folded from the whole log, and only the
+  updates up to `after` are skipped.
 - The client picks the `InputId`, so a retried send is stored once.
 - Check the user may use the chat before calling either.
 

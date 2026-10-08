@@ -31,7 +31,6 @@ import type * as AssistantLoop from "./AssistantLoop.ts"
 import type * as BlockKit from "./BlockKit.ts"
 import { ChatId } from "./ChatId.ts"
 import * as Chats from "./Chats.ts"
-import * as ChatView from "./ChatView.ts"
 import type { CurrentChat } from "./CurrentChat.ts"
 import type * as Instructions from "./Instructions.ts"
 import * as AppEvents from "./internal/events.ts"
@@ -279,21 +278,15 @@ export interface Service<Events = never> {
    * Streams the chat's stored entries, then live ones, with the assistant's own events decoded.
    * A reader that already has the earlier entries passes `after` and receives only the entries
    * after that `seq`.
+   *
+   * For a chat client, pipe the whole log into `ChatView.updates(MyAssistant, { after })`, which
+   * streams the chat as its user sees it. Its `after` goes there, not here: the view of a message
+   * depends on earlier entries.
    */
   readonly subscribe: (
     chatId: ChatId,
     options?: { readonly after?: number | undefined }
   ) => Stream.Stream<Entry<Events>>
-  /**
-   * Streams the chat as its user sees it, for a chat client. Each update holds what changed in
-   * the chat's messages, blocks, and activity (see `ChatView`), from the start of the chat and
-   * then live. A client that has the view up to a `seq` passes it as `after` and receives only
-   * what changed since.
-   */
-  readonly subscribeView: (
-    chatId: ChatId,
-    options?: { readonly after?: number | undefined }
-  ) => Stream.Stream<ChatView.Update>
   /**
    * Deletes a chat by storing a `ChatDeleted` event and stopping everything that works in it.
    *
@@ -533,8 +526,6 @@ export const make = <
               Filter.fromPredicateOption((entry: AssistantEvent.Entry) => AppEvents.decodeEntry(definition.app, entry))
             )
           ),
-      subscribeView: (chatId, options) =>
-        ChatView.updates(engine.subscribe(name, chatId, 0), { wakes: definition.app.wakes, after: options?.after }),
       delete: (chatId) => engine.delete(name, chatId)
     })
   })

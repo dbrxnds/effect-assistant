@@ -5,12 +5,13 @@
  * A {@link View} holds the chat's messages with their blocks and decisions, the chat's
  * {@link Activity}, and whether the last turn failed or the chat was deleted. It never contains
  * the model's output, tool calls or results, what the model read, the app's own events, or why a
- * turn failed. The server streams {@link Update}s with `MyAssistant.subscribeView`, which is built
- * on {@link updates}, and the client folds them with {@link apply}, starting from {@link empty}.
+ * turn failed. The server streams {@link Update}s by piping the assistant's `subscribe` through
+ * {@link updates}, and the client folds them with {@link apply}, starting from {@link empty}.
  * On the server, {@link fromEntries} builds a whole view from a chat's log.
  *
  * @since 0.1.0
  */
+import { dual } from "effect/Function"
 import * as Match from "effect/Match"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
@@ -316,7 +317,7 @@ export interface Options {
  * **When to use**
  *
  * Use it in server-side code, for example to return a whole chat at once. A client gets the view
- * from `MyAssistant.subscribeView` instead, which knows the assistant's events.
+ * as a stream from {@link updates} instead.
  *
  * **Example** (Building a chat's view from its log)
  *
@@ -553,16 +554,50 @@ const merge = (updates: ReadonlyArray<Update>): Update | undefined => {
 }
 
 /**
- * Returns the stream of updates that a chat's entries produce.
+ * Represents an assistant's definition as {@link updates} reads it: the app's events it
+ * registered, and whether each one wakes a turn. An assistant made with `Assistant.make` fits it.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface Definition {
+  readonly events: ReadonlyArray<{ readonly tag: string; readonly wakes: boolean }>
+}
+
+/**
+ * Represents the options accepted by {@link updates}.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface UpdatesOptions {
+  /**
+   * The `seq` up to which the client already has the view. The result contains only the updates
+   * after it. Defaults to `0`, every update.
+   */
+  readonly after?: number | undefined
+}
+
+const wakesOf = (definition: Definition): ReadonlySet<string> =>
+  new Set(definition.events.flatMap((event) => (event.wakes ? [event.tag] : [])))
+
+/**
+ * Returns the stream of view updates that a chat's entries produce, for a chat client.
  *
  * **Details**
  *
- * `entries` must stream from the start of the chat's log, as `MyAssistant.subscribe` does. The
- * result contains only the updates after `after`, and each chunk of entries becomes one update;
- * the stored entries, for example, arrive as one chunk. `MyAssistant.subscribeView` is this
- * function applied to the assistant's log.
+ * The entries must stream from the start of the chat's log, as `assistant.subscribe(chatId)` does
+ * without `after`. The fold reads every entry, because a message's view depends on earlier
+ * entries: a block is answered or closed later, and a decision is made later. `after` only skips
+ * emitting the updates up to that `seq`, so a client that has the view up to a `seq` receives only
+ * what changed since. Pass `after` here, not to `subscribe`: a subscription that starts after a
+ * `seq` gives the fold an incomplete log, and the updates it produces are wrong.
  *
- * **Example** (Folding a chat's log into its view)
+ * The definition tells the fold which of the app's events wake a turn, so the view shows a turn as
+ * about to start after one. Each chunk of entries becomes one update; the stored entries, for
+ * example, arrive as one chunk.
+ *
+ * **Example** (Streaming a chat's view to a client)
  *
  * ```ts
  * import { Assistant, type ChatId, ChatView } from "effect-assistant"
@@ -570,41 +605,54 @@ const merge = (updates: ReadonlyArray<Update>): Update | undefined => {
  *
  * const MyAssistant = Assistant.make("my-assistant")
  *
- * const watch = (chatId: ChatId.ChatId) =>
+ * const watch = (chatId: ChatId.ChatId, after: number) =>
  *   Stream.unwrap(
  *     MyAssistant.useSync((assistant) =>
- *       ChatView.updates(assistant.subscribe(chatId)).pipe(
- *         Stream.scan(() => ChatView.empty, ChatView.apply)
- *       )
+ *       assistant.subscribe(chatId).pipe(ChatView.updates(MyAssistant, { after }))
  *     )
  *   )
  * ```
  *
- * @see {@link apply} for folding the updates into a view
+ * @see {@link apply} for folding the updates into a view on the client
  *
  * @category utils
  * @since 0.1.0
  */
-export const updates = <E, R>(
-  entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
-  options?: Options & { readonly after?: number | undefined }
-): Stream.Stream<Update, E, R> => {
-  const after = options?.after ?? 0
+export const updates: {
+  (
+    definition: Definition,
+    options?: UpdatesOptions
+  ): <E, R>(entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>) => Stream.Stream<Update, E, R>
+  <E, R>(
+    entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
+    definition: Definition,
+    options?: UpdatesOptions
+  ): Stream.Stream<Update, E, R>
+} = dual(
+  (args) => Stream.isStream(args[0]),
+  <E, R>(
+    entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
+    definition: Definition,
+    options?: UpdatesOptions
+  ): Stream.Stream<Update, E, R> => {
+    const after = options?.after ?? 0
+    const wakes = wakesOf(definition)
 
-  return entries.pipe(
-    Stream.mapAccumArray(
-      () => folding(options?.wakes ?? new Set()),
-      (fold, chunk) => {
-        const changed = chunk.flatMap((entry) => {
-          const update = fold.step(entry)
+    return entries.pipe(
+      Stream.mapAccumArray(
+        () => folding(wakes),
+        (fold, chunk) => {
+          const changed = chunk.flatMap((entry) => {
+            const update = fold.step(entry)
 
-          return update === undefined || entry.seq <= after ? [] : [update]
-        })
+            return update === undefined || entry.seq <= after ? [] : [update]
+          })
 
-        const merged = merge(changed)
+          const merged = merge(changed)
 
-        return [fold, merged === undefined ? [] : [merged]]
-      }
+          return [fold, merged === undefined ? [] : [merged]]
+        }
+      )
     )
-  )
-}
+  }
+)

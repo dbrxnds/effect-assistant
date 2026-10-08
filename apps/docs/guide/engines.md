@@ -46,7 +46,7 @@ Effect cluster, keyed by chat id.
   stores the input, then runs turns until nothing is pending.
 - A crash mid-turn leaves the message unprocessed, so the cluster
   **redelivers** it and the work resumes.
-- `subscribe` and `subscribeView` stream from the entity, which is where the
+- `subscribe` streams from the entity, which is where the
   events are written, and `delete` goes to it, so the entity stops what
   works in the chat.
 - The chat's [specialist](./specialists) runs live in its entity, which

@@ -26,7 +26,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
 
-// The definition: submit and subscribeView are on it.
+// The definition: submit and subscribe are on it.
 export const MyAssistant = Assistant.make("my-assistant")
 
 // The handler: every turn runs the agent loop with these instructions.
@@ -67,8 +67,9 @@ workflow:
 ## Send it a message
 
 A chat is a `ChatId`. `submit` stores a message in it and returns at once;
-the assistant works in the background. `subscribeView` streams the chat as
-its user sees it: the messages, and whether the assistant is working.
+the assistant works in the background. `subscribe` streams the chat's log,
+and `ChatView.updates` turns it into the chat as its user sees it: the
+messages, and whether the assistant is working.
 
 **Example** (Submit, then read the reply)
 
@@ -84,7 +85,8 @@ const program = Effect.gen(function* () {
 
   yield* assistant.submit(chatId, AssistantEvent.UserMessage.make({ text: "Hi! What can you do?" }))
 
-  const view = yield* assistant.subscribeView(chatId).pipe(
+  const view = yield* assistant.subscribe(chatId).pipe(
+    ChatView.updates(MyAssistant),
     Stream.scan(() => ChatView.empty, ChatView.apply),
     Stream.takeUntil((view) => view.messages.length > 1 && ChatView.isIdle(view)),
     Stream.runLast

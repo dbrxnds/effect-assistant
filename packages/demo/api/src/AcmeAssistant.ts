@@ -10,7 +10,7 @@ import { Research } from "./Research.ts"
 import * as WorkflowStep from "./WorkflowStep.ts"
 
 /**
- * Acme: `submit`, `subscribeView`, and `delete` wherever the assistant
+ * Acme: `submit`, `subscribe`, and `delete` wherever the assistant
  * engine is provided. The demo has no sign-in: every thread is everyone's.
  * It hands research to the research specialist, and its workflows report
  * their steps as `WorkflowStep`s.
