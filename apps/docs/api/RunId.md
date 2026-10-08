@@ -16,7 +16,7 @@ from a tool. A run id is `run:` followed by a UUID.
 Creates a new random run id using Effect's `Random`.
 
 ```ts
-const make: Effect.Effect<RunId>
+const make: () => Effect.Effect<RunId>
 ```
 
 <small>Since 0.1.0</small>
@@ -55,7 +55,7 @@ type RunId = typeof RunId.Type
 Schema for run ids of the form `` `run:${uuid}` ``, branded.
 
 ```ts
-const RunId = Schema.TemplateLiteral(["run:", Uuid.Uuid]).pipe(Schema.brand("effect-assistant/RunId"))
+const RunId = Schema.TemplateLiteral(["run:", Uuid.Uuid]).pipe(Schema.brand("~effect-assistant/RunId"))
 ```
 
 <small>Since 0.1.0</small>

@@ -11,8 +11,7 @@ matches. They then stay in the history for the rest of the work.
 ```ts
 import { Skill } from "effect-assistant"
 
-const orderingCampaigns = Skill.make({
-  name: "Ordering a campaign",
+const orderingCampaigns = Skill.make("Ordering a campaign", {
   description: "Use when the user wants to order or start a campaign.",
   instructions: `1. Pick the product with list_campaign_products.
 2. You need who it should reach and a budget. Ask for what's missing, one question at a time.

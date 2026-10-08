@@ -1,7 +1,7 @@
 /**
  * Groups the blocks an assistant may put in its messages, and renders them on the client.
  *
- * A kit is created with {@link make} and passed to `Assistant.make`. {@link blockStates} computes
+ * A kit is created with {@link make} and passed to `Assistant.make`. {@link fromEntries} computes
  * the state of every message's block from a chat's log, {@link closeStale} closes the blocks the
  * user moved on from, and {@link toClient} creates a client-side renderer with one function per
  * block kind.
@@ -12,10 +12,10 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import { AssistantChat } from "./AssistantChat.ts"
 import * as AssistantEvent from "./AssistantEvent.ts"
 import type * as Block from "./Block.ts"
 import type * as ChatView from "./ChatView.ts"
+import { CurrentChat } from "./CurrentChat.ts"
 import * as Decision from "./Decision.ts"
 import * as InputId from "./InputId.ts"
 
@@ -55,7 +55,7 @@ type AnswerOf<B> = B extends { readonly answer: infer A } ? (A extends Schema.To
  * @category models
  * @since 0.1.0
  */
-export interface BlockState {
+export interface State {
   readonly open: boolean
   /** The user's answer, if they used the block. */
   readonly answer: AssistantEvent.BlockAnswer | undefined
@@ -67,10 +67,10 @@ export interface BlockState {
  * @category utils
  * @since 0.1.0
  */
-export const nextBlockStates = (
-  states: ReadonlyMap<string, BlockState>,
+export const apply = (
+  states: ReadonlyMap<string, State>,
   event: { readonly _tag: string }
-): ReadonlyMap<string, BlockState> => {
+): ReadonlyMap<string, State> => {
   if (!AssistantEvent.isLibraryEvent(event)) return states
 
   const close = (ids: ReadonlyArray<string>) => {
@@ -104,10 +104,10 @@ export const nextBlockStates = (
  * @category utils
  * @since 0.1.0
  */
-export const blockStates = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): ReadonlyMap<string, BlockState> => {
-  let states: ReadonlyMap<string, BlockState> = new Map()
+export const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): ReadonlyMap<string, State> => {
+  let states: ReadonlyMap<string, State> = new Map()
 
-  for (const entry of entries) states = nextBlockStates(states, entry.event)
+  for (const entry of entries) states = apply(states, entry.event)
 
   return states
 }
@@ -128,7 +128,7 @@ export const staleBlocks = (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
   options: { readonly messages: number }
 ): ReadonlyArray<string> => {
-  const open = [...blockStates(entries)].flatMap(([id, state]) => (state.open ? [id] : []))
+  const open = [...fromEntries(entries)].flatMap(([id, state]) => (state.open ? [id] : []))
 
   return open.filter((id) => {
     const shown = entries.findIndex(
@@ -167,7 +167,7 @@ export const staleBlocks = (
  * @since 0.1.0
  */
 export const closeStale = Effect.fn(function* (options: { readonly messages: number }) {
-  const chat = yield* AssistantChat
+  const chat = yield* CurrentChat
   const stale = staleBlocks(yield* chat.entries, options)
 
   if (stale.length > 0) yield* chat.append(AssistantEvent.BlocksClosed.make({ messageIds: stale }))
@@ -193,7 +193,7 @@ export interface RenderArgs<B> {
    * For the decision block, the call each decision is for (its tool and params) and how it was
    * decided. Empty for other blocks.
    */
-  readonly decisions: ReadonlyArray<ChatView.Decision>
+  readonly decisions: ReadonlyArray<ChatView.PendingDecision>
   /** Sends an answer. Only call it while `open`. */
   readonly respond: (answer: AnswerOf<B>) => void
 }

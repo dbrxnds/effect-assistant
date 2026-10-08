@@ -186,7 +186,7 @@ const researchScript: Scripted.Script = (request) => {
       ]
     : [
         Scripted.call("spawn_specialist", {
-          kind: "research",
+          specialist: "research",
           goal: "What's the capital of Canada?"
         })
       ]
@@ -272,7 +272,7 @@ describe("specialist runs", () => {
           ? Scripted.reply("On it.")
           : [
               Scripted.call("spawn_specialist", {
-                kind: "archivist",
+                specialist: "archivist",
                 goal: "Where was the 2024 offsite?"
               })
             ]
@@ -358,7 +358,7 @@ describe("specialist runs", () => {
           ? Scripted.reply("Asking research.")
           : [
               Scripted.call("spawn_specialist", {
-                kind: "research",
+                specialist: "research",
                 goal: "What's the capital of Canada?"
               })
             ]
@@ -396,7 +396,7 @@ describe("specialist runs", () => {
 
         return hasCalled(request, "spawn_specialist")
           ? Scripted.reply("On it.")
-          : [Scripted.call("spawn_specialist", { kind: "crasher", goal: "Crash." })]
+          : [Scripted.call("spawn_specialist", { specialist: "crasher", goal: "Crash." })]
       }
 
       const entries = yield* Effect.gen(function* () {
@@ -513,7 +513,7 @@ describe("UI blocks", () => {
       yield* (yield* BlockAssistant).submit(chat, answers[0]!)
 
       const entries = yield* collectUntil(BlockAssistant, chat, (es) => text(es).includes("blue it is") && idle(es))
-      const state = BlockKit.blockStates(entries).get(message!.id)
+      const state = BlockKit.fromEntries(entries).get(message!.id)
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
       expect(state?.open).toBe(false)
@@ -529,7 +529,7 @@ describe("UI blocks", () => {
       yield* (yield* BlockAssistant).submit(chat, say("blue"))
 
       const entries = yield* collectUntil(BlockAssistant, chat, (es) => text(es).includes("blue it is") && idle(es))
-      const state = BlockKit.blockStates(entries).get(shown(first)!.id)
+      const state = BlockKit.fromEntries(entries).get(shown(first)!.id)
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
       expect(state).toEqual({ open: false, answer: undefined })
@@ -560,7 +560,7 @@ describe("UI blocks", () => {
       const results = entries.flatMap(({ event }) => (Predicate.isTagged(event, "ToolResult") ? [event] : []))
 
       expect(results[0]?.outcome).toBe("failure")
-      expect(results[0]?.kind).toBe("ToolParameterValidationError")
+      expect(results[0]?.reason).toBe("ToolParameterValidationError")
       expect(toJsonText(results[0]?.result)).toMatch(/Expected/)
       expect(shown(entries)).toBeUndefined()
       // The failed message's `wait` doesn't end the turn: the loop's next step reads the failure.
@@ -626,6 +626,8 @@ describe("tools found on demand, and skills", () => {
   })
 
   const officeToolsDiscovery = ToolDiscovery.make(officeTools.toolkit)
+  // From its own `make` call: the handlers are found by tool name.
+  const officeToolsDiscoveryLive = ToolDiscovery.layer(officeTools.toolkit)
 
   it.live("finds a tool with search_tools and runs it with execute_tool", () =>
     Effect.gen(function* () {
@@ -657,9 +659,9 @@ describe("tools found on demand, and skills", () => {
       }).pipe(
         Effect.provide(
           runMemory(
-            TestAssistant.toLayer((turn) => turn.loop({ instructions, toolkit: officeToolsDiscovery.toolkit })).pipe(
+            TestAssistant.toLayer((turn) => turn.loop({ instructions, toolkit: officeToolsDiscovery })).pipe(
               Layer.provide(
-                officeToolsDiscovery.layer.pipe(Layer.provide(officeTools.toolkit.toLayer(officeTools.handlers)))
+                officeToolsDiscoveryLive.pipe(Layer.provide(officeTools.toolkit.toLayer(officeTools.handlers)))
               )
             ),
             Scripted.layer(script)
@@ -686,6 +688,7 @@ describe("tools found on demand, and skills", () => {
       })
 
       const brokenDiscovery = ToolDiscovery.make(broken.toolkit)
+      const brokenDiscoveryLive = ToolDiscovery.layer(broken.toolkit)
 
       const model = yield* Scripted.make((request) =>
         Option.isSome(Scripted.result(request, "execute_tool"))
@@ -701,8 +704,8 @@ describe("tools found on demand, and skills", () => {
       }).pipe(
         Effect.provide(
           runMemory(
-            TestAssistant.toLayer((turn) => turn.loop({ instructions, toolkit: brokenDiscovery.toolkit })).pipe(
-              Layer.provide(brokenDiscovery.layer.pipe(Layer.provide(broken.toolkit.toLayer(broken.handlers))))
+            TestAssistant.toLayer((turn) => turn.loop({ instructions, toolkit: brokenDiscovery })).pipe(
+              Layer.provide(brokenDiscoveryLive.pipe(Layer.provide(broken.toolkit.toLayer(broken.handlers))))
             ),
             model.layer
           )
@@ -713,7 +716,9 @@ describe("tools found on demand, and skills", () => {
       expect(yield* model.requests).toHaveLength(2)
       expect(
         entries.flatMap(({ event }) =>
-          Predicate.isTagged(event, "ToolResult") && event.tool === "execute_tool" ? [[event.outcome, event.kind]] : []
+          Predicate.isTagged(event, "ToolResult") && event.tool === "execute_tool"
+            ? [[event.outcome, event.reason]]
+            : []
         )
       ).toEqual([["failure", "ToolFailure"]])
     })
@@ -730,13 +735,11 @@ describe("tools found on demand, and skills", () => {
       })
 
       const skills = [
-        Skill.make({
-          name: "Onboarding",
+        Skill.make("Onboarding", {
           description: "Use when someone new is joining the team.",
           instructions: "Book a buddy lunch on day one."
         }),
-        Skill.make({
-          name: "Offboarding",
+        Skill.make("Offboarding", {
           description: "Use when someone is leaving.",
           instructions: "Collect the laptop."
         })

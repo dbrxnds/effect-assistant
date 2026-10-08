@@ -16,10 +16,10 @@ import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Semaphore from "effect/Semaphore"
 import * as Stream from "effect/Stream"
-import { AssistantChat } from "../AssistantChat.ts"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import type * as AssistantLoop from "../AssistantLoop.ts"
 import * as Loop from "./loop.ts"
+import { CurrentChat } from "../CurrentChat.ts"
 import * as InputId from "../InputId.ts"
 import * as RunId from "../RunId.ts"
 import * as Skill from "../Skill.ts"
@@ -145,10 +145,10 @@ export const finished = (
     ...outcome
   })
 
-const RunIdInput = Schema.String.annotate({ description: "The runId spawn_specialist returned." })
+const RunIdInput = RunId.RunId.annotate({ description: "The runId spawn_specialist returned." })
 
 const RunStatus = <const Status extends string>(status: ReadonlyArray<Status>) =>
-  Schema.Struct({ runId: Schema.String, status: Schema.Literals(status) })
+  Schema.Struct({ runId: RunId.RunId, status: Schema.Literals(status) })
 
 const MessageSpecialist = Tool.make("message_specialist", {
   description:
@@ -169,7 +169,7 @@ const StopSpecialist = Tool.make("stop_specialist", {
 })
 
 const refused = <A, R>(effect: Effect.Effect<A, Specialist.SpecialistError, R>) =>
-  Effect.catch(effect, (error) => ToolFailure.fail(error.message))
+  Effect.catch(effect, (error) => ToolFailure.fail(error.message, { reason: error.reason }))
 
 /** @internal */
 export const toolkit = Effect.fnUntraced(function* (
@@ -180,9 +180,11 @@ export const toolkit = Effect.fnUntraced(function* (
   const catalog = specialists.map((specialist) => `- ${specialist.name}: ${specialist.description}`).join("\n")
 
   const SpawnSpecialist = Tool.make("spawn_specialist", {
-    description: `Start a specialist on a job. It works in the background and its report arrives as a <specialist> input, often within seconds. Write a self-contained brief: it can't see this chat. For a quick question, just call wait; for slow work, tell the user in one line first.\n${catalog}`,
+    description: `Start a specialist on a job. It works in the background and its report arrives as a <specialist> input, often within seconds. Write a self-contained brief: it can't see this chat. For a quick question, just call wait; for slow work, tell the user in one line first.\nPass one of these as specialist:\n${catalog}`,
     parameters: Schema.Struct({
-      kind: Schema.Literals(specialists.map((specialist) => specialist.name)),
+      specialist: Schema.Literals(specialists.map((specialist) => specialist.name)).annotate({
+        description: "The specialist to start, by name."
+      }),
       ...Specialist.Brief.fields
     }),
     success: RunStatus(["started"]),
@@ -193,8 +195,8 @@ export const toolkit = Effect.fnUntraced(function* (
   const SpecialistTools = Toolkit.make(SpawnSpecialist, MessageSpecialist, StopSpecialist)
 
   const handlers = yield* SpecialistTools.toHandlers({
-    spawn_specialist: Effect.fnUntraced(function* ({ kind, ...brief }) {
-      const runId = yield* refused(Specialist.Runner.use((runner) => runner.spawn({ kind, brief })))
+    spawn_specialist: Effect.fnUntraced(function* ({ specialist, ...brief }) {
+      const runId = yield* refused(Specialist.Runner.use((runner) => runner.spawn({ specialist, brief })))
 
       return { runId, status: "started" }
     }),
@@ -236,7 +238,7 @@ interface Run {
 /** @internal */
 export const makeRunner = Effect.fnUntraced(function* (options: {
   readonly chat: Writer
-  readonly handle: AssistantChat["Service"]
+  readonly handle: CurrentChat["Service"]
   readonly specialists: ReadonlyArray<{
     readonly specialist: Specialist.Any
     readonly handler: RunHandler
@@ -354,16 +356,17 @@ export const makeRunner = Effect.fnUntraced(function* (options: {
 
   const runner = Specialist.Runner.of({
     spawn: Effect.fnUntraced(function* (request: Specialist.SpawnRequest) {
-      const found = byName.get(request.kind)
+      const found = byName.get(request.specialist)
 
       if (found === undefined) {
-        return yield* Specialist.SpecialistError.make({
-          message: `No specialist named ${request.kind}.`
+        return yield* new Specialist.SpecialistError({
+          reason: "UnknownSpecialist",
+          message: `No specialist named ${request.specialist}.`
         })
       }
 
       const run: Run = {
-        runId: yield* RunId.make,
+        runId: yield* RunId.make(),
         specialist: found.specialist,
         handler: found.handler,
         goal: request.brief.goal,
@@ -381,22 +384,23 @@ export const makeRunner = Effect.fnUntraced(function* (options: {
       return run.runId
     }),
     message: Effect.fnUntraced(function* (
-      runId: string,
+      runId: RunId.RunId,
       text: string
     ): Effect.fn.Return<"steered" | "continued", Specialist.SpecialistError> {
       const run = runs.get(runId)
 
       if (run === undefined) {
-        return yield* Specialist.SpecialistError.make({
+        return yield* new Specialist.SpecialistError({
+          reason: "RunNotFound",
           message: `Run ${runId} is no longer available. Spawn a new one with the full context.`
         })
       }
 
       return yield* run.lock.withPermit(send(run, text))
     }),
-    stop: Effect.fnUntraced(function* (runId: string) {
+    stop: Effect.fnUntraced(function* (runId: RunId.RunId) {
       if (!(yield* FiberMap.has(working, runId))) {
-        return yield* Specialist.SpecialistError.make({ message: `Run ${runId} isn't running.` })
+        return yield* new Specialist.SpecialistError({ reason: "NotRunning", message: `Run ${runId} isn't running.` })
       }
 
       yield* FiberMap.remove(working, runId)
@@ -404,7 +408,7 @@ export const makeRunner = Effect.fnUntraced(function* (options: {
   })
 
   // What a run's handler gets: its chat, this runner, and (merged in `once`) the model.
-  const services = Context.make(AssistantChat, options.handle).pipe(Context.add(Specialist.Runner, runner))
+  const services = Context.make(CurrentChat, options.handle).pipe(Context.add(Specialist.Runner, runner))
 
   return runner
 })

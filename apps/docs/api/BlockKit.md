@@ -8,7 +8,7 @@ import { BlockKit } from "effect-assistant"
 
 Groups the blocks an assistant may put in its messages, and renders them on the client.
 
-A kit is created with `make` and passed to `Assistant.make`. `blockStates` computes
+A kit is created with `make` and passed to `Assistant.make`. `fromEntries` computes
 the state of every message's block from a chat's log, `closeStale` closes the blocks the
 user moved on from, and `toClient` creates a client-side renderer with one function per
 block kind.
@@ -40,12 +40,12 @@ interface BlockKit<Blocks extends Block.Any = Block.Any> {
 
 <small>Since 0.1.0</small>
 
-### BlockState
+### State
 
 Represents the state of a message's block.
 
 ```ts
-interface BlockState {
+interface State {
   readonly open: boolean
   /** The user's answer, if they used the block. */
   readonly answer: AssistantEvent.BlockAnswer | undefined
@@ -57,10 +57,10 @@ interface BlockState {
  * @category utils
  * @since 0.1.0
  */
-export const nextBlockStates = (
-  states: ReadonlyMap<string, BlockState>,
+export const apply = (
+  states: ReadonlyMap<string, State>,
   event: { readonly _tag: string }
-): ReadonlyMap<string, BlockState> => {
+): ReadonlyMap<string, State> => {
   if (!AssistantEvent.isLibraryEvent(event)) return states
 
   const close = (ids: ReadonlyArray<string>) => {
@@ -94,10 +94,10 @@ export const nextBlockStates = (
  * @category utils
  * @since 0.1.0
  */
-export const blockStates = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): ReadonlyMap<string, BlockState> => {
-  let states: ReadonlyMap<string, BlockState> = new Map()
+export const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): ReadonlyMap<string, State> => {
+  let states: ReadonlyMap<string, State> = new Map()
 
-  for (const entry of entries) states = nextBlockStates(states, entry.event)
+  for (const entry of entries) states = apply(states, entry.event)
 
   return states
 }
@@ -118,7 +118,7 @@ export const staleBlocks = (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
   options: { readonly messages: number }
 ): ReadonlyArray<string> => {
-  const open = [...blockStates(entries)].flatMap(([id, state]) => (state.open ? [id] : []))
+  const open = [...fromEntries(entries)].flatMap(([id, state]) => (state.open ? [id] : []))
 
   return open.filter((id) => {
     const shown = entries.findIndex(
@@ -164,7 +164,7 @@ interface RenderArgs<B> {
    * For the decision block, the call each decision is for (its tool and params) and how it was
    * decided. Empty for other blocks.
    */
-  readonly decisions: ReadonlyArray<ChatView.Decision>
+  readonly decisions: ReadonlyArray<ChatView.PendingDecision>
   /** Sends an answer. Only call it while `open`. */
   readonly respond: (answer: AnswerOf<B>) => void
 }
@@ -311,25 +311,25 @@ interface RenderOptions {
 
 ## Utils
 
-### nextBlockStates
+### apply
 
 Returns the block states after one more event.
 
 ```ts
-const nextBlockStates: (
-  states: ReadonlyMap<string, BlockState>,
+const apply: (
+  states: ReadonlyMap<string, State>,
   event: { readonly _tag: string }
-) => ReadonlyMap<string, BlockState>
+) => ReadonlyMap<string, State>
 ```
 
 <small>Since 0.1.0</small>
 
-### blockStates
+### fromEntries
 
 Returns the state of every message's block, by message id.
 
 ```ts
-const blockStates: (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => ReadonlyMap<string, BlockState>
+const fromEntries: (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => ReadonlyMap<string, State>
 ```
 
 <small>Since 0.1.0</small>
@@ -364,7 +364,7 @@ Run it from a turn, before or after its loop. It records a `BlocksClosed` event,
 client folds the blocks closed.
 
 ```ts
-const closeStale = Effect.fnUntraced(function* (options: { readonly messages: number }) { …
+const closeStale = Effect.fn(function* (options: { readonly messages: number }) { …
 ```
 
 <small>Since 0.1.0</small>

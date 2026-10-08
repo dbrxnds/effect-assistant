@@ -90,8 +90,8 @@ message id in a later message's `closes`. Anything else the user sends, like ano
 block's answer or a question about something else, leaves it open. The
 view's block `status` says which: `"open"`, `"answered"`, or `"closed"`
 (without an answer). On the server,
-[`BlockKit.blockStates(entries)`](/api/BlockKit#blockstates) computes the
-same from a log, and `BlockKit.nextBlockStates` one event at a time.
+[`BlockKit.fromEntries(entries)`](/api/BlockKit#fromentries) computes the
+same from a log, and `BlockKit.apply` one event at a time.
 
 In case the assistant doesn't close a block the user moved on from, the turn
 can: `yield* BlockKit.closeStale({ messages: 3 })` in the handler, before

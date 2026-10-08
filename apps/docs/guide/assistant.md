@@ -53,7 +53,7 @@ Code that runs in a chat uses the chat itself instead. `yield* MyAssistant.Chat`
 (in the handler, its build, or a tool its turns run) has the chat's id, its
 `entries` typed with the assistant's events, and `append`. Code that doesn't
 know the assistant, like a shared tool or a specialist's run, uses
-`yield* AssistantChat`: the same chat, untyped.
+`yield* CurrentChat`: the same chat, untyped.
 
 The name is also the assistant's name in [traces](./observability)
 (`invoke_agent my-assistant`) and, with the cluster engine, in its entity type.
@@ -96,16 +96,16 @@ the loop themselves (see [custom loops](./loops)):
 Effect cluster entity's, the build runs once per chat activation, when the
 chat wakes up (a message, a specialist's report, a workflow's event), and its
 scope closes when the chat goes idle. The handler it returns runs every turn.
-Inside the build, `AssistantChat` says which chat it is.
+Inside the build, `CurrentChat` says which chat it is.
 
 **Example** (Setup per chat, work every turn)
 
 ```ts
-import { AssistantChat } from "effect-assistant"
+import { CurrentChat } from "effect-assistant"
 
 const MyAssistantHandlers = MyAssistant.toLayer(
   Effect.gen(function* () {
-    const { chatId } = yield* AssistantChat.AssistantChat // the chat this build is for
+    const { chatId } = yield* CurrentChat.CurrentChat // the chat this build is for
     const catalog = yield* Catalog // your service, from the layer
     yield* Effect.addFinalizer(() => Effect.log(`${chatId} went idle`)) // when the chat closes
 
@@ -130,7 +130,7 @@ reads services, [looks up the user](./chats), or fetches its
 A turn doesn't run inside the request that caused it, so a handler can't use
 just any service in scope. It may use:
 
-- the turn's services, `Assistant.TurnServices`: `AssistantChat` (the chat:
+- the turn's services, `Assistant.TurnServices`: `CurrentChat` (the chat:
   its id, its entries, and its writer) and `Specialist.Runner`;
 - `LanguageModel`;
 - what its build Effect required, like `Catalog` above. Those become the

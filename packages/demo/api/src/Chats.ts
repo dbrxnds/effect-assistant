@@ -6,7 +6,7 @@
  */
 import { ChatSummary, newChatTitle, seededChat, sortChats, titleFromText } from "@acme/demo-shared/ChatList"
 import * as ChatId from "effect-assistant/ChatId"
-import * as AssistantChats from "effect-assistant/Chats"
+import * as LibraryChats from "effect-assistant/Chats"
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -152,8 +152,8 @@ export const layerSql: Layer.Layer<Chats, never, SqlClient.SqlClient> = Layer.ef
  * @category layers
  * @since 0.1.0
  */
-export const layerAssistantChats: Layer.Layer<never, never, Chats> = Layer.effect(
-  AssistantChats.Chats,
+export const layerLibraryChats: Layer.Layer<never, never, Chats> = Layer.effect(
+  LibraryChats.Chats,
   Effect.gen(function* () {
     const chats = yield* Chats
 
@@ -162,7 +162,7 @@ export const layerAssistantChats: Layer.Layer<never, never, Chats> = Layer.effec
         const all = yield* chats.list
 
         if (!all.some((chat) => chat.chatId === chatId)) {
-          return yield* new AssistantChats.GetChatError({ chatId, reason: "NotFound" })
+          return yield* new LibraryChats.GetChatError({ chatId, reason: "NotFound" })
         }
 
         return { chatId }

@@ -85,7 +85,7 @@ export const openItems = (
       : []
   )
 
-  const blocks = [...BlockKit.blockStates(entries)].flatMap(([messageId, state]) => {
+  const blocks = [...BlockKit.fromEntries(entries)].flatMap(([messageId, state]) => {
     const shown = entries.find(
       ({ event }) =>
         AssistantEvent.isLibraryEvent(event) && Predicate.isTagged(event, "AssistantMessage") && event.id === messageId

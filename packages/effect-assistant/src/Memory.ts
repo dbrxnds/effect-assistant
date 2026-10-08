@@ -18,8 +18,8 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
-import { AssistantChat } from "./AssistantChat.ts"
 import type { ChatId } from "./ChatId.ts"
+import { CurrentChat } from "./CurrentChat.ts"
 import * as Uuid from "./internal/uuid.ts"
 import * as ToolFailure from "./ToolFailure.ts"
 
@@ -174,7 +174,7 @@ const Remember = Tool.make("remember", {
   }),
   success: Schema.String,
   failure: ToolFailure.ToolFailure,
-  dependencies: [AssistantChat, MemoryStore]
+  dependencies: [CurrentChat, MemoryStore]
 })
 
 const Forget = Tool.make("forget", {
@@ -182,7 +182,7 @@ const Forget = Tool.make("forget", {
   parameters: Schema.Struct({ id: Schema.String }),
   success: Schema.String,
   failure: ToolFailure.ToolFailure,
-  dependencies: [AssistantChat, MemoryStore]
+  dependencies: [CurrentChat, MemoryStore]
 })
 
 const Recall = Tool.make("recall", {
@@ -190,7 +190,7 @@ const Recall = Tool.make("recall", {
   parameters: Schema.Struct({ query: Schema.String }),
   success: Schema.Array(Schema.String),
   failure: ToolFailure.ToolFailure,
-  dependencies: [AssistantChat, MemoryStore]
+  dependencies: [CurrentChat, MemoryStore]
 })
 
 /**
@@ -248,7 +248,7 @@ const endOf = (date: string): Option.Option<DateTime.Utc> =>
  */
 export const layerTools = Tools.toLayer({
   remember: Effect.fnUntraced(function* ({ text, until, replaces }) {
-    const chat = yield* AssistantChat
+    const chat = yield* CurrentChat
     const store = yield* MemoryStore
     const expiresAt = until === undefined ? Option.none() : endOf(until)
 
@@ -261,14 +261,14 @@ export const layerTools = Tools.toLayer({
     return `Remembered as ${id}.`
   }),
   forget: Effect.fnUntraced(function* ({ id }) {
-    const chat = yield* AssistantChat
+    const chat = yield* CurrentChat
 
     yield* (yield* MemoryStore).forget(chat.chatId, id)
 
     return `Forgot ${id}.`
   }),
   recall: Effect.fnUntraced(function* ({ query }) {
-    const chat = yield* AssistantChat
+    const chat = yield* CurrentChat
     const found = yield* (yield* MemoryStore).recall(chat.chatId, query)
 
     return found.map(line)

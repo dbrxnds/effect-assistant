@@ -43,7 +43,7 @@ Schema for chat ids of the form `` `chat:${uuid}` ``. The schema is branded, so 
 plain string can't be passed where a chat id is required.
 
 ```ts
-const ChatId = Schema.TemplateLiteral(["chat:", Uuid.Uuid]).pipe(Schema.brand("effect-assistant/ChatId"))
+const ChatId = Schema.TemplateLiteral(["chat:", Uuid.Uuid]).pipe(Schema.brand("~effect-assistant/ChatId"))
 ```
 
 <small>Since 0.1.0</small>

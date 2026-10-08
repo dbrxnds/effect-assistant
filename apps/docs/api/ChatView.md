@@ -77,12 +77,12 @@ const apply: (view: View, update: Update) => View
 
 ## Models
 
-### Decision
+### PendingDecision
 
 Represents a decision as the user sees it.
 
 ```ts
-type Decision = typeof Decision.Type
+type PendingDecision = typeof PendingDecision.Type
 ```
 
 <small>Since 0.1.0</small>
@@ -221,14 +221,14 @@ interface Options {
 
 ## Schemas
 
-### Decision
+### PendingDecision
 
 Schema for a decision as the user sees it on a decision block. It holds the call the decision is
 for (its tool and params, which the app can display as it likes) and, once the user has
 decided, the outcome.
 
 ```ts
-const Decision = Schema.Struct({ …
+const PendingDecision = Schema.Struct({ …
 ```
 
 <small>Since 0.1.0</small>

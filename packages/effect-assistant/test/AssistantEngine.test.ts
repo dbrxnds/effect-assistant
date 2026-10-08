@@ -13,12 +13,12 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import {
   Assistant,
-  AssistantChat,
   AssistantEngine,
   AssistantEvent,
   AssistantToolCall,
   ChatId,
-  ChatLog
+  ChatLog,
+  CurrentChat
 } from "../src/index.ts"
 import { collectUntil, say, simple, turnsDone, withHandlers } from "./utils/fixtures.ts"
 import * as Scripted from "./utils/scripted.ts"
@@ -173,7 +173,7 @@ describe("a chat's log", () => {
         Stream.fromEffect(
           Effect.gen(function* () {
             // The chat's appends take its lock.
-            const chat = yield* AssistantChat.AssistantChat
+            const chat = yield* CurrentChat.CurrentChat
             yield* Effect.all([chat.append(say("a")), chat.append(say("b"), say("c"))], {
               concurrency: "unbounded"
             })
@@ -330,7 +330,7 @@ describe("a handler's build", () => {
 
       const handler = Resumer.toLayer(
         Effect.gen(function* () {
-          const { chatId } = yield* AssistantChat.AssistantChat
+          const { chatId } = yield* CurrentChat.CurrentChat
           builds.push(chatId)
 
           return () => Stream.empty

@@ -70,6 +70,9 @@ export const decodeEntries = (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>
 ): ReadonlyArray<Assistant.Entry<any>> => entries.flatMap((entry) => Option.toArray(decodeEntry(app, entry)))
 
+/** @internal */
+export type DecodedEntries = ReturnType<typeof decodeEntries>
+
 const decodeStored = Schema.decodeUnknownOption(AssistantEvent.StoredAppEvent)
 
 const toEntry = (entry: AssistantEvent.AnyEntry) => ({

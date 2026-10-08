@@ -44,7 +44,7 @@ gets three tools to work with them.
 ### `spawn_specialist`
 
 ```
-spawn_specialist({ kind, goal, context?, successCriteria?, report?, limits? })
+spawn_specialist({ specialist, goal, context?, successCriteria?, report?, limits? })
 ```
 
 Starts a run with a [brief](/api/Specialist#brief) and returns its `runId`.
@@ -79,10 +79,16 @@ stop_specialist({ runId })
 
 Interrupts a running run. It posts no answer.
 
+A request the runner can't carry out fails with a
+[`SpecialistError`](/api/Specialist#specialisterror), which the model reads as
+a failure with its `reason`: `UnknownSpecialist`, `RunNotFound` (a run that is
+gone), or `NotRunning` (stopping a run that isn't running). A `runId` that
+isn't a run id fails as invalid params.
+
 ## The handler
 
 The build Effect runs once per chat activation, like an assistant's (with
-`AssistantChat`), and the function runs for each brief (and each follow-up),
+`CurrentChat`), and the function runs for each brief (and each follow-up),
 so instructions, tools, the model, and limits are just code.
 
 **Example** (At most three reports at a time)
@@ -130,10 +136,12 @@ const AnalystLive = Analyst.toLayer(
 - A run waiting for a permit already counts as working (it has
   `SpecialistStarted`), so a chat UI shows it as busy.
 
-A run works in the chat of the turn that spawned it (`run.chatId`), so its
+A run belongs to the chat of the turn that spawned it (`run.chatId`), so its
 handler looks up the same user the assistant's does (see
-[chats and users](./chats#specialists)). Its answer is written to that chat's
-log as a `SpecialistFinished` and gets a turn there.
+[chats and users](./chats#specialists)). Inside the run, its handler's build,
+and its tools, [`CurrentChat`](/api/CurrentChat) is that chat: the chat the run
+belongs to. Its answer is written to that chat's log as a `SpecialistFinished`
+and gets a turn there.
 
 ## Runs live with their chat
 

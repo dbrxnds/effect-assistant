@@ -106,8 +106,7 @@ The handler gets the prompt every turn, and skills load theirs when they're
 used:
 
 ```ts
-const ordering = Skill.make({
-  name: "Ordering a campaign",
+const ordering = Skill.make("Ordering a campaign", {
   description: "…",
   instructions: Prompts.instructions("skill-ordering")
 })

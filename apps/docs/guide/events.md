@@ -42,7 +42,7 @@ A `ModelOutput` is one model call: its response parts (text, reasoning, and
 tool calls, as `effect/ai`'s `Response` parts), the model, the
 provider's response id, the tokens it used (with the cache's reads and
 writes), and how long it took. A `ToolResult` is a call's `outcome`
-(`"success"` or `"failure"`), its `result` in JSON, and a failure's `kind`.
+(`"success"` or `"failure"`), its `result` in JSON, and a failure's `reason`.
 `TurnStarted` has the turn's trace id when a tracer records it, to go from
 the log to the trace.
 
@@ -52,6 +52,30 @@ registered with `wakes: true`. A chat
 client may submit `UserMessage` and `BlockAnswer`
 (`AssistantEvent.UserInput`); your events come from your server, which
 submits them itself.
+
+## Evolving events
+
+The log outlives the code that wrote it, so events change in a way that keeps
+old logs readable:
+
+- New event types can be added in minor versions. Code that switches over
+  `AssistantEvent` needs a default case, which skips events it doesn't know.
+- Existing events only gain optional fields, and are never renamed.
+- UIs should build on [`ChatView`](./client), which is the stable surface,
+  rather than on the events themselves.
+
+```ts
+const label = (event: AssistantEvent.AssistantEvent): string => {
+  switch (event._tag) {
+    case "UserMessage":
+      return "You"
+    case "AssistantMessage":
+      return "Assistant"
+    default:
+      return "" // an event this code doesn't know, maybe added in a later version
+  }
+}
+```
 
 ## Input ids make retries safe
 
@@ -77,7 +101,7 @@ InputId.fromKey(`${orderId}:shipped`)
   `seq` it has, `subscribe(chatId, { after: seq })`, and gets only what's
   new.
 - An open chat keeps its entries in memory: turns and tools read them with
-  `AssistantChat`'s `entries`, not from the log.
+  `CurrentChat`'s `entries`, not from the log.
 - The `ChatLog` service's `read(chatId)` (or `read(chatId, { after })`) returns
   what's stored now. Use it in tests, or in code that runs where the log is written.
 
@@ -141,7 +165,7 @@ event wakes it.
 An assistant stores events of its own in the chat, registered with
 `AppEvent.make(schema, { wakes, render })`: what background work reports,
 which wakes a turn, or the app's bookkeeping, which doesn't. Each is stored
-as itself, in its schema's JSON form, and `AssistantChat`'s `entries` and
+as itself, in its schema's JSON form, and `CurrentChat`'s `entries` and
 the assistant's `subscribe` decode it to its type. See
 [your own events](./app-events). For an RPC that streams the log to other
 server code, `MyAssistant.Entry` is the schema: it covers the assistant's

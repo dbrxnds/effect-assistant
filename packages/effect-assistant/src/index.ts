@@ -22,11 +22,6 @@ export * as AssistantActivity from "./AssistantActivity.ts"
 /**
  * @since 0.1.0
  */
-export * as AssistantChat from "./AssistantChat.ts"
-
-/**
- * @since 0.1.0
- */
 export * as AssistantEngine from "./AssistantEngine.ts"
 
 /**
@@ -78,6 +73,11 @@ export * as ChatView from "./ChatView.ts"
  * @since 0.1.0
  */
 export * as Compaction from "./Compaction.ts"
+
+/**
+ * @since 0.1.0
+ */
+export * as CurrentChat from "./CurrentChat.ts"
 
 /**
  * @since 0.1.0

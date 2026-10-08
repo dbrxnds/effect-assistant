@@ -17,7 +17,7 @@ import { toJson } from "./schema.ts"
 export interface CallResult {
   readonly outcome: AssistantEvent.ToolOutcome
   readonly result: Schema.Json
-  readonly kind?: string | undefined
+  readonly reason?: string | undefined
 }
 
 // Apps give the loop native toolkits; these are what the loop makes of them, merged with its own.
@@ -40,22 +40,22 @@ export type ToolServices<T extends Record<string, Tool.Any>> =
 const encodeFailure = Schema.encodeSync(ToolFailure.ToolFailure)
 
 /** @internal */
-export const failed = (message: string, kind: string): CallResult => ({
+export const failed = (message: string, reason: string): CallResult => ({
   outcome: "failure",
-  result: toJson(encodeFailure(ToolFailure.ToolFailure.make({ message, kind }))),
-  kind
+  result: toJson(encodeFailure(new ToolFailure.ToolFailure({ message, reason }))),
+  reason
 })
 
-const decodeKind = Schema.decodeUnknownOption(Schema.Struct({ kind: Schema.String }))
+const decodeReason = Schema.decodeUnknownOption(Schema.Struct({ reason: Schema.String }))
 
 const decodeTag = Schema.decodeUnknownOption(Schema.Struct({ _tag: Schema.String }))
 
 const failure = (result: Schema.Json): CallResult => ({
   outcome: "failure",
   result,
-  kind: Option.getOrUndefined(
+  reason: Option.getOrUndefined(
     Option.orElse(
-      Option.map(decodeKind(result), ({ kind }) => kind),
+      Option.map(decodeReason(result), ({ reason }) => reason),
       () => Option.map(decodeTag(result), ({ _tag }) => _tag)
     )
   )
@@ -225,7 +225,7 @@ export const duplicateNames = (tools: Tools<unknown>): ReadonlyArray<string> => 
 /** @internal */
 export const runOnly = <R>(tools: Tools<R>, names: ReadonlyArray<string>, message: string): Tools<R> => ({
   definitions: tools.definitions,
-  run: (call) => (names.includes(call.name) ? tools.run(call) : Effect.succeed(failed(message, "not_now"))),
+  run: (call) => (names.includes(call.name) ? tools.run(call) : Effect.succeed(failed(message, "NotNow"))),
   needsDecision: (call, history) =>
     names.includes(call.name) ? needsDecisionOf(tools, call, history) : Effect.succeed(false)
 })

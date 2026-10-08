@@ -79,24 +79,24 @@ const MyAssistantHandlers = MyAssistant.toLayer((turn) => turn.loop({ instructio
 
 Services a handler needs at call time, like the chat or the chat's user, are
 its tool's `dependencies`. The loop then needs them: the turn provides
-`AssistantChat` and `Specialist.Runner`, the loop `AssistantToolCall`, and the
+`CurrentChat` and `Specialist.Runner`, the loop `AssistantToolCall`, and the
 handler provides the rest itself, like a `CurrentUser` (see
 [chats and users](./chats)). The full rule is in
 [what a handler may use](./assistant#what-a-handler-may-use).
 
 ## The chat a tool runs in
 
-[`AssistantChat`](/api/AssistantChat) tells a tool which chat it's acting on,
+[`CurrentChat`](/api/CurrentChat) tells a tool which chat it's acting on,
 and lets it read and add to the chat:
 
 ```ts
-import { AssistantChat } from "effect-assistant"
+import { CurrentChat } from "effect-assistant"
 
 const StartExport = Tool.make("start_export", {
   description: "Export this chat's orders to a spreadsheet.",
   parameters: Schema.Struct({ month: Schema.String }),
   success: Schema.Struct({ status: Schema.Literal("started") }),
-  dependencies: [AssistantChat.AssistantChat]
+  dependencies: [CurrentChat.CurrentChat]
 })
 
 const ExportTools = Toolkit.make(StartExport)
@@ -108,7 +108,7 @@ const ExportToolsLive = ExportTools.toLayer(
     return ExportTools.of({
       start_export: ({ month }) =>
         Effect.gen(function* () {
-          const chat = yield* AssistantChat.AssistantChat
+          const chat = yield* CurrentChat.CurrentChat
           yield* exports.start({ chatId: chat.chatId, month })
 
           return { status: "started" }
@@ -163,27 +163,27 @@ call waits for the user's [decision](./decisions), and runs once they
 approve.
 
 A call whose handler stopped while it ran (not a crash) gets a failed result
-saying it may have run (kind `may_have_run`); one that never started, that it
-didn't run (`not_run`).
+saying it may have run (reason `MayHaveRun`); one that never started, that it
+didn't run (`NotRun`).
 
 ## Failures
 
 A tool's failure is its result, which the model reads and adapts to: declare
 `failure: ToolFailure.ToolFailure` and fail with `ToolFailure.fail("…")`
-("No office named Oslo"), optionally with a `kind` the model (and you) can
+("No office named Oslo"), optionally with a `reason` the model (and you) can
 tell apart:
 
 ```ts
 office_budget: ({ office }) =>
   Effect.fromNullishOr(budgets.get(office)).pipe(
-    Effect.catch(() => ToolFailure.fail(`No office named ${office}.`, { kind: "not_found" }))
+    Effect.catch(() => ToolFailure.fail(`No office named ${office}.`, { reason: "NotFound" }))
   )
 ```
 
 The log stores the call's `ToolResult` with its `outcome` (`"success"` or
-`"failure"`), the `result` in JSON, and a failure's `kind`: a
-`ToolFailure`'s kind, or the failure's tag. Params that don't fit the tool's
-schema are a failure too, of kind `ToolParameterValidationError`, and so is
+`"failure"`), the `result` in JSON, and a failure's `reason`: a
+`ToolFailure`'s reason, or the failure's tag. Params that don't fit the tool's
+schema are a failure too, with reason `ToolParameterValidationError`, and so is
 any failure a tool declares. A step with a failed call never ends the turn,
 so the model reads why. Only a defect fails the turn, recorded as
 `TurnFailed`.
@@ -206,20 +206,22 @@ Every tool definition goes into the prompt on every call. For catalogs that
 are big, or that change at runtime (MCP servers, plugins),
 [`ToolDiscovery.make`](/api/ToolDiscovery#make) turns a toolkit into two
 tools: `search_tools` finds tools by what the model needs to do, and
-`execute_tool` runs one with a validated input. It returns a native toolkit,
-and its handlers' layer, which needs the catalog's handlers:
+`execute_tool` runs one with a validated input. It returns a native toolkit.
+[`ToolDiscovery.layer`](/api/ToolDiscovery#layer), given the same catalog, is
+its handlers' layer, which needs the catalog's handlers:
 
 ```ts
 import { ToolDiscovery } from "effect-assistant"
 
 const OfficeDiscovery = ToolDiscovery.make(OfficeTools) // rare: found when needed
+const OfficeDiscoveryLive = ToolDiscovery.layer(OfficeTools).pipe(Layer.provide(OfficeToolsLive))
 
 const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
   turn.loop({
     instructions,
-    toolkit: Toolkit.merge(CommonTools, OfficeDiscovery.toolkit) // common: always in the prompt
+    toolkit: Toolkit.merge(CommonTools, OfficeDiscovery) // common: always in the prompt
   })
-).pipe(Layer.provide([CommonToolsLive, OfficeDiscovery.layer.pipe(Layer.provide(OfficeToolsLive))]))
+).pipe(Layer.provide([CommonToolsLive, OfficeDiscoveryLive]))
 ```
 
 What the catalog's tools use at call time (their `dependencies`, like a

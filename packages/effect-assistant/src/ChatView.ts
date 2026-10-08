@@ -31,7 +31,7 @@ import { toJson } from "./internal/schema.ts"
  * @category schemas
  * @since 0.1.0
  */
-export const Decision = Schema.Struct({
+export const PendingDecision = Schema.Struct({
   id: DecisionId,
   tool: Schema.String,
   params: Schema.Json,
@@ -44,7 +44,7 @@ export const Decision = Schema.Struct({
  * @category models
  * @since 0.1.0
  */
-export type Decision = typeof Decision.Type
+export type PendingDecision = typeof PendingDecision.Type
 
 /**
  * Schema for the status of a block. A block is `"open"` while it accepts an answer, `"answered"`
@@ -77,7 +77,7 @@ export const Block = Schema.Struct({
   props: Schema.Json,
   status: BlockStatus,
   answer: Schema.optional(Schema.Json),
-  decisions: Schema.optional(Schema.Array(Decision))
+  decisions: Schema.optional(Schema.Array(PendingDecision))
 })
 
 /**
@@ -352,7 +352,7 @@ const decodeProps = Schema.decodeUnknownOption(Decisions.Props)
 
 const decodeAnswer = Schema.decodeUnknownOption(Decisions.Answer)
 
-const activityOf = (activity: AssistantActivity.Activity): Activity => ({
+const activityOf = (activity: AssistantActivity.State): Activity => ({
   working: activity.turnSince !== undefined || activity.queued,
   specialists: [...activity.specialists.values()].map((run) => ({
     specialist: run.specialist,
@@ -382,7 +382,7 @@ const folding = (wakes: ReadonlySet<string>): Folding => {
   let failed = false
   let deleted = false
   let activity = AssistantActivity.empty
-  let blocks: ReadonlyMap<string, BlockKit.BlockState> = new Map()
+  let blocks: ReadonlyMap<string, BlockKit.State> = new Map()
   let decisions: ReadonlyMap<string, Decisions.State> = new Map()
   // The messages in order, and the assistant's as stored: their blocks change as the chat goes on.
   const messages = new Map<string, Message>()
@@ -501,7 +501,7 @@ const folding = (wakes: ReadonlySet<string>): Folding => {
       return sameActivity(before.activity, now) ? undefined : { seq, messages: [], activity: now, failed, deleted }
     }
 
-    blocks = BlockKit.nextBlockStates(blocks, event)
+    blocks = BlockKit.apply(blocks, event)
     decisions = Decisions.apply(decisions, event)
 
     const changed = [...new Set(touched(event, entry.at))].flatMap((id) => {

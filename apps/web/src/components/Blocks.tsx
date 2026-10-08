@@ -41,7 +41,7 @@ function Preview(props: { readonly value: unknown }) {
 /** Approve / decline for the decisions a message asks for, with what each one is about. */
 function DecisionBlock(props: {
   readonly block: Decision.Props
-  readonly decisions: ReadonlyArray<ChatView.Decision>
+  readonly decisions: ReadonlyArray<ChatView.PendingDecision>
   readonly open: boolean
   readonly respond: (answer: Decision.Answer) => void
 }) {

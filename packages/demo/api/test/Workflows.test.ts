@@ -68,7 +68,7 @@ const startCampaign = (chatId: ChatId.ChatId) =>
   Effect.gen(function* () {
     yield* Campaign.CreateCampaign.execute(
       {
-        runId: yield* RunId.make,
+        runId: yield* RunId.make(),
         chatId,
         reference: "ACM-TEST01",
         campaignName: "Summer Campaign",
@@ -121,7 +121,7 @@ describe("PrintOrder", () => {
         )
         yield* PrintOrders.PrintOrder.execute(
           {
-            runId: yield* RunId.make,
+            runId: yield* RunId.make(),
             chatId,
             reference: "ACM-TEST02",
             office: "Acme Amsterdam",
@@ -168,7 +168,7 @@ describe("PrintOrder", () => {
         )
         yield* PrintOrders.PrintOrder.execute(
           {
-            runId: yield* RunId.make,
+            runId: yield* RunId.make(),
             chatId,
             reference: "ACM-TEST03",
             office: "Acme Amsterdam",

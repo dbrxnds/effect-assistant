@@ -134,7 +134,7 @@ const park = Effect.fnUntraced(
         tool: call.name,
         ...Toolkits.failed(
           `${call.name} needs the user's decision, and only the assistant can ask them. Don't run it: say in your answer what needs deciding, with the details.`,
-          "needs_decision"
+          "NeedsDecision"
         )
       })
     }

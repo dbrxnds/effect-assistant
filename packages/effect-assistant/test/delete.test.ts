@@ -149,7 +149,9 @@ for (const [name, run] of Object.entries(engines)) {
         const layer = run(
           Deleting.toLayer(() =>
             Stream.fromEffect(
-              Specialist.Runner.use((runner) => runner.spawn({ kind: "slow", brief: { goal: "Take your time." } }))
+              Specialist.Runner.use((runner) =>
+                runner.spawn({ specialist: "slow", brief: { goal: "Take your time." } })
+              )
             ).pipe(Stream.drain)
           ).pipe(Layer.provide(slowLive(signal))),
           Scripted.unused

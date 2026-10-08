@@ -2,7 +2,7 @@
  * This module provides functions that determine what is working in a chat right now, read from
  * the chat's log.
  *
- * An {@link Activity} records whether the assistant is running a turn or is about to start one,
+ * A {@link State} records whether the assistant is running a turn or is about to start one,
  * and which specialist runs are working. Fold a chat's entries into it with {@link apply}, or
  * build it from a list of entries with {@link fromEntries}, then check it with
  * {@link isWorking}.
@@ -35,7 +35,7 @@ export interface SpecialistRun {
  * @category models
  * @since 0.1.0
  */
-export interface Activity {
+export interface State {
   /** When the running turn started, in epoch milliseconds, or `undefined` when no turn runs. */
   readonly turnSince: number | undefined
   /**
@@ -55,14 +55,14 @@ export interface Activity {
  * @category constructors
  * @since 0.1.0
  */
-export const empty: Activity = {
+export const empty: State = {
   turnSince: undefined,
   queued: false,
   lastInputSeq: 0,
   specialists: new Map()
 }
 
-const withoutRun = (activity: Activity, runId: RunId): Activity => {
+const withoutRun = (activity: State, runId: RunId): State => {
   if (!activity.specialists.has(runId)) return activity
 
   const specialists = new Map(activity.specialists)
@@ -92,7 +92,7 @@ export interface Options {
  * @category combinators
  * @since 0.1.0
  */
-export const apply = (activity: Activity, entry: AssistantEvent.AnyEntry, options?: Options): Activity => {
+export const apply = (activity: State, entry: AssistantEvent.AnyEntry, options?: Options): State => {
   const event = entry.event
 
   if (!AssistantEvent.isLibraryEvent(event)) {
@@ -107,14 +107,14 @@ export const apply = (activity: Activity, entry: AssistantEvent.AnyEntry, option
   }
 
   return Match.value(event).pipe(
-    Match.tag("TurnStarted", (): Activity => ({ ...activity, turnSince: entry.at })),
+    Match.tag("TurnStarted", (): State => ({ ...activity, turnSince: entry.at })),
     // Turns run one at a time, so an end closes whichever turn is open, also one a restart cut off.
-    Match.tag("TurnCompleted", "TurnFailed", (ended): Activity => ({
+    Match.tag("TurnCompleted", "TurnFailed", (ended): State => ({
       ...activity,
       turnSince: undefined,
       queued: activity.lastInputSeq > ended.throughSeq
     })),
-    Match.tag("SpecialistStarted", (started): Activity => ({
+    Match.tag("SpecialistStarted", (started): State => ({
       ...activity,
       specialists: new Map(activity.specialists).set(started.runId, {
         runId: started.runId,
@@ -124,7 +124,7 @@ export const apply = (activity: Activity, entry: AssistantEvent.AnyEntry, option
       })
     })),
     // Deleting a chat stops everything in it, and nothing starts again.
-    Match.tag("ChatDeleted", (): Activity => ({ ...empty, lastInputSeq: activity.lastInputSeq })),
+    Match.tag("ChatDeleted", (): State => ({ ...empty, lastInputSeq: activity.lastInputSeq })),
     Match.orElse(() => activity)
   )
 }
@@ -136,7 +136,7 @@ export const apply = (activity: Activity, entry: AssistantEvent.AnyEntry, option
  * @category constructors
  * @since 0.1.0
  */
-export const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, options?: Options): Activity =>
+export const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, options?: Options): State =>
   entries.reduce((activity, entry) => apply(activity, entry, options), empty)
 
 /**
@@ -146,5 +146,5 @@ export const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, opt
  * @category guards
  * @since 0.1.0
  */
-export const isWorking = (activity: Activity): boolean =>
+export const isWorking = (activity: State): boolean =>
   activity.turnSince !== undefined || activity.queued || activity.specialists.size > 0

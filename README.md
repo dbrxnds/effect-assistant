@@ -290,17 +290,17 @@ with `load_skill` when a task matches. `ToolDiscovery` turns a big toolkit into 
 `execute_tool`, so the model finds a tool when it needs one instead of reading every definition.
 
 ```ts
-const reorder = Skill.make({
-  name: "reorder",
+const reorder = Skill.make("reorder", {
   description: "Reordering something the user ordered before.",
   instructions: "1. Find their last order of it. 2. Confirm quantity and address. 3. Place it."
 })
 
 const Discovery = ToolDiscovery.make(AllOtherTools) // search_tools and execute_tool over a big toolkit
+const DiscoveryLive = ToolDiscovery.layer(AllOtherTools).pipe(Layer.provide(AllOtherToolsLive))
 
 const MyAssistantLive = MyAssistant.toLayer((turn) =>
-  turn.loop({ instructions, toolkit: Toolkit.merge(WeatherTools, Discovery.toolkit), skills: [reorder] })
-).pipe(Layer.provide([WeatherToolsLive, Discovery.layer.pipe(Layer.provide(AllOtherToolsLive))]))
+  turn.loop({ instructions, toolkit: Toolkit.merge(WeatherTools, Discovery), skills: [reorder] })
+).pipe(Layer.provide([WeatherToolsLive, DiscoveryLive]))
 ```
 
 ### Your own events
@@ -368,7 +368,7 @@ const NoteToolsLive = NoteTools.toLayer({
 ```
 
 `MyAssistant.Chat` is typed with the assistant's events. Code that doesn't know the assistant, like a shared
-tool, uses `AssistantChat`: the same chat, untyped.
+tool, uses `CurrentChat`: the same chat, untyped.
 
 ### Memory
 
