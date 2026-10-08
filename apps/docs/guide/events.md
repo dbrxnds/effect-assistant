@@ -35,7 +35,7 @@ Each event is stored as an `AssistantEvent.Entry`: the chat id, a `seq`
 | Your own events                              | [Yours](./app-events), like a workflow's progress or a summary, stored as themselves.                                    |
 
 A `ModelOutput` is one model call: its response parts (text, reasoning, and
-tool calls, as `effect/unstable/ai`'s `Response` parts), the model, the
+tool calls, as `effect/ai`'s `Response` parts), the model, the
 provider's response id, the tokens it used (with the cache's reads and
 writes), and how long it took. A `ToolResult` is a call's `outcome`
 (`"success"` or `"failure"`), its `result` in JSON, and a failure's `kind`.
@@ -87,9 +87,19 @@ The log is the `ChatLog` service:
 
 - `ChatLog.layerMemory` keeps chats in memory, for tests and local
   runs.
-- `ChatLog.layerSql` stores them with a `SqlClient`, in a
-  `chat_log` table it creates if it doesn't exist, and remembers deleted
-  chats in `chat_log_deleted`.
+- `ChatLog.layerSql` stores them with a `SqlClient`, in a `chat_log` table
+  you create. It asks `ChatLog.DeletedChats` whether a chat was deleted, so
+  the app keeps that where it keeps its chats:
+
+```sql
+CREATE TABLE chat_log (
+  chat_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  at DOUBLE PRECISION NOT NULL,
+  event TEXT NOT NULL,
+  PRIMARY KEY (chat_id, seq)
+);
+```
 
 `ChatLog.delete(chatId)` removes a chat's entries and remembers it was
 deleted, so nothing is stored in it again. Delete through the assistant,

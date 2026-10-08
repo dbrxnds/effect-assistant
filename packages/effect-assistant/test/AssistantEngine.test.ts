@@ -1,4 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
+import * as Response from "effect/ai/Response"
+import * as Tool from "effect/ai/Tool"
+import * as Toolkit from "effect/ai/Toolkit"
+import * as TestRunner from "effect/cluster/TestRunner"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
@@ -7,9 +11,6 @@ import * as Predicate from "effect/Predicate"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import * as Response from "effect/unstable/ai/Response"
-import * as Tool from "effect/unstable/ai/Tool"
-import * as Toolkit from "effect/unstable/ai/Toolkit"
 import {
   Assistant,
   AssistantChat,
@@ -20,8 +21,8 @@ import {
   ChatId,
   ChatLog
 } from "../src/index.ts"
-import { collectUntil, say, simple, turnsDone } from "./fixtures.ts"
-import * as Scripted from "./scripted.ts"
+import { collectUntil, say, simple, turnsDone } from "./utils/fixtures.ts"
+import * as Scripted from "./utils/scripted.ts"
 
 const Resumer = Assistant.make("resumer")
 
@@ -57,6 +58,37 @@ describe("AssistantEngine.layerMemory", () => {
   )
 })
 
+describe("AssistantEngine.layerCluster", () => {
+  it.live("reaches a chat from a process that doesn't register the assistant", () =>
+    Effect.gen(function* () {
+      const chat = yield* ChatId.make
+      const Greeter = Assistant.make("greeter")
+
+      // The runner hosts the chats; the client, like a web server, only reaches them.
+      const runner = Greeter.toLayer(simple({ instructions: "Greet." })).pipe(
+        Layer.provide(AssistantEngine.layerCluster),
+        Layer.provide(Scripted.layer(() => Scripted.reply("Hi!")))
+      )
+
+      const client = Layer.fresh(AssistantEngine.layerCluster)
+
+      const entries = yield* Effect.scoped(
+        Layer.build(runner).pipe(
+          Effect.andThen(
+            Effect.gen(function* () {
+              yield* Greeter.submit(chat, say("hello"))
+
+              return yield* collectUntil(Greeter, chat, (es) => turnsDone(es) >= 1)
+            }).pipe(Effect.provide(client))
+          )
+        )
+      )
+
+      expect(AssistantEvent.assistantTexts(entries)).toEqual(["Hi!"])
+    }).pipe(Effect.provide(Layer.mergeAll(ChatLog.layerMemory, TestRunner.layer)))
+  )
+})
+
 describe("tool calls after a crash", () => {
   it.live("runs a call the crash cut off again, with the same id and key, before the model goes on", () =>
     Effect.gen(function* () {
@@ -70,11 +102,14 @@ describe("tool calls after a crash", () => {
         dependencies: [AssistantToolCall.AssistantToolCall]
       })
 
-      const sendReport = AssistantLoop.tools(Toolkit.make(SendReport), {
+      const sendReport = AssistantLoop.fromToolkit(Toolkit.make(SendReport), {
         send_report: () =>
           Effect.gen(function* () {
             const call = yield* AssistantToolCall.AssistantToolCall
-            yield* Deferred.succeed(ran, { callId: call.callId, key: yield* AssistantToolCall.idempotencyKey })
+            yield* Deferred.succeed(ran, {
+              callId: call.callId,
+              key: yield* AssistantToolCall.idempotencyKey
+            })
 
             return "sent"
           })

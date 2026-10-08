@@ -1,15 +1,15 @@
 import { describe, expect, it } from "@effect/vitest"
+import * as Tool from "effect/ai/Tool"
+import * as Toolkit from "effect/ai/Toolkit"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Queue from "effect/Queue"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import * as Tool from "effect/unstable/ai/Tool"
-import * as Toolkit from "effect/unstable/ai/Toolkit"
 import { Assistant, AssistantLoop, ChatId, Specialist } from "../src/index.ts"
-import { runEntity, runMemory, say, update, type Update, UpdateEvent } from "./fixtures.ts"
-import * as Scripted from "./scripted.ts"
+import { runEntity, runMemory, say, update, type Update, UpdateEvent } from "./utils/fixtures.ts"
+import * as Scripted from "./utils/scripted.ts"
 
 interface User {
   readonly name: string
@@ -60,14 +60,21 @@ const clerkLive = (seen: Queue.Queue<Seen>) =>
 
       return Effect.fn(function* (run: Specialist.Run) {
         const user = yield* users.forChat(run.chatId)
-        yield* Queue.offer(seen, { by: "clerk", instructions: `You file for ${user.name}.`, tools: [] })
+        yield* Queue.offer(seen, {
+          by: "clerk",
+          instructions: `You file for ${user.name}.`,
+          tools: []
+        })
 
         return Stream.empty
       })
     })
   )
 
-const AdminReport = Tool.make("admin_report", { description: "Admins only.", success: Schema.String })
+const AdminReport = Tool.make("admin_report", {
+  description: "Admins only.",
+  success: Schema.String
+})
 
 const Greet = Tool.make("greet", {
   description: "Greets the current user.",
@@ -94,11 +101,11 @@ const recording = (seen: Queue.Queue<Seen>) =>
 
         // This turn's tools: only admins get the report.
         const toolkit = current.admin
-          ? AssistantLoop.tools(Toolkit.make(AdminReport, Greet), {
+          ? AssistantLoop.fromToolkit(Toolkit.make(AdminReport, Greet), {
               admin_report: () => Effect.succeed("report"),
               greet
             })
-          : AssistantLoop.tools(Toolkit.make(Greet), { greet })
+          : AssistantLoop.fromToolkit(Toolkit.make(Greet), { greet })
 
         yield* Queue.offer(seen, {
           by: "assistant",
@@ -156,7 +163,11 @@ for (const [name, engine] of Object.entries(engines)) {
           yield* Helper.submit(yield* chatFor(bob), say("file it"))
           yield* Queue.take(seen)
 
-          expect(yield* Queue.take(seen)).toEqual({ by: "clerk", instructions: "You file for Bob.", tools: [] })
+          expect(yield* Queue.take(seen)).toEqual({
+            by: "clerk",
+            instructions: "You file for Bob.",
+            tools: []
+          })
           // The clerk's answer is an input in the chat: a turn reads it, for Bob too.
           expect((yield* Queue.take(seen)).instructions).toContain("You help Bob.")
         }).pipe(Effect.provide(engine(seen)))

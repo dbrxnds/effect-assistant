@@ -53,7 +53,7 @@ history wired in.
 | Option         | What it is                                                                        |
 | -------------- | --------------------------------------------------------------------------------- |
 | `instructions` | The assistant's role and rules: text, or [resolved instructions](./instructions). |
-| `toolkit`      | Its [tools](./tools), next to its own: `AssistantLoop.tools(...)`.                |
+| `toolkit`      | Its [tools](./tools), next to its own: `AssistantLoop.fromToolkit(...)`.          |
 | `skills`       | [Playbooks](./skills) it loads when a task matches.                               |
 | `maxSteps`     | Model calls per turn. Default 16.                                                 |
 
@@ -127,7 +127,7 @@ names the missing services. For a tool's own services, see
 
 ## The model
 
-The loop calls whatever `LanguageModel` (from `effect/unstable/ai`) the
+The loop calls whatever `LanguageModel` (from `effect/ai`) the
 layer is given: `AnthropicLanguageModel.model("claude-sonnet-5")` in these
 docs. Swap it for another provider or model, or a scripted one, as the
 [tests](./testing) do. A specialist's layer can be given a model of its own

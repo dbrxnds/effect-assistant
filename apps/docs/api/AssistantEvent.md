@@ -11,30 +11,258 @@ is an append-only log of these events, and the log is the source of truth:
 a chat client gets what its user sees of it (`ChatView`), and the model's
 history is rebuilt from it before every model call.
 
-- Inputs from the user: `UserMessage`, `BlockAnswer`. Submitting
-  one starts a turn, or joins the turn that is running.
-- What the user sees: `AssistantMessage`, optionally with a
-  `MessageBlock`.
-- What the model did: `ModelOutput`, then `ToolStarted` and
-  `ToolResult` for each tool call. These are the assistant's own
-  work: a chat client never gets them (see `ChatView`).
-- Turn bookkeeping: `TurnStarted`, `TurnCompleted`,
-  `TurnFailed`.
-- Specialist runs: `SpecialistStarted`, `SpecialistFinished`. A
-  finished run is an input too: its report wakes a turn.
-- Blocks closed without an answer: `BlocksClosed`.
-- Decisions the user is asked to make: `DecisionRequested`, when a
-  tool call waits for one or work asks for one (that one is an input), and
-  `DecisionResolved`, once the user answered its decision block.
-- The app's own events, like a workflow's progress or a summary for
-  compaction: `StoredAppEvent`, as they're stored. The ones an
-  assistant registers (see `AppEvent`) decode to their own types, and
-  those registered with `wakes` start a turn.
+## Other
 
-Turns and specialist runs are the chat's activity: each opens with one event
-and closes with another (see `AssistantActivity`).
+### Attachment
 
-## Models
+A file the user attached to a message, by reference: the file itself is
+stored elsewhere, so the log never holds its bytes.
+
+```ts
+const Attachment = Schema.Struct({ …
+```
+
+<small>Since 0.1.0</small>
+
+### MAX_ATTACHMENTS
+
+The most files one message carries: each is a line in every prompt after it.
+
+```ts
+const MAX_ATTACHMENTS = 10 …
+```
+
+<small>Since 0.1.0</small>
+
+### Attachment
+
+A file the user attached to a message.
+
+```ts
+type Attachment = typeof Attachment.Type
+```
+
+<small>Since 0.1.0</small>
+
+### formatSize
+
+A byte count for people and the model: `2.1 MB`.
+
+```ts
+const formatSize: (bytes: number) => string
+```
+
+<small>Since 0.1.0</small>
+
+### attachmentLine
+
+The line the model reads for an attachment. It names the file and never holds its content.
+
+```ts
+const attachmentLine: (attachment: Attachment) => string
+```
+
+<small>Since 0.1.0</small>
+
+### textWithAttachments
+
+The text of a message followed by a line per attached file.
+
+```ts
+const textWithAttachments: (text: string, attachments: ReadonlyArray<Attachment> | undefined) => string
+```
+
+<small>Since 0.1.0</small>
+
+### UserMessage
+
+Text the user typed, and the files they attached.
+
+```ts
+class UserMessage extends Schema.TaggedClass<UserMessage>()("UserMessage", {
+  id: InputId,
+  text: Schema.String,
+  attachments: Schema.optional(Schema.Array(Attachment).check(Schema.isMaxLength(MAX_ATTACHMENTS)))
+})
+```
+
+<small>Since 0.1.0</small>
+
+### BlockAnswer
+
+The user used a block: which message it was on, and the value in the
+block's answer schema (its JSON form). A chat UI shows it inside the block
+rather than as a message.
+
+```ts
+class BlockAnswer extends Schema.TaggedClass<BlockAnswer>()("BlockAnswer", {
+  id: InputId,
+  messageId: Schema.String,
+  kind: Schema.String,
+  value: Schema.Unknown
+})
+```
+
+<small>Since 0.1.0</small>
+
+### SpecialistFinished
+
+A specialist run finished working on a brief. Unless the assistant stopped
+it, it's an input: a turn reads its report and decides what to tell the
+user. Its id is fixed per run and brief, so it's stored once.
+
+```ts
+class SpecialistFinished extends Schema.TaggedClass<SpecialistFinished>()("SpecialistFinished", {
+  id: InputId,
+  runId: RunId,
+  specialist: Schema.String,
+  /** Which brief this answers: 1 for the first, then one more per follow-up. */
+  brief: Schema.Int,
+  goal: Schema.String,
+  status: Schema.Literals(["answered", "failed", "stopped", "cut_off"]),
+  report: Schema.optional(Schema.String),
+  error: Schema.optional(Schema.String)
+})
+```
+
+<small>Since 0.1.0</small>
+
+### DecisionOutcome
+
+Schema for how the user decided: `"approved"` or `"declined"`.
+
+```ts
+const DecisionOutcome = Schema.Literals(["approved", "declined"])
+```
+
+<small>Since 0.1.0</small>
+
+### DecisionOutcome
+
+How the user decided.
+
+```ts
+type DecisionOutcome = typeof DecisionOutcome.Type
+```
+
+<small>Since 0.1.0</small>
+
+### CallOrigin
+
+Schema for a decision a tool call waits for: the call, as the model wrote
+it. Approving it runs exactly this call.
+
+```ts
+const CallOrigin = Schema.TaggedStruct("Call", { …
+```
+
+<small>Since 0.1.0</small>
+
+### CallOrigin
+
+A decision a tool call waits for.
+
+```ts
+type CallOrigin = typeof CallOrigin.Type
+```
+
+<small>Since 0.1.0</small>
+
+### WorkOrigin
+
+Schema for a decision that running work asks for, like a workflow: who
+asks (`source`, like `workflow:CreateCampaign`), and, for a workflow waiting on it, the
+`DurableDeferred` token the answer completes.
+
+```ts
+const WorkOrigin = Schema.TaggedStruct("Work", { …
+```
+
+<small>Since 0.1.0</small>
+
+### WorkOrigin
+
+A decision that running work asks for.
+
+```ts
+type WorkOrigin = typeof WorkOrigin.Type
+```
+
+<small>Since 0.1.0</small>
+
+### DecisionRequested
+
+The user is asked to decide something: approve or decline.
+
+```ts
+class DecisionRequested extends Schema.TaggedClass<DecisionRequested>()("DecisionRequested", {
+  id: DecisionId,
+  origin: Schema.Union([CallOrigin, WorkOrigin]),
+  preview: Schema.Json
+})
+```
+
+<small>Since 0.1.0</small>
+
+### DecisionResolved
+
+A decision is made: the user answered a decision block for it (`answer` is
+that `BlockAnswer`'s id). An approved call runs next, at the turn's next
+step; a workflow's decision is passed on to it before this is stored.
+
+```ts
+class DecisionResolved extends Schema.TaggedClass<DecisionResolved>()("DecisionResolved", {
+  id: DecisionId,
+  outcome: DecisionOutcome,
+  answer: InputId
+})
+```
+
+<small>Since 0.1.0</small>
+
+### Input
+
+Schema for everything `Assistant.submit` accepts. A `DecisionRequested` is
+one only when work requests it (`origin: Work`); the chat refuses a parked
+call submitted from outside.
+
+```ts
+const Input = Schema.Union([UserMessage, BlockAnswer, SpecialistFinished, DecisionRequested])
+```
+
+<small>Since 0.1.0</small>
+
+### Input
+
+An input to an assistant.
+
+```ts
+type Input = typeof Input.Type
+```
+
+<small>Since 0.1.0</small>
+
+### UserInput
+
+Schema for the inputs from the chat's user: messages and block answers. A
+turn owes each one a reply. It's also what a chat client usually may
+submit; the app's events come from the server.
+
+```ts
+const UserInput = Schema.Union([UserMessage, BlockAnswer])
+```
+
+<small>Since 0.1.0</small>
+
+### UserInput
+
+An input from the chat's user.
+
+```ts
+type UserInput = typeof UserInput.Type
+```
+
+<small>Since 0.1.0</small>
 
 ### MessageBlock
 
@@ -69,7 +297,7 @@ class AssistantMessage extends Schema.TaggedClass<AssistantMessage>()("Assistant
 
 ### ToolCallPart
 
-Schema for a tool call the model made: `effect/unstable/ai`'s tool call
+Schema for a tool call the model made: `effect/ai`'s tool call
 part (`Response.ToolCallPart`) for any tool, with its params in JSON, as the
 model wrote them.
 
@@ -91,7 +319,7 @@ type ToolCallPart = typeof ToolCallPart.Type
 
 ### ModelPart
 
-Schema for what the log keeps of a model call: `effect/unstable/ai`'s
+Schema for what the log keeps of a model call: `effect/ai`'s
 response parts for text, reasoning (with the provider's metadata, like a
 thinking block's signature), and tool calls.
 
@@ -121,7 +349,8 @@ class ModelOutput extends Schema.TaggedClass<ModelOutput>()("ModelOutput", {
   parts: Schema.Array(ModelPart),
   /**
    * The last entry the model had read when it wrote this. Inputs after it
-   * arrived while the model was working.
+   * arrived while the model was working. A turn has handled what its
+   * outputs had read.
    */
   seenThroughSeq: Schema.optional(Schema.Int),
   /** The model that wrote it: the provider's id for it, or the name the context gave it. */
@@ -191,192 +420,6 @@ class ToolResult extends Schema.TaggedClass<ToolResult>()("ToolResult", {
 
 <small>Since 0.1.0</small>
 
-### BlocksClosed
-
-Blocks closed without an answer, like the ones `turn.loop`'s
-`BlockKit.closeStale` closes once the user moved on. The model doesn't see it.
-
-```ts
-class BlocksClosed extends Schema.TaggedClass<BlocksClosed>()("BlocksClosed", {
-  messageIds: Schema.Array(Schema.String)
-})
-```
-
-<small>Since 0.1.0</small>
-
-### AssistantEvent
-
-An event the library defines.
-
-```ts
-type AssistantEvent = typeof AssistantEvent.Type
-```
-
-<small>Since 0.1.0</small>
-
-### StoredAppEvent
-
-Schema for one of the app's own events, as it's stored: its `_tag` and its
-fields in JSON. An assistant made with `events: [AppEvent.make(Summary)]`
-decodes it to a `Summary` in `turn.entries` and in its `subscribe`.
-
-```ts
-const StoredAppEvent = Schema.StructWithRest(Schema.Struct({ _tag: AppTag }), [ …
-```
-
-<small>Since 0.1.0</small>
-
-### StoredAppEvent
-
-One of the app's own events, as it's stored.
-
-```ts
-type StoredAppEvent = typeof StoredAppEvent.Type
-```
-
-<small>Since 0.1.0</small>
-
-### AnyEntry
-
-A chat's entry with any event in it: the library's, or the app's own
-(decoded or not). What the folds over a chat take, so a client's typed
-entries fit too.
-
-```ts
-interface AnyEntry {
-  readonly chatId: ChatId
-  readonly seq: number
-  readonly at: number
-  readonly event: { readonly _tag: string }
-}
-```
-
-<small>Since 0.1.0</small>
-
-### Entry
-
-A stored event with its position in the chat.
-
-```ts
-type Entry = typeof Entry.Type
-```
-
-<small>Since 0.1.0</small>
-
-## Schemas
-
-### AssistantEvent
-
-Schema for every event the library defines.
-
-```ts
-const AssistantEvent = Schema.Union([ …
-```
-
-<small>Since 0.1.0</small>
-
-### AppTag
-
-Schema for the tag of one of the app's own events: any tag but the
-library's, branded, so narrowing an entry's event to one of the library's
-events (`Predicate.isTagged(event, "UserMessage")`) never leaves an app
-event in.
-
-```ts
-const AppTag = Schema.String.pipe(Schema.brand("effect-assistant/AppTag"))
-```
-
-<small>Since 0.1.0</small>
-
-### Entry
-
-Schema for a stored event with its position in the chat. `seq` starts at 1
-and has no gaps; `at` is the time it was stored, in epoch milliseconds.
-
-```ts
-const Entry = Schema.Struct({ …
-```
-
-<small>Since 0.1.0</small>
-
-## Inputs
-
-### UserMessage
-
-Text the user typed.
-
-```ts
-class UserMessage extends Schema.TaggedClass<UserMessage>()("UserMessage", {
-  id: InputId,
-  text: Schema.String
-})
-```
-
-<small>Since 0.1.0</small>
-
-### BlockAnswer
-
-The user used a block: which message it was on, and the value in the
-block's answer schema (its JSON form). A chat UI shows it inside the block
-rather than as a message.
-
-```ts
-class BlockAnswer extends Schema.TaggedClass<BlockAnswer>()("BlockAnswer", {
-  id: InputId,
-  messageId: Schema.String,
-  kind: Schema.String,
-  value: Schema.Unknown
-})
-```
-
-<small>Since 0.1.0</small>
-
-### Input
-
-Schema for everything `Assistant.submit` accepts. A `DecisionRequested` is
-one only when work requests it (`origin: Work`); the chat refuses a parked
-call submitted from outside.
-
-```ts
-const Input = Schema.Union([UserMessage, BlockAnswer, SpecialistFinished, DecisionRequested])
-```
-
-<small>Since 0.1.0</small>
-
-### Input
-
-An input to an assistant.
-
-```ts
-type Input = typeof Input.Type
-```
-
-<small>Since 0.1.0</small>
-
-### UserInput
-
-Schema for the inputs from the chat's user: messages and block answers. A
-turn owes each one a reply. It's also what a chat client usually may
-submit; the app's events come from the server.
-
-```ts
-const UserInput = Schema.Union([UserMessage, BlockAnswer])
-```
-
-<small>Since 0.1.0</small>
-
-### UserInput
-
-An input from the chat's user.
-
-```ts
-type UserInput = typeof UserInput.Type
-```
-
-<small>Since 0.1.0</small>
-
-## Turns
-
 ### TurnStarted
 
 A turn started.
@@ -385,7 +428,9 @@ A turn started.
 class TurnStarted extends Schema.TaggedClass<TurnStarted>()("TurnStarted", {
   /** The assistant that runs it. */
   assistant: Schema.String,
-  /** The id of the turn's trace, when a tracer records it (not Effect's own, which exports nothing). */
+  /**
+   * The id of the turn's trace, when a tracer records it (not Effect's own, which exports nothing).
+   */
   traceId: Schema.optional(Schema.String)
 })
 ```
@@ -419,7 +464,90 @@ class TurnFailed extends Schema.TaggedClass<TurnFailed>()("TurnFailed", {
 
 <small>Since 0.1.0</small>
 
-## Guards
+### SpecialistStarted
+
+A specialist run started working: spawned, or continued by a follow-up
+message. The model doesn't see it: the call that started the run says
+so, and its report arrives as a `SpecialistFinished`.
+
+```ts
+class SpecialistStarted extends Schema.TaggedClass<SpecialistStarted>()("SpecialistStarted", {
+  runId: RunId,
+  specialist: Schema.String,
+  /** The goal it's working on. */
+  goal: Schema.String
+})
+```
+
+<small>Since 0.1.0</small>
+
+### BlocksClosed
+
+Blocks closed without an answer, like the ones `turn.loop`'s
+`BlockKit.closeStale` closes once the user moved on. The model doesn't see it.
+
+```ts
+class BlocksClosed extends Schema.TaggedClass<BlocksClosed>()("BlocksClosed", {
+  messageIds: Schema.Array(Schema.String)
+})
+```
+
+<small>Since 0.1.0</small>
+
+### AssistantEvent
+
+Schema for every event the library defines.
+
+```ts
+const AssistantEvent = Schema.Union([ …
+```
+
+<small>Since 0.1.0</small>
+
+### AssistantEvent
+
+An event the library defines.
+
+```ts
+type AssistantEvent = typeof AssistantEvent.Type
+```
+
+<small>Since 0.1.0</small>
+
+### AppTag
+
+Schema for the tag of one of the app's own events: any tag but the
+library's, branded, so narrowing an entry's event to one of the library's
+events (`Predicate.isTagged(event, "UserMessage")`) never leaves an app
+event in.
+
+```ts
+const AppTag = Schema.String.pipe(Schema.brand("effect-assistant/AppTag"))
+```
+
+<small>Since 0.1.0</small>
+
+### StoredAppEvent
+
+Schema for one of the app's own events, as it's stored: its `_tag` and its
+fields in JSON. An assistant made with `events: [AppEvent.make(Summary)]`
+decodes it to a `Summary` in `turn.entries` and in its `subscribe`.
+
+```ts
+const StoredAppEvent = Schema.StructWithRest(Schema.Struct({ _tag: AppTag }), [ …
+```
+
+<small>Since 0.1.0</small>
+
+### StoredAppEvent
+
+One of the app's own events, as it's stored.
+
+```ts
+type StoredAppEvent = typeof StoredAppEvent.Type
+```
+
+<small>Since 0.1.0</small>
 
 ### isLibraryEvent
 
@@ -427,6 +555,44 @@ Returns whether an event is one of the library's, not one of the app's own.
 
 ```ts
 const isLibraryEvent: (event: { readonly _tag: string }) => event is AssistantEvent
+```
+
+<small>Since 0.1.0</small>
+
+### AnyEntry
+
+A chat's entry with any event in it: the library's, or the app's own
+(decoded or not). What the folds over a chat take, so a client's typed
+entries fit too.
+
+```ts
+interface AnyEntry {
+  readonly chatId: ChatId
+  readonly seq: number
+  readonly at: number
+  readonly event: { readonly _tag: string }
+}
+```
+
+<small>Since 0.1.0</small>
+
+### Entry
+
+Schema for a stored event with its position in the chat. `seq` starts at 1
+and has no gaps; `at` is the time it was stored, in epoch milliseconds.
+
+```ts
+const Entry = Schema.Struct({ …
+```
+
+<small>Since 0.1.0</small>
+
+### Entry
+
+A stored event with its position in the chat.
+
+```ts
+type Entry = typeof Entry.Type
 ```
 
 <small>Since 0.1.0</small>
@@ -444,13 +610,13 @@ const isInput: (event: { readonly _tag: string }) => event is Input
 
 <small>Since 0.1.0</small>
 
-### wakes
+### isWaking
 
 Returns whether an input starts a turn: every one but a run the assistant
 stopped itself.
 
 ```ts
-const wakes: (input: Input) => boolean
+const isWaking: (input: Input) => boolean
 ```
 
 <small>Since 0.1.0</small>
@@ -475,165 +641,12 @@ const isTurnEnd: (event: { readonly _tag: string }) => event is TurnCompleted | 
 
 <small>Since 0.1.0</small>
 
-## Getters
-
 ### assistantTexts
 
 Returns the text of every message the user was shown, in order.
 
 ```ts
 const assistantTexts: (entries: ReadonlyArray<AnyEntry>) => ReadonlyArray<string>
-```
-
-<small>Since 0.1.0</small>
-
-## Decisions
-
-### DecisionOutcome
-
-Schema for how the user decided: `"approved"` or `"declined"`.
-
-```ts
-const DecisionOutcome = Schema.Literals(["approved", "declined"])
-```
-
-<small>Since 0.1.0</small>
-
-### DecisionOutcome
-
-How the user decided.
-
-```ts
-type DecisionOutcome = typeof DecisionOutcome.Type
-```
-
-<small>Since 0.1.0</small>
-
-### CallOrigin
-
-Schema for a decision a tool call waits for: the call, as the model wrote
-it. Approving it runs exactly this call.
-
-```ts
-const CallOrigin = Schema.TaggedStruct("Call", { …
-```
-
-<small>Since 0.1.0</small>
-
-### CallOrigin
-
-A decision a tool call waits for.
-
-```ts
-type CallOrigin = typeof CallOrigin.Type
-```
-
-<small>Since 0.1.0</small>
-
-### WorkOrigin
-
-Schema for a decision that running work asks for, like a workflow: who
-asks (`source`, like `workflow:CreateCampaign`), and, for a workflow waiting on it, the
-`DurableDeferred` token the answer completes.
-
-```ts
-const WorkOrigin = Schema.TaggedStruct("Work", { …
-```
-
-<small>Since 0.1.0</small>
-
-### WorkOrigin
-
-A decision that running work asks for.
-
-```ts
-type WorkOrigin = typeof WorkOrigin.Type
-```
-
-<small>Since 0.1.0</small>
-
-### DecisionRequested
-
-The user is asked to decide something: approve or decline.
-
-- From a tool call (`origin: Call`): the model called a tool that needs
-  the user's decision, and the loop parked the call instead of running it.
-  The model reads this as the call's result. It's not an input.
-- From work (`origin: Work`): something already running asks, like a
-  workflow. It's an input: it wakes a turn.
-
-Either way the user sees nothing yet: the model sends a message with a
-decision block for its id. `preview` is what they decide on, like an
-order's total, in JSON.
-
-```ts
-class DecisionRequested extends Schema.TaggedClass<DecisionRequested>()("DecisionRequested", {
-  id: DecisionId,
-  origin: Schema.Union([CallOrigin, WorkOrigin]),
-  preview: Schema.Json
-})
-```
-
-<small>Since 0.1.0</small>
-
-### DecisionResolved
-
-A decision is made: the user answered a decision block for it (`answer` is
-that `BlockAnswer`'s id). An approved call runs next, at the turn's next
-step; a workflow's decision is passed on to it before this is stored.
-
-```ts
-class DecisionResolved extends Schema.TaggedClass<DecisionResolved>()("DecisionResolved", {
-  id: DecisionId,
-  outcome: DecisionOutcome,
-  answer: InputId
-})
-```
-
-<small>Since 0.1.0</small>
-
-## Specialists
-
-### SpecialistFinished
-
-A specialist run finished working on a brief. Unless the assistant stopped
-it, it's an input: a turn reads its report and decides what to tell the
-user. Its id is fixed per run and brief, so it's stored once.
-
-- `answered`: `report` is its answer.
-- `failed`: `error` says why.
-- `stopped`: the assistant stopped it; no turn starts for it.
-- `cut_off`: a shutdown interrupted it; spawn it again if it's still needed.
-
-```ts
-class SpecialistFinished extends Schema.TaggedClass<SpecialistFinished>()("SpecialistFinished", {
-  id: InputId,
-  runId: RunId,
-  specialist: Schema.String,
-  /** Which brief this answers: 1 for the first, then one more per follow-up. */
-  brief: Schema.Int,
-  goal: Schema.String,
-  status: Schema.Literals(["answered", "failed", "stopped", "cut_off"]),
-  report: Schema.optional(Schema.String),
-  error: Schema.optional(Schema.String)
-})
-```
-
-<small>Since 0.1.0</small>
-
-### SpecialistStarted
-
-A specialist run started working: spawned, or continued by a follow-up
-message. The model doesn't see it; it sees the run in "Running now", and
-its report arrives as a `SpecialistFinished`.
-
-```ts
-class SpecialistStarted extends Schema.TaggedClass<SpecialistStarted>()("SpecialistStarted", {
-  runId: RunId,
-  specialist: Schema.String,
-  /** The goal it's working on. */
-  goal: Schema.String
-})
 ```
 
 <small>Since 0.1.0</small>

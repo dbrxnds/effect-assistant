@@ -17,8 +17,8 @@ folds them with [`ChatView.apply`](/api/ChatView#apply), from `ChatView.empty`.
 
 ```ts
 import { AssistantEvent, ChatId, ChatView } from "effect-assistant"
-import * as Rpc from "effect/unstable/rpc/Rpc"
-import * as RpcGroup from "effect/unstable/rpc/RpcGroup"
+import * as Rpc from "effect/rpc/Rpc"
+import * as RpcGroup from "effect/rpc/RpcGroup"
 
 // Shared by the server and the client.
 export const Subscribe = Rpc.make("Subscribe", {

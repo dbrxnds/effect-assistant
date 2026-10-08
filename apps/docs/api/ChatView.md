@@ -9,89 +9,18 @@ import { ChatView } from "effect-assistant"
 The `ChatView` module is a chat as its user sees it: what a chat client
 gets, and all it gets.
 
-- **Messages**: the user's, and the assistant's (what it sent with
-  `send_user_message`), in order.
-- **Blocks** on the assistant's messages: their props, whether they're
-  open, answered (with the answer), or closed, and, for a decision block,
-  each decision's preview and outcome.
-- **Activity**: whether the assistant is working (a turn, or one about to
-  start) and which specialists are, for a typing indicator.
-- Whether the last turn **failed**, until the next message.
+## Other
 
-Nothing else: not the model's output, tool calls or results, what the
-model read, the app's own events, or why a turn failed. The chat's log
-(`MyAssistant.subscribe`) has those, for server-side code.
+### Decision
 
-`MyAssistant.subscribeView(chatId)` streams `Update`s: each one has
-the messages that are new or changed since the last, and the activity now.
-A client folds them with `apply`, from `empty`; an update
-that's applied twice changes nothing, so a client that resubscribes from
-the start just folds again. Both are schemas: `Update` for the RPC
-that streams them, and `View` for one that returns a whole chat.
-
-**Example** (A chat's view over RPC)
+Schema for a decision as the user sees it on a decision block: what they
+decide on (the preview), and how they decided, once they did.
 
 ```ts
-import { ChatId, ChatView } from "effect-assistant"
-import * as Rpc from "effect/unstable/rpc/Rpc"
-
-// Shared by the server and the client.
-export const Subscribe = Rpc.make("Subscribe", {
-  payload: { chatId: ChatId.ChatId },
-  success: ChatView.Update,
-  stream: true
-})
-
-// The server, once it checked the user may read the chat:
-const handlers = { Subscribe: ({ chatId }) => MyAssistant.subscribeView(chatId) }
-
-// The client:
-const view = client("Subscribe", { chatId }).pipe(Stream.scan(() => ChatView.empty, ChatView.apply))
-```
-
-## Constructors
-
-### empty
-
-A chat before anything happened in it: no messages, and nothing working.
-
-```ts
-const empty: View
+const Decision = Schema.Struct({ …
 ```
 
 <small>Since 0.1.0</small>
-
-### fromEntries
-
-Returns a chat's view from its log's entries, for server-side code: a
-client gets it from `MyAssistant.subscribeView`, which knows the
-assistant's events.
-
-```ts
-const fromEntries: (entries: ReadonlyArray<AssistantEvent.AnyEntry>, options?: Options) => View
-```
-
-<small>Since 0.1.0</small>
-
-## Combinators
-
-### updates
-
-Returns the updates a chat's entries make, streamed from the start of its
-log (as `MyAssistant.subscribe` streams them): the ones after `after`, each
-chunk of entries (like the stored ones, which come at once) as one update.
-`MyAssistant.subscribeView` is this over the assistant's log.
-
-```ts
-const updates: <E, R>(
-  entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
-  options?: Options & { readonly after?: number | undefined }
-) => Stream.Stream<Update, E, R>
-```
-
-<small>Since 0.1.0</small>
-
-## Models
 
 ### Decision
 
@@ -99,6 +28,18 @@ A decision as the user sees it.
 
 ```ts
 type Decision = typeof Decision.Type
+```
+
+<small>Since 0.1.0</small>
+
+### BlockStatus
+
+Schema for where a block stands: `"open"` while it takes an answer,
+`"answered"` once the user used it, `"closed"` when it closed without an
+answer (the user answered in words, or moved on).
+
+```ts
+const BlockStatus = Schema.Literals(["open", "answered", "closed"])
 ```
 
 <small>Since 0.1.0</small>
@@ -115,10 +56,34 @@ type BlockStatus = typeof BlockStatus.Type
 
 ### Block
 
+Schema for a block on an assistant's message: its kind and props (in JSON,
+as the block's props schema encodes them), where it stands, the user's
+answer (in JSON, as its answer schema encodes it), and, for a decision
+block, its decisions.
+
+```ts
+const Block = Schema.Struct({ …
+```
+
+<small>Since 0.1.0</small>
+
+### Block
+
 A block on an assistant's message.
 
 ```ts
 type Block = typeof Block.Type
+```
+
+<small>Since 0.1.0</small>
+
+### UserMessage
+
+Schema for a message the user sent. `at` is when it was stored, in epoch
+milliseconds.
+
+```ts
+const UserMessage = Schema.TaggedStruct("UserMessage", { …
 ```
 
 <small>Since 0.1.0</small>
@@ -135,10 +100,31 @@ type UserMessage = typeof UserMessage.Type
 
 ### AssistantMessage
 
+Schema for a message the assistant sent the user, with its block, if it
+has one.
+
+```ts
+const AssistantMessage = Schema.TaggedStruct("AssistantMessage", { …
+```
+
+<small>Since 0.1.0</small>
+
+### AssistantMessage
+
 A message the assistant sent the user.
 
 ```ts
 type AssistantMessage = typeof AssistantMessage.Type
+```
+
+<small>Since 0.1.0</small>
+
+### Message
+
+Schema for a message in the chat: the user's or the assistant's.
+
+```ts
+const Message = Schema.Union([UserMessage, AssistantMessage])
 ```
 
 <small>Since 0.1.0</small>
@@ -155,10 +141,33 @@ type Message = typeof Message.Type
 
 ### SpecialistWorking
 
+Schema for a specialist that works for the assistant: which one, and
+since when (epoch milliseconds).
+
+```ts
+const SpecialistWorking = Schema.Struct({ …
+```
+
+<small>Since 0.1.0</small>
+
+### SpecialistWorking
+
 A specialist that works for the assistant.
 
 ```ts
 type SpecialistWorking = typeof SpecialistWorking.Type
+```
+
+<small>Since 0.1.0</small>
+
+### Activity
+
+Schema for what works in the chat: the assistant (a turn, or one about to
+start, for something that arrived), and its specialists. Nothing works
+when the chat is idle, even if a workflow waits on a timer or a decision.
+
+```ts
+const Activity = Schema.Struct({ …
 ```
 
 <small>Since 0.1.0</small>
@@ -175,10 +184,35 @@ type Activity = typeof Activity.Type
 
 ### View
 
+Schema for a chat as its user sees it: its messages, what works in it,
+and whether the last turn failed. `seq` is how far into the chat's log it
+is.
+
+```ts
+const View = Schema.Struct({ …
+```
+
+<small>Since 0.1.0</small>
+
+### View
+
 A chat as its user sees it.
 
 ```ts
 type View = typeof View.Type
+```
+
+<small>Since 0.1.0</small>
+
+### Update
+
+Schema for a change to a chat's view: the messages that are new or
+changed (a block answered or closed, a decision decided), whole, and what
+works in the chat and whether the last turn failed, now. `seq` is how far
+into the log it is.
+
+```ts
+const Update = Schema.Struct({ …
 ```
 
 <small>Since 0.1.0</small>
@@ -193,13 +227,46 @@ type Update = typeof Update.Type
 
 <small>Since 0.1.0</small>
 
+### empty
+
+A chat before anything happened in it: no messages, and nothing working.
+
+```ts
+const empty: View
+```
+
+<small>Since 0.1.0</small>
+
+### apply
+
+Returns the view after an update: its messages replace the ones with
+their ids, in place, and the new ones go after the rest.
+
+```ts
+const apply: (view: View, update: Update) => View
+```
+
+<small>Since 0.1.0</small>
+
+### isIdle
+
+Returns whether nothing works in the chat: no turn, and no specialist.
+
+```ts
+const isIdle: (view: View) => boolean
+```
+
+<small>Since 0.1.0</small>
+
 ### Options
 
 Options for a view of a chat's log.
 
 ```ts
 interface Options {
-  /** The tags of the app's events that wake a turn: a turn is about to start after one. Default: none. */
+  /**
+   * The tags of the app's events that wake a turn: a turn is about to start after one. Default: none.
+   */
   readonly wakes?: ReadonlySet<string> | undefined
 }
 
@@ -207,9 +274,6 @@ interface Options {
  * Returns a chat's view from its log's entries, for server-side code: a
  * client gets it from `MyAssistant.subscribeView`, which knows the
  * assistant's events.
- *
- * @category constructors
- * @since 0.1.0
  */
 export const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, options?: Options): View => {
   const fold = folding(options?.wakes ?? new Set())
@@ -233,20 +297,28 @@ const decodeAnswer = Schema.decodeUnknownOption(Decisions.Answer)
 
 const activityOf = (activity: AssistantActivity.Activity): Activity => ({
   working: activity.turnSince !== undefined || activity.queued,
-  specialists: [...activity.specialists.values()].map((run) => ({ specialist: run.specialist, since: run.since }))
+  specialists: [...activity.specialists.values()].map((run) => ({
+    specialist: run.specialist,
+    since: run.since
+  }))
 })
 
 const sameActivity = (a: Activity, b: Activity) =>
   a.working === b.working &&
   a.specialists.length === b.specialists.length &&
-  a.specialists.every(
-    (run, i) => run.specialist === b.specialists[i]?.specialist && run.since === b.specialists[i]?.since
-  )
+  a.specialists.every((run, i) => {
+    const other = b.specialists[i]
+
+    return other !== undefined && run.specialist === other.specialist && run.since === other.since
+  })
 
 /** The decisions a decision block asks for. */
 const decisionIds = (block: AssistantEvent.MessageBlock): ReadonlyArray<string> =>
   block.kind === Decisions.kind
-    ? Option.match(decodeProps(block.props), { onNone: () => [], onSome: (props) => props.decisionIds })
+    ? Option.match(decodeProps(block.props), {
+        onNone: () => [],
+        onSome: (props) => props.decisionIds
+      })
     : []
 
 /** Starts a fold over a chat's log. `wakes` are the tags of the app's events that wake a turn. */
@@ -277,7 +349,11 @@ const folding = (wakes: ReadonlySet<string>): Folding => {
         : [
             decision.outcome === undefined
               ? { id: decision.request.id, preview: decision.request.preview }
-              : { id: decision.request.id, preview: decision.request.preview, outcome: decision.outcome }
+              : {
+                  id: decision.request.id,
+                  preview: decision.request.preview,
+                  outcome: decision.outcome
+                }
           ]
     })
 
@@ -300,7 +376,17 @@ const folding = (wakes: ReadonlySet<string>): Folding => {
     Match.value(event).pipe(
       Match.tagsExhaustive({
         UserMessage: (message) => {
-          messages.set(message.id, UserMessage.make({ id: message.id, text: message.text, at }))
+          messages.set(
+            message.id,
+            message.attachments === undefined
+              ? UserMessage.make({ id: message.id, text: message.text, at })
+              : UserMessage.make({
+                  id: message.id,
+                  text: message.text,
+                  attachments: message.attachments,
+                  at
+                })
+          )
           failed = false
 
           return [message.id]
@@ -361,7 +447,7 @@ const folding = (wakes: ReadonlySet<string>): Folding => {
     }
 
     blocks = BlockKit.nextBlockStates(blocks, event)
-    decisions = Decisions.nextStates(decisions, event)
+    decisions = Decisions.apply(decisions, event)
 
     const changed = [...new Set(touched(event, entry.at))].flatMap((id) => {
       const message = sent.get(id)
@@ -390,7 +476,9 @@ const folding = (wakes: ReadonlySet<string>): Folding => {
   }
 }
 
-/** One update for several: their messages, each as it is in the last one that has it, and the last one's activity. */
+/**
+ * One update for several: their messages, each as it is in the last one that has it, and the last one's activity.
+ */
 const merge = (updates: ReadonlyArray<Update>): Update | undefined => {
   const last = updates.at(-1)
 
@@ -400,7 +488,12 @@ const merge = (updates: ReadonlyArray<Update>): Update | undefined => {
 
   for (const update of updates) for (const message of update.messages) messages.set(message.id, message)
 
-  return { seq: last.seq, messages: [...messages.values()], activity: last.activity, failed: last.failed }
+  return {
+    seq: last.seq,
+    messages: [...messages.values()],
+    activity: last.activity,
+    failed: last.failed
+  }
 }
 
 /**
@@ -408,9 +501,6 @@ const merge = (updates: ReadonlyArray<Update>): Update | undefined => {
  * log (as `MyAssistant.subscribe` streams them): the ones after `after`, each
  * chunk of entries (like the stored ones, which come at once) as one update.
  * `MyAssistant.subscribeView` is this over the assistant's log.
- *
- * @category combinators
- * @since 0.1.0
  */
 export const updates = <E, R>(
   entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
@@ -439,145 +529,30 @@ export const updates = <E, R>(
 
 <small>Since 0.1.0</small>
 
-## Schemas
+### fromEntries
 
-### Decision
-
-Schema for a decision as the user sees it on a decision block: what they
-decide on (the preview), and how they decided, once they did.
+Returns a chat's view from its log's entries, for server-side code: a
+client gets it from `MyAssistant.subscribeView`, which knows the
+assistant's events.
 
 ```ts
-const Decision = Schema.Struct({ …
+const fromEntries: (entries: ReadonlyArray<AssistantEvent.AnyEntry>, options?: Options) => View
 ```
 
 <small>Since 0.1.0</small>
 
-### BlockStatus
+### updates
 
-Schema for where a block stands: `"open"` while it takes an answer,
-`"answered"` once the user used it, `"closed"` when it closed without an
-answer (the user answered in words, or moved on).
-
-```ts
-const BlockStatus = Schema.Literals(["open", "answered", "closed"])
-```
-
-<small>Since 0.1.0</small>
-
-### Block
-
-Schema for a block on an assistant's message: its kind and props (in JSON,
-as the block's props schema encodes them), where it stands, the user's
-answer (in JSON, as its answer schema encodes it), and, for a decision
-block, its decisions.
+Returns the updates a chat's entries make, streamed from the start of its
+log (as `MyAssistant.subscribe` streams them): the ones after `after`, each
+chunk of entries (like the stored ones, which come at once) as one update.
+`MyAssistant.subscribeView` is this over the assistant's log.
 
 ```ts
-const Block = Schema.Struct({ …
-```
-
-<small>Since 0.1.0</small>
-
-### UserMessage
-
-Schema for a message the user sent. `at` is when it was stored, in epoch
-milliseconds.
-
-```ts
-const UserMessage = Schema.TaggedStruct("UserMessage", { …
-```
-
-<small>Since 0.1.0</small>
-
-### AssistantMessage
-
-Schema for a message the assistant sent the user, with its block, if it
-has one.
-
-```ts
-const AssistantMessage = Schema.TaggedStruct("AssistantMessage", { …
-```
-
-<small>Since 0.1.0</small>
-
-### Message
-
-Schema for a message in the chat: the user's or the assistant's.
-
-```ts
-const Message = Schema.Union([UserMessage, AssistantMessage])
-```
-
-<small>Since 0.1.0</small>
-
-### SpecialistWorking
-
-Schema for a specialist that works for the assistant: which one, and
-since when (epoch milliseconds).
-
-```ts
-const SpecialistWorking = Schema.Struct({ …
-```
-
-<small>Since 0.1.0</small>
-
-### Activity
-
-Schema for what works in the chat: the assistant (a turn, or one about to
-start, for something that arrived), and its specialists. Nothing works
-when the chat is idle, even if a workflow waits on a timer or a decision.
-
-```ts
-const Activity = Schema.Struct({ …
-```
-
-<small>Since 0.1.0</small>
-
-### View
-
-Schema for a chat as its user sees it: its messages, what works in it,
-and whether the last turn failed. `seq` is how far into the chat's log it
-is.
-
-```ts
-const View = Schema.Struct({ …
-```
-
-<small>Since 0.1.0</small>
-
-### Update
-
-Schema for a change to a chat's view: the messages that are new or
-changed (a block answered or closed, a decision decided), whole, and what
-works in the chat and whether the last turn failed, now. `seq` is how far
-into the log it is.
-
-```ts
-const Update = Schema.Struct({ …
-```
-
-<small>Since 0.1.0</small>
-
-## Folding
-
-### apply
-
-Returns the view after an update: its messages replace the ones with
-their ids, in place, and the new ones go after the rest.
-
-```ts
-const apply: (view: View, update: Update) => View
-```
-
-<small>Since 0.1.0</small>
-
-## Predicates
-
-### isIdle
-
-Returns whether nothing works in the chat: no turn, and no specialist.
-
-```ts
-const isIdle: (view: View) => boolean
+const updates: <E, R>(
+  entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
+  options?: Options & { readonly after?: number | undefined }
+) => Stream.Stream<Update, E, R>
 ```
 
 <small>Since 0.1.0</small>

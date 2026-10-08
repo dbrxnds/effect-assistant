@@ -23,7 +23,7 @@ params (`(params) => params.amount > 100`, or an Effect of a boolean).
 
 ```ts
 import * as Schema from "effect/Schema"
-import * as Tool from "effect/unstable/ai/Tool"
+import * as Tool from "effect/ai/Tool"
 import { AssistantChat, AssistantToolCall, ToolFailure } from "effect-assistant"
 
 const OrderInput = Schema.Struct({ office: Schema.String, product: Schema.String, quantity: Schema.Int })
@@ -50,7 +50,7 @@ const MyAssistantLive = MyAssistant.toLayer(
   Effect.gen(function* () {
     const orders = yield* Orders
 
-    const toolkit = AssistantLoop.tools(yield* OrderTools, {
+    const toolkit = AssistantLoop.fromToolkit(yield* OrderTools, {
       previews: {
         // A ToolFailure goes to the model instead ("Berlin has $200 left"), and nothing waits.
         order_products: (order) => orders.quote(order)
@@ -117,7 +117,7 @@ have ids; the [chat's view](./client) has each decision the block asks for,
 with its preview and how it was decided, and its renderer gets them as
 `decisions`. (A parked call's params and the model's reading of it stay on
 the server.) `Decision.answerAll` is the answer an Approve or Decline button
-sends. On the server, [`Decision.states`](/api/Decision#states) folds the
+sends. On the server, [`Decision.fromEntries`](/api/Decision#fromentries) folds the
 same from a log.
 
 ```tsx

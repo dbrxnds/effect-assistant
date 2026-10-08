@@ -1,21 +1,13 @@
-/**
- * What the tests share. Most tests run on a scripted model (`scripted.ts`);
- * `realModel` is the Anthropic API, for the contract tests. It needs
- * ANTHROPIC_API_KEY (loaded from .env.local).
- */
-import * as AnthropicClient from "@effect/ai-anthropic/AnthropicClient"
-import * as AnthropicLanguageModel from "@effect/ai-anthropic/AnthropicLanguageModel"
+/** What the tests share: they run on a scripted model (`scripted.ts`). */
+import type * as LanguageModel from "effect/ai/LanguageModel"
+import * as TestRunner from "effect/cluster/TestRunner"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
-import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import type * as LanguageModel from "effect/unstable/ai/LanguageModel"
-import * as TestRunner from "effect/unstable/cluster/TestRunner"
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import {
   AppEvent,
   Assistant,
@@ -26,17 +18,8 @@ import {
   ChatLog,
   ChatView,
   InputId
-} from "../src/index.ts"
-import { toJsonText } from "../src/internal/schema.ts"
-
-/** A small, fast model: the contract tests check behaviour, not wording. */
-export const testModel = "claude-haiku-4-5"
-
-/** The Anthropic API, for the contract tests, with prompt caching as an app would set it. */
-export const realModel = AnthropicLanguageModel.model(testModel, { cache_control: { type: "ephemeral" } }).pipe(
-  Layer.provide(AnthropicClient.layer({ apiKey: Redacted.make(process.env.ANTHROPIC_API_KEY ?? "") })),
-  Layer.provide(FetchHttpClient.layer)
-)
+} from "../../src/index.ts"
+import { toJsonText } from "../../src/internal/schema.ts"
 
 /** What a workflow or a webhook reports in the tests: an app event that wakes a turn. */
 export class Update extends Schema.TaggedClass<Update>()("Update", {

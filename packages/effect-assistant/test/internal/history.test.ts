@@ -1,11 +1,11 @@
 import { describe, expect, it } from "@effect/vitest"
+import type * as Prompt from "effect/ai/Prompt"
+import * as Response from "effect/ai/Response"
 import * as Effect from "effect/Effect"
-import type * as Prompt from "effect/unstable/ai/Prompt"
-import * as Response from "effect/unstable/ai/Response"
-import { AssistantEvent, ChatId, Decision, DecisionId, InputId, RunId } from "../src/index.ts"
-import * as Decisions from "../src/internal/decisions.ts"
-import * as History from "../src/internal/history.ts"
-import { say } from "./fixtures.ts"
+import { AssistantEvent, ChatId, Decision, DecisionId, InputId, RunId } from "../../src/index.ts"
+import * as Decisions from "../../src/internal/decisions.ts"
+import * as History from "../../src/internal/history.ts"
+import { say } from "../utils/fixtures.ts"
 
 const { ModelOutput, ToolResult, ToolStarted, TurnStarted } = AssistantEvent
 
@@ -153,7 +153,11 @@ describe("History.fromEntries, a finished specialist run", () => {
         chatId,
         seq: 2,
         at: 1000,
-        event: AssistantEvent.SpecialistStarted.make({ runId, specialist: "research", goal: "Q4 budgets" })
+        event: AssistantEvent.SpecialistStarted.make({
+          runId,
+          specialist: "research",
+          goal: "Q4 budgets"
+        })
       }),
       AssistantEvent.Entry.make({
         chatId,
@@ -183,13 +187,20 @@ describe("History.fromEntries, a finished specialist run", () => {
 
 describe("History.fromEntries, decisions", () => {
   const params = { sku: "tote", quantity: 300 }
-  const id = DecisionId.forCall("a")
+  const id = DecisionId.fromCallId("a")
 
   const parked = [
     say("order 300 totes"),
     TurnStarted.make({ assistant: "test" }),
     ModelOutput.make({
-      parts: [Response.makePart("tool-call", { id: "a", name: "place_order", params, providerExecuted: false })],
+      parts: [
+        Response.makePart("tool-call", {
+          id: "a",
+          name: "place_order",
+          params,
+          providerExecuted: false
+        })
+      ],
       seenThroughSeq: 2
     }),
     AssistantEvent.DecisionRequested.make({
@@ -202,7 +213,10 @@ describe("History.fromEntries, decisions", () => {
     AssistantEvent.AssistantMessage.make({
       id: "m",
       text: "Place it?",
-      block: AssistantEvent.MessageBlock.make({ kind: Decision.kind, props: { decisionIds: [id] } })
+      block: AssistantEvent.MessageBlock.make({
+        kind: Decision.kind,
+        props: { decisionIds: [id] }
+      })
     }),
     AssistantEvent.TurnCompleted.make({ throughSeq: 7 })
   ]
@@ -238,7 +252,11 @@ describe("History.fromEntries, decisions", () => {
       "result: b"
     ])
     expect(first?.isFailure).toBe(false)
-    expect(first?.result).toMatchObject({ status: "waiting_for_decision", decisionId: id, preview: { total: 600 } })
+    expect(first?.result).toMatchObject({
+      status: "waiting_for_decision",
+      decisionId: id,
+      preview: { total: 600 }
+    })
     // Parked is answered: the loop doesn't run it again.
     expect(History.unansweredCalls(history)).toEqual([])
     expect(Decisions.approvedCalls(entries(parked))).toEqual([])
@@ -256,7 +274,12 @@ describe("History.fromEntries, decisions", () => {
       ...approved,
       TurnStarted.make({ assistant: "test" }),
       ToolStarted.make({ callId: "a", tool: "place_order" }),
-      ToolResult.make({ callId: "a", tool: "place_order", outcome: "success", result: { reference: "R-1" } })
+      ToolResult.make({
+        callId: "a",
+        tool: "place_order",
+        outcome: "success",
+        result: { reference: "R-1" }
+      })
     ]
 
     const history = fromEntries(entries(ran))
@@ -277,7 +300,12 @@ describe("History.fromEntries, decisions", () => {
       resolved("approved"),
       TurnStarted.make({ assistant: "test" }),
       ToolStarted.make({ callId: "a", tool: "place_order" }),
-      ToolResult.make({ callId: "a", tool: "place_order", outcome: "success", result: { reference: "R-1" } })
+      ToolResult.make({
+        callId: "a",
+        tool: "place_order",
+        outcome: "success",
+        result: { reference: "R-1" }
+      })
     ]
 
     // Only what came after the parked call and its request, like a view since a summary.

@@ -12,8 +12,8 @@ import * as Skill from "effect-assistant/Skill"
 import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as Toolkit from "effect/unstable/ai/Toolkit"
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
+import * as Toolkit from "effect/ai/Toolkit"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import { AcmeAssistant } from "./AcmeAssistant.ts"
 import * as Campaign from "./Campaign.ts"
 import * as PrintOrders from "./PrintOrders.ts"
@@ -53,7 +53,7 @@ export const layer = AcmeAssistant.toLayer(
   Effect.gen(function* () {
     const prompts = yield* Prompts.Prompts
     // A product order waits for the user's decision; its quote is what they approve.
-    const toolkit = AssistantLoop.tools(yield* AcmeTools, { previews: yield* PrintOrders.previews })
+    const toolkit = AssistantLoop.fromToolkit(yield* AcmeTools, { previews: yield* PrintOrders.previews })
 
     return Effect.fn(function* (turn) {
       const prompt = yield* prompts.get("acme")

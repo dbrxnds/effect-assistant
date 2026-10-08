@@ -9,41 +9,23 @@ import { Instructions } from "effect-assistant"
 The `Instructions` module defines what an assistant, specialist, or skill is
 told to do: text, optionally with span attributes (a `Resolved`).
 
-In a handler, instructions are just a value the handler computes: fetch
-the current version from a prompt manager, or tailor it to the user. A
-resolved prompt's span attributes (such as its name and version) are added
-to every model call it is used for. A skill's instructions can also be an
-Effect, resolved each time the skill is loaded.
+## Other
 
-**Example** (Instructions from a prompt service)
+### protocol
 
-```ts
-import * as Effect from "effect/Effect"
-import { MyAssistant } from "./MyAssistant.ts"
-import { Prompts } from "./Prompts.ts" // your service, provided by a layer
-
-const MyAssistantLive = MyAssistant.toLayer(Effect.gen(function*() {
-  const prompts = yield* Prompts
-
-  return Effect.fn(function*(turn: Assistant.Turn) {
-    return turn.loop({ instructions: yield* prompts.get("my-assistant") })
-  })
-}))
-```
-
-## Constructors
-
-### resolve
-
-Resolves instructions to text and span attributes.
+What the model has to know for a turn's loop to work: every step is a tool
+call, `wait` (or a last message with `wait: true`) ends the turn, and
+messages can arrive mid-turn. The rest (the user sees only
+`send_user_message`, what a `<specialist>` or an app's event is) is in the
+tools' descriptions and in the history itself.
+`turn.instructions(text)` puts it before the text; a custom loop on
+`AssistantLoop.run` can use it too.
 
 ```ts
-const resolve: <R = never>(instructions: Instructions<R>) => Effect.Effect<Resolved, never, R>
+const protocol = `Every step is a tool call. When you have nothing more to do right now, end your turn: set wait to true on your last send_user_message, or call wait if you have nothing to say. …
 ```
 
 <small>Since 0.1.0</small>
-
-## Models
 
 ### SpanAttributes
 
@@ -72,31 +54,18 @@ interface Resolved {
 
 Text, or an Effect that produces it (optionally with span attributes).
 
-**Gotchas**
-
-The Effect can't fail. If it reads from a service that can be down, fall
-back to fixed text inside it.
-
 ```ts
 type Instructions<R = never> = string | Effect.Effect<string | Resolved, never, R>
 ```
 
 <small>Since 0.1.0</small>
 
-## Constants
+### resolve
 
-### protocol
-
-What the model has to know for a turn's loop to work: every step is a tool
-call, `wait` (or a last message with `wait: true`) ends the turn, and
-messages can arrive mid-turn. The rest (the user sees only
-`send_user_message`, what a `<specialist>` or an app's event is) is in the
-tools' descriptions and in the history itself.
-`turn.instructions(text)` puts it before the text; a custom loop on
-`AssistantLoop.stream` can use it too.
+Resolves instructions to text and span attributes.
 
 ```ts
-const protocol = `Every step is a tool call. When you have nothing more to do right now, end your turn: set wait to true on your last send_user_message, or call wait if you have nothing to say. …
+const resolve = Effect.fn("Instructions.resolve")(function* <R = never>(instructions: Instructions<R>) { …
 ```
 
 <small>Since 0.1.0</small>

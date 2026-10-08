@@ -7,17 +7,17 @@ stream.
 
 `turn.loop` is built from pieces you can use yourself:
 
-| Piece                                               | What it is                                                                                       |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `turn.instructions(text)`                           | The full system prompt: `Instructions.protocol`, your text, and the specialist runs working now. |
-| `turn.tools`                                        | The assistant's own tools: `send_user_message`, `wait`, and the specialist tools.                |
-| `turn.history(view?)`                               | The model's history from the chat's entries: all of them, or what a view keeps.                  |
-| `turn.entries`                                      | The chat's entries, with the assistant's own events decoded.                                     |
-| [`AssistantLoop.step`](/api/AssistantLoop#step)     | One step: call the model, run its tool calls.                                                    |
-| [`AssistantLoop.stream`](/api/AssistantLoop#stream) | The whole loop, steps until the model is done.                                                   |
-| `turn.replyIfOwed(...)`                             | One more pass, reply-only, when the user's latest message has no reply.                          |
+| Piece                                           | What it is                                                                                       |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `turn.instructions(text)`                       | The full system prompt: `Instructions.protocol`, your text, and the specialist runs working now. |
+| `turn.tools`                                    | The assistant's own tools: `send_user_message`, `wait`, and the specialist tools.                |
+| `turn.history(view?)`                           | The model's history from the chat's entries: all of them, or what a view keeps.                  |
+| `turn.entries`                                  | The chat's entries, with the assistant's own events decoded.                                     |
+| [`AssistantLoop.step`](/api/AssistantLoop#step) | One step: call the model, run its tool calls.                                                    |
+| [`AssistantLoop.run`](/api/AssistantLoop#run)   | The whole loop, steps until the model is done.                                                   |
+| `turn.replyIfOwed(...)`                         | One more pass, reply-only, when the user's latest message has no reply.                          |
 
-`turn.loop` is `AssistantLoop.stream` with these wired in, the skill catalog,
+`turn.loop` is `AssistantLoop.run` with these wired in, the skill catalog,
 and a tool call required at every step, followed by `turn.replyIfOwed`.
 
 ## A loop of your own
@@ -80,7 +80,7 @@ reply."). See [a reply to every message](./turns#a-reply-to-every-message).
 
 A history view picks which of the chat's entries the model reads, and what
 goes with them. It gets the entries and returns entries (the model reads them
-as usual) and prompt messages (`effect/unstable/ai/Prompt`, which it reads as
+as usual) and prompt messages (`effect/ai/Prompt`, which it reads as
 they are), in order. Pass it to
 the loop as `history`, or to `turn.history(view)` in a loop of your own.
 
@@ -131,7 +131,7 @@ runs the loop.
 ```ts
 import type { Assistant } from "effect-assistant"
 import * as Effect from "effect/Effect"
-import * as Prompt from "effect/unstable/ai/Prompt"
+import * as Prompt from "effect/ai/Prompt"
 
 const sinceSummary: Assistant.HistoryView<Summary> = (entries) => {
   const last = entries.findLast(({ event }) => event instanceof Summary)

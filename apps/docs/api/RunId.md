@@ -10,7 +10,27 @@ The `RunId` module defines the id of one background run, such as a
 specialist run or a workflow started from a tool: `run:` followed by a
 UUID.
 
-## Constructors
+## Other
+
+### RunId
+
+Schema for run ids: `` `run:${uuid}` ``, branded.
+
+```ts
+const RunId = Schema.TemplateLiteral(["run:", Uuid.Uuid]).pipe(Schema.brand("effect-assistant/RunId"))
+```
+
+<small>Since 0.1.0</small>
+
+### RunId
+
+A run id.
+
+```ts
+type RunId = typeof RunId.Type
+```
+
+<small>Since 0.1.0</small>
 
 ### make
 
@@ -30,30 +50,6 @@ again finds the same run.
 
 ```ts
 const fromKey: (key: string) => RunId
-```
-
-<small>Since 0.1.0</small>
-
-## Models
-
-### RunId
-
-A run id.
-
-```ts
-type RunId = typeof RunId.Type
-```
-
-<small>Since 0.1.0</small>
-
-## Schemas
-
-### RunId
-
-Schema for run ids: `` `run:${uuid}` ``, branded.
-
-```ts
-const RunId = Schema.TemplateLiteral(["run:", Uuid.Uuid]).pipe(Schema.brand("effect-assistant/RunId"))
 ```
 
 <small>Since 0.1.0</small>

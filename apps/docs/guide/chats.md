@@ -64,8 +64,8 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import * as Tool from "effect/unstable/ai/Tool"
-import * as Toolkit from "effect/unstable/ai/Toolkit"
+import * as Tool from "effect/ai/Tool"
+import * as Toolkit from "effect/ai/Toolkit"
 
 interface User {
   readonly name: string
@@ -91,7 +91,7 @@ const Greet = Tool.make("greet", {
 
 const greet = () => CurrentUser.useSync((user) => `hi ${user.name}`)
 
-const toolkit = AssistantLoop.tools(Toolkit.make(Greet), { greet })
+const toolkit = AssistantLoop.fromToolkit(Toolkit.make(Greet), { greet })
 
 const MyAssistantLive = MyAssistant.toLayer(
   Effect.gen(function* () {
@@ -139,8 +139,8 @@ const MyAssistantLive = MyAssistant.toLayer(
             .loop({
               instructions,
               toolkit: user.admin
-                ? AssistantLoop.tools(Toolkit.make(AdminReport, Greet), { admin_report: adminReport, greet })
-                : AssistantLoop.tools(Toolkit.make(Greet), { greet })
+                ? AssistantLoop.fromToolkit(Toolkit.make(AdminReport, Greet), { admin_report: adminReport, greet })
+                : AssistantLoop.fromToolkit(Toolkit.make(Greet), { greet })
             })
             .pipe(Stream.provideService(CurrentUser, user))
         )
@@ -164,7 +164,7 @@ handler does the same lookup from `run.chatId`:
 const ResearchLive = Research.toLayer(
   Effect.gen(function* () {
     const users = yield* ChatUsers
-    const toolkit = AssistantLoop.tools(yield* OrderTools)
+    const toolkit = AssistantLoop.fromToolkit(yield* OrderTools)
 
     return (run) =>
       Stream.unwrap(

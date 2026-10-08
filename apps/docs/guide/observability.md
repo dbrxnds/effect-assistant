@@ -18,7 +18,7 @@ invoke_agent <assistant>          one trace per turn; session.id = the chat id
   handles; its output is what the user saw.
 - **Model calls** are named after the model the loop calls (when the context
   names it, as `AnthropicLanguageModel.model(...)` does), and get the standard
-  `gen_ai.*` attributes (from Effect's `effect/unstable/ai/Telemetry`), cache
+  `gen_ai.*` attributes (from Effect's `effect/ai/Telemetry`), cache
   read and write tokens, and the prompt's span attributes when
   [instructions](./instructions) carry them. The `LanguageModel` call's own
   span, with the provider's attributes, is inside it.

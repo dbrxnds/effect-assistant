@@ -1,42 +1,13 @@
 /**
  * The `AssistantActivity` module says what is working in a chat right now,
  * read from its log: the assistant's turn, and specialist runs.
- *
- * Each is open from the event that starts it until the one that ends it: a
- * turn from `TurnStarted` to `TurnCompleted` or `TurnFailed`, a specialist
- * run from `SpecialistStarted` to `SpecialistFinished`. An input is open until a
- * turn that read it ends, so the gap before its turn starts counts too.
- * Anything merely waiting, like a workflow on an approval, isn't working: the
- * assistant took its last step, and the workflow wakes it with an event.
- *
- * A chat client gets this from its chat view (`ChatView`); these folds are
- * for server-side code, over the log.
- *
- * **Example** (A working indicator)
- *
- * ```ts
- * import { AssistantActivity } from "effect-assistant"
- *
- * const activity = AssistantActivity.fromEntries(entries)
- *
- * if (AssistantActivity.isWorking(activity)) {
- *   // Show who: the assistant, or `activity.specialists`.
- * }
- * ```
- *
- * @since 0.1.0
  */
 import * as Match from "effect/Match"
 import * as Predicate from "effect/Predicate"
 import * as AssistantEvent from "./AssistantEvent.ts"
 import type { RunId } from "./RunId.ts"
 
-/**
- * A specialist run that is working.
- *
- * @category models
- * @since 0.1.0
- */
+/** A specialist run that is working. */
 export interface SpecialistRun {
   readonly runId: RunId
   readonly specialist: string
@@ -46,12 +17,7 @@ export interface SpecialistRun {
   readonly since: number
 }
 
-/**
- * What is working in a chat.
- *
- * @category models
- * @since 0.1.0
- */
+/** What is working in a chat. */
 export interface Activity {
   /** When the running turn started, in epoch milliseconds; `undefined` when no turn runs. */
   readonly turnSince: number | undefined
@@ -63,12 +29,7 @@ export interface Activity {
   readonly specialists: ReadonlyMap<RunId, SpecialistRun>
 }
 
-/**
- * Nothing working: a chat with an empty log.
- *
- * @category constructors
- * @since 0.1.0
- */
+/** Nothing working: a chat with an empty log. */
 export const empty: Activity = {
   turnSince: undefined,
   queued: false,
@@ -85,12 +46,7 @@ const withoutRun = (activity: Activity, runId: RunId): Activity => {
   return { ...activity, specialists }
 }
 
-/**
- * Options for folding activity.
- *
- * @category models
- * @since 0.1.0
- */
+/** Options for folding activity. */
 export interface Options {
   /** The tags of the app's events that wake a turn (see `AppEvent`): inputs too. Default: none. */
   readonly wakes?: ReadonlySet<string> | undefined
@@ -99,9 +55,6 @@ export interface Options {
 /**
  * Returns the activity after one more entry. Fold a chat's entries in order,
  * or use {@link fromEntries}.
- *
- * @category combinators
- * @since 0.1.0
  */
 export const apply = (activity: Activity, entry: AssistantEvent.AnyEntry, options?: Options): Activity => {
   const event = entry.event
@@ -114,7 +67,7 @@ export const apply = (activity: Activity, entry: AssistantEvent.AnyEntry, option
     // A finished run's report is an input, and ends the run.
     const current = Predicate.isTagged(event, "SpecialistFinished") ? withoutRun(activity, event.runId) : activity
 
-    return AssistantEvent.wakes(event) ? { ...current, queued: true, lastInputSeq: entry.seq } : current
+    return AssistantEvent.isWaking(event) ? { ...current, queued: true, lastInputSeq: entry.seq } : current
   }
 
   return Match.value(event).pipe(
@@ -138,21 +91,13 @@ export const apply = (activity: Activity, entry: AssistantEvent.AnyEntry, option
   )
 }
 
-/**
- * Returns what is working after these entries.
- *
- * @category constructors
- * @since 0.1.0
- */
+/** Returns what is working after these entries. */
 export const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, options?: Options): Activity =>
   entries.reduce((activity, entry) => apply(activity, entry, options), empty)
 
 /**
  * Returns whether anything is working: a turn (or one about to start), or a
  * specialist run.
- *
- * @category predicates
- * @since 0.1.0
  */
 export const isWorking = (activity: Activity): boolean =>
   activity.turnSince !== undefined || activity.queued || activity.specialists.size > 0

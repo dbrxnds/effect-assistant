@@ -6,11 +6,11 @@ Everything runs in one process; all you need is an Anthropic API key.
 ## Install
 
 `effect` is a peer dependency: your app brings its own, so there's one copy.
-The library runs on Effect's AI modules (`effect/unstable/ai`); add a model
+The library runs on Effect's AI modules (`effect/ai`); add a model
 provider for them, here `@effect/ai-anthropic`.
 
 ```bash
-pnpm add effect-assistant effect@4.0.0-rc.117 @effect/ai-anthropic@4.0.0-rc.117
+pnpm add effect-assistant effect@4.0.0 @effect/ai-anthropic@4.0.0
 ```
 
 ## Define an assistant
@@ -24,7 +24,7 @@ import { Assistant, AssistantEngine, ChatLog } from "effect-assistant"
 import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
 
 // The definition: submit and subscribeView are on it.
 export const MyAssistant = Assistant.make("my-assistant")
@@ -128,8 +128,8 @@ or their results: they're its own work. It sends a message by calling
 
 ## Give it a tool
 
-Tools are Effect's own (`effect/unstable/ai/Tool`): a name, a description,
-schemas for the parameters and the result, and a handler. `AssistantLoop.tools`
+Tools are Effect's own (`effect/ai/Tool`): a name, a description,
+schemas for the parameters and the result, and a handler. `AssistantLoop.fromToolkit`
 turns a toolkit and its handlers into tools for `turn.loop`.
 
 **Example** (A weather tool)
@@ -138,8 +138,8 @@ turns a toolkit and its handlers into tools for `turn.loop`.
 import { AssistantLoop } from "effect-assistant"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import * as Tool from "effect/unstable/ai/Tool"
-import * as Toolkit from "effect/unstable/ai/Toolkit"
+import * as Tool from "effect/ai/Tool"
+import * as Toolkit from "effect/ai/Toolkit"
 
 const GetWeather = Tool.make("get_weather", {
   description: "Current weather for a city.",
@@ -147,7 +147,7 @@ const GetWeather = Tool.make("get_weather", {
   success: Schema.Struct({ city: Schema.String, weather: Schema.String })
 })
 
-const toolkit = AssistantLoop.tools(Toolkit.make(GetWeather), {
+const toolkit = AssistantLoop.fromToolkit(Toolkit.make(GetWeather), {
   get_weather: ({ city }) => Effect.succeed({ city, weather: "sunny, 21°C" })
 })
 

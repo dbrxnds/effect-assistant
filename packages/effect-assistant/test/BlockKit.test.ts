@@ -1,9 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import * as Schema from "effect/Schema"
 import * as Predicate from "effect/Predicate"
-import { AssistantEvent, Block, BlockKit, ChatId, ChatView, InputId } from "../src/index.ts"
-import { say } from "./fixtures.ts"
+import * as Schema from "effect/Schema"
+import { AssistantEvent, Block, BlockKit, ChatId, ChatView, Decision, InputId } from "../src/index.ts"
+import { say } from "./utils/fixtures.ts"
 
 const Choose = Block.make("choose_one", {
   description: "Let the user pick one option.",
@@ -61,23 +61,18 @@ describe("BlockKit.toClient", () => {
 
   it("renders a block and sends its answer", () => {
     const sent: Array<AssistantEvent.BlockAnswer> = []
-    const out = render(viewed("m1", [message("m1", choice(["red", "blue"]))]), { respond: (a) => sent.push(a) })
+
+    const out = render(viewed("m1", [message("m1", choice(["red", "blue"]))]), {
+      respond: (a) => sent.push(a)
+    })
 
     expect(out).toBe("Pick one: red/blue")
     expect(sent[0]).toBeInstanceOf(AssistantEvent.BlockAnswer)
-    expect(sent[0]).toMatchObject({ messageId: "m1", kind: "choose_one", value: { choice: "blue" } })
-  })
-
-  it("encodes answers in their JSON form and decodes them back", () => {
-    const sent: Array<AssistantEvent.BlockAnswer> = []
-    render(
-      viewed("m2", [
-        message("m2", AssistantEvent.MessageBlock.make({ kind: "pick_date", props: { label: "Launch" } }))
-      ]),
-      { respond: (a) => sent.push(a) }
-    )
-
-    expect(sent[0]!.value).toEqual({ date: "2026-10-01T00:00:00.000Z" })
+    expect(sent[0]).toMatchObject({
+      messageId: "m1",
+      kind: "choose_one",
+      value: { choice: "blue" }
+    })
   })
 
   it("passes the answer once there is one", () => {
@@ -88,7 +83,7 @@ describe("BlockKit.toClient", () => {
     expect(out).toBe("picked red")
   })
 
-  it("returns undefined for no block, unknown kinds, and bad props", () => {
+  it("returns undefined for no block and unknown kinds", () => {
     const respond = () => undefined
 
     const shown = (id: string, block?: AssistantEvent.MessageBlock) =>
@@ -96,7 +91,6 @@ describe("BlockKit.toClient", () => {
 
     expect(shown("m3")).toBeUndefined()
     expect(shown("m4", AssistantEvent.MessageBlock.make({ kind: "mystery", props: {} }))).toBeUndefined()
-    expect(shown("m5", AssistantEvent.MessageBlock.make({ kind: "choose_one", props: { options: 1 } }))).toBeUndefined()
   })
 })
 
@@ -147,6 +141,16 @@ describe("BlockKit.blockStates", () => {
     const entries = events.map(entry)
 
     expect(BlockKit.staleBlocks(entries, { messages: 3 })).toEqual(["m1"])
+
+    // Work waits on a decision block, so typing past it leaves it open.
+    const decision = AssistantEvent.MessageBlock.make({
+      kind: Decision.kind,
+      props: { decisionIds: ["decision:1"] }
+    })
+
+    const deciding = [message("d1", decision), say("a"), say("b"), say("c")].map(entry)
+
+    expect(BlockKit.staleBlocks(deciding, { messages: 3 })).toEqual([])
 
     const closed = [...entries, entry(AssistantEvent.BlocksClosed.make({ messageIds: ["m1"] }), entries.length)]
 

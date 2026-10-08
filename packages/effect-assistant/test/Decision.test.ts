@@ -4,6 +4,9 @@
  * that running work asks for, and restarts in between.
  */
 import { describe, expect, it } from "@effect/vitest"
+import * as Response from "effect/ai/Response"
+import * as Tool from "effect/ai/Tool"
+import * as Toolkit from "effect/ai/Toolkit"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
@@ -12,11 +15,8 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
-import * as Response from "effect/unstable/ai/Response"
-import * as Tool from "effect/unstable/ai/Tool"
-import * as Toolkit from "effect/unstable/ai/Toolkit"
-import * as Workflow from "effect/unstable/workflow/Workflow"
-import * as WorkflowEngine from "effect/unstable/workflow/WorkflowEngine"
+import * as Workflow from "effect/workflow/Workflow"
+import * as WorkflowEngine from "effect/workflow/WorkflowEngine"
 import {
   Assistant,
   AssistantEngine,
@@ -49,8 +49,8 @@ import {
   toolsRun,
   traceEntries,
   viewedMessages
-} from "./fixtures.ts"
-import * as Scripted from "./scripted.ts"
+} from "./utils/fixtures.ts"
+import * as Scripted from "./utils/scripted.ts"
 
 const instructions = "You help a small team."
 
@@ -79,7 +79,7 @@ interface Ran {
 const orderTools = Effect.gen(function* () {
   const ran = yield* Ref.make<ReadonlyArray<Ran>>([])
 
-  const toolkit = AssistantLoop.tools(
+  const toolkit = AssistantLoop.fromToolkit(
     Toolkit.make(PlaceOrder),
     {
       place_order: (params) =>
@@ -104,7 +104,10 @@ const orderTools = Effect.gen(function* () {
   return { ran: Ref.get(ran), toolkit }
 })
 
-const Parked = Schema.Struct({ status: Schema.Literal("waiting_for_decision"), decisionId: Schema.String })
+const Parked = Schema.Struct({
+  status: Schema.Literal("waiting_for_decision"),
+  decisionId: Schema.String
+})
 
 /** The decision id of the last parked call in the history. */
 const parkedId = (request: Scripted.Request) =>
@@ -189,6 +192,61 @@ const anotherAnswer = (message: ChatView.AssistantMessage, decisions: Record<str
 
 const waitingFor = (entries: ReadonlyArray<AssistantEvent.Entry>) => asked(entries) !== undefined && idle(entries)
 
+describe("closing a block", () => {
+  /** The order script, until the user asks something else; then a message that tries to close the decision block. */
+  const closingScript: Scripted.Script = (request) => {
+    if (!Scripted.lastInput(request).includes("What's new?")) return orderScript()(request)
+
+    const refused = Scripted.lastResult(request, "send_user_message")
+
+    if (Option.isSome(refused) && refused.value.includes("only their answer"))
+      return Scripted.reply("Still waiting on your decision for the order.")
+
+    const blockMessage = Scripted.toolResults(request)
+      .flatMap((part) => /sent as message ([0-9a-f-]{36})/.exec(Scripted.resultText(part))?.[1] ?? [])
+      .at(-1)
+
+    return [
+      Scripted.call("send_user_message", {
+        text: "Nothing new.",
+        wait: true,
+        closes: blockMessage === undefined ? [] : [blockMessage]
+      })
+    ]
+  }
+
+  it.live("can't close a decision block that still waits for the user", () =>
+    Effect.gen(function* () {
+      const { ran, toolkit } = yield* orderTools
+      const model = yield* Scripted.make(closingScript)
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* Deciding.submit(chat, say("Order 300 totes."))
+        const first = yield* collectUntil(Deciding, chat, waitingFor, "10 seconds")
+
+        yield* Deciding.submit(chat, say("What's new?"))
+        yield* collectUntil(Deciding, chat, (es) => text(es).includes("still waiting") && idle(es), "10 seconds")
+
+        // The block still takes the user's answer, and it places the order.
+        yield* Deciding.submit(chat, answerWith(asked(first)!, "approved"))
+
+        return yield* collectUntil(Deciding, chat, (es) => text(es).includes("placed") && idle(es), "10 seconds")
+      }).pipe(Effect.provide(runMemory(Deciding.toLayer(simple({ instructions, toolkit })), model.layer)))
+
+      const refusals = events
+        .ToolResult(entries)
+        .filter((result) => result.outcome === "failure" && result.tool === "send_user_message")
+
+      expect(failures(entries), traceEntries(entries)).toEqual([])
+      expect(refusals.map((result) => result.kind)).toEqual(["decision_waiting"])
+      expect(events.BlockAnswer(entries)).toHaveLength(1)
+      expect(events.DecisionResolved(entries).map((resolved) => resolved.outcome)).toEqual(["approved"])
+      expect(yield* ran).toHaveLength(1)
+    })
+  )
+})
+
 describe("a call that needs the user's decision", () => {
   it.live("is parked with its preview, and the user's yes runs exactly that call", () =>
     Effect.gen(function* () {
@@ -217,9 +275,13 @@ describe("a call that needs the user's decision", () => {
       const [resolved] = events.DecisionResolved(entries)
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
-      expect(request?.id).toBe(DecisionId.forCall(call!.id))
+      expect(request?.id).toBe(DecisionId.fromCallId(call!.id))
       expect(request?.origin).toEqual(
-        AssistantEvent.CallOrigin.make({ callId: call!.id, tool: "place_order", params: call!.params })
+        AssistantEvent.CallOrigin.make({
+          callId: call!.id,
+          tool: "place_order",
+          params: call!.params
+        })
       )
       expect(request?.preview).toEqual({ sku: "tote", quantity: 300, total: 600 })
       expect(resolved?.outcome).toBe("approved")
@@ -397,7 +459,7 @@ describe("a call that needs the user's decision", () => {
         needsApproval: ({ amount }) => amount > 100
       })
 
-      const toolkit = AssistantLoop.tools(Toolkit.make(Refund), {
+      const toolkit = AssistantLoop.fromToolkit(Toolkit.make(Refund), {
         refund: ({ amount }) => Effect.succeed(`refunded ${amount}`)
       })
 
@@ -588,7 +650,7 @@ describe("a decision that running work asks for", () => {
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
       expect(events.DecisionResolved(entries).map((resolved) => resolved.outcome)).toEqual(["approved"])
-      expect(Decision.states(entries).get(events.DecisionRequested(entries)[0]!.id)).toMatchObject({
+      expect(Decision.fromEntries(entries).get(events.DecisionRequested(entries)[0]!.id)).toMatchObject({
         outcome: "approved",
         resolved: true
       })
@@ -669,8 +731,12 @@ describe("a decision that running work asks for", () => {
         yield* Launcher.submit(
           chat,
           AssistantEvent.DecisionRequested.make({
-            id: DecisionId.forCall("forged"),
-            origin: AssistantEvent.CallOrigin.make({ callId: "forged", tool: "place_order", params: {} }),
+            id: DecisionId.fromCallId("forged"),
+            origin: AssistantEvent.CallOrigin.make({
+              callId: "forged",
+              tool: "place_order",
+              params: {}
+            }),
             preview: null
           })
         )
@@ -692,7 +758,7 @@ describe("a decision that running work asks for", () => {
 
 describe("decisions across a restart", () => {
   const callId = "toolu_parked_1"
-  const decisionId = DecisionId.forCall(callId)
+  const decisionId = DecisionId.fromCallId(callId)
   const params = { sku: "tote", quantity: 300 }
 
   /** What the log holds once a turn parked the call and asked for its decision. */
@@ -700,7 +766,14 @@ describe("decisions across a restart", () => {
     say("Order 300 totes."),
     AssistantEvent.TurnStarted.make({ assistant: Deciding.name }),
     AssistantEvent.ModelOutput.make({
-      parts: [Response.makePart("tool-call", { id: callId, name: "place_order", params, providerExecuted: false })],
+      parts: [
+        Response.makePart("tool-call", {
+          id: callId,
+          name: "place_order",
+          params,
+          providerExecuted: false
+        })
+      ],
       seenThroughSeq: 2
     }),
     AssistantEvent.DecisionRequested.make({
@@ -723,7 +796,10 @@ describe("decisions across a restart", () => {
     AssistantEvent.AssistantMessage.make({
       id: "message-1",
       text: "Place it?",
-      block: AssistantEvent.MessageBlock.make({ kind: Decision.kind, props: { decisionIds: [decisionId] } })
+      block: AssistantEvent.MessageBlock.make({
+        kind: Decision.kind,
+        props: { decisionIds: [decisionId] }
+      })
     }),
     AssistantEvent.ToolResult.make({
       callId: "toolu_ask_1",
@@ -746,7 +822,7 @@ describe("decisions across a restart", () => {
     Effect.gen(function* () {
       const RecordingTools = Toolkit.make(PlaceOrder)
 
-      const toolkit = AssistantLoop.tools(RecordingTools, {
+      const toolkit = AssistantLoop.fromToolkit(RecordingTools, {
         place_order: (order) =>
           Effect.gen(function* () {
             const call = yield* AssistantToolCall.AssistantToolCall
@@ -816,7 +892,11 @@ describe("decisions across a restart", () => {
       yield* log.append(chat, [
         ...parkedLog,
         approve,
-        AssistantEvent.DecisionResolved.make({ id: decisionId, outcome: "approved", answer: approve.id }),
+        AssistantEvent.DecisionResolved.make({
+          id: decisionId,
+          outcome: "approved",
+          answer: approve.id
+        }),
         AssistantEvent.TurnStarted.make({ assistant: Deciding.name }),
         AssistantEvent.ToolStarted.make({ callId, tool: "place_order" })
       ])

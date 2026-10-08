@@ -9,111 +9,7 @@ import { Specialist } from "effect-assistant"
 The `Specialist` module defines specialists: focused agents an assistant
 hands work to, in the background.
 
-A specialist has two parts, like a workflow:
-
-- **Definition**: `make` names it and says when to use it (the
-  assistant sees this). An assistant lists the specialists it can use in
-  its own definition.
-- **Handler**: `toLayer` takes a function of the `Run` that returns
-  the run's loop as a stream, usually `run.loop({ instructions, toolkit })`.
-  The build Effect runs once per chat activation, like an entity's, with
-  the layer's services and `AssistantChat`; the function runs for each
-  brief. A run works in the chat that spawned it: look up whom it works
-  for from `run.chatId`, like the assistant's handler does.
-
-The assistant works with its specialists through three tools:
-
-- `spawn_specialist({ kind, goal, ... })` starts a run with a `Brief`
-  and returns its `runId`. The run works in the background and reports
-  back: its report arrives as a `SpecialistFinished` input, usually
-  within the same turn for quick questions, and the assistant decides what
-  to tell the user.
-- `message_specialist({ runId, message })` sends a run more: a running one
-  reads it at its next step (steering), a finished one continues with
-  everything it found so far (follow-up).
-- `stop_specialist({ runId })` interrupts a running one.
-
-Specialists answer in plain text (the last text the model writes) and
-can't message the user. Runs live with their chat: a restart cuts them
-off (the assistant is told), and a finished run is forgotten after 15
-minutes.
-
-A run calls the assistant's `LanguageModel`, unless the specialist's layer
-is given one of its own, like a smaller model for quick lookups.
-
-**Example** (A research specialist, on its own model)
-
-```ts
-import * as AnthropicLanguageModel from "@effect/ai-anthropic/AnthropicLanguageModel"
-import * as Effect from "effect/Effect"
-import * as Layer from "effect/Layer"
-import * as Stream from "effect/Stream"
-import { Assistant, AssistantLoop, Specialist } from "effect-assistant"
-import { ChatUsers, CurrentUser } from "./CurrentUser.ts"
-import { ResearchTools, ResearchToolsLive } from "./tools.ts" // tools whose handlers yield CurrentUser
-
-const Research = Specialist.make("research", {
-  description: "Researches past campaigns and orders. Give it the question and any context."
-})
-
-const ResearchLive = Research.toLayer(Effect.gen(function*() {
-  const users = yield* ChatUsers // the app's: whose chat is it
-  const toolkit = AssistantLoop.tools(yield* ResearchTools)
-
-  return (run) =>
-    Stream.unwrap(Effect.map(users.forChat(run.chatId), (user) =>
-      run.loop({
-        instructions: "Answer with the findings and numbers the colleague needs, in a few short lines.",
-        toolkit
-      }).pipe(Stream.provideService(CurrentUser, user))))
-})).pipe(Layer.provide([ResearchToolsLive, AnthropicLanguageModel.model("claude-haiku-4-5")]))
-
-const MyAssistant = Assistant.make("my-assistant", { specialists: [Research] })
-```
-
-## Constructors
-
-### make
-
-Defines a specialist: its name, and when to use it.
-
-```ts
-const make: <const Name extends string>(
-  name: Name,
-  options: {
-    /** When to use it. The assistant sees this. */
-    readonly description: string
-  }
-) => Specialist<Name>
-```
-
-<small>Since 0.1.0</small>
-
-## Services
-
-### Runner
-
-Service that runs a chat's specialists and keeps finished runs warm for
-follow-ups. The engine provides it to every turn: the specialist tools use
-it, and so can a handler.
-
-```ts
-class Runner extends Context.Service<
-  Runner,
-  {
-    /** Starts a run and returns its id. */
-    readonly spawn: (request: SpawnRequest) => Effect.Effect<RunId, SpecialistError>
-    /** Steers a running run, or continues a finished one. */
-    readonly message: (runId: string, text: string) => Effect.Effect<"steered" | "continued", SpecialistError>
-    /** Interrupts a running run. */
-    readonly stop: (runId: string) => Effect.Effect<void, SpecialistError>
-  }
->()("effect-assistant/Specialist/Runner")
-```
-
-<small>Since 0.1.0</small>
-
-## Models
+## Other
 
 ### Specialist
 
@@ -140,6 +36,26 @@ interface Specialist<Name extends string = string> {
 
 <small>Since 0.1.0</small>
 
+### CheckServices
+
+What `toLayer` checks a handler against: every service it uses must be one
+the run (or turn) provides, or one its build Effect required (the layer
+provides those). A handler that uses anything else gets this error, naming
+the services.
+
+```ts
+type CheckServices<Undeclared> = [Undeclared] extends [never]
+  ? unknown
+  : {
+      readonly "~undeclaredServices": {
+        readonly error: "The handler uses services that neither the turn provides nor its build Effect requires"
+        readonly services: Undeclared
+      }
+    }
+```
+
+<small>Since 0.1.0</small>
+
 ### Any
 
 Any specialist.
@@ -162,6 +78,16 @@ interface SpecialistHandler<Name extends string> {
 
 <small>Since 0.1.0</small>
 
+### HandlerOf
+
+Returns the handlers these specialists need.
+
+```ts
+type HandlerOf<S> = S extends Specialist<infer Name> ? SpecialistHandler<Name> : never
+```
+
+<small>Since 0.1.0</small>
+
 ### RunServices
 
 Services a run provides to its handler: its chat, the chat's runner, and
@@ -180,7 +106,7 @@ Options for `run.loop`.
 ```ts
 interface LoopOptions<RT = never, RS = never> {
   readonly instructions: string | Instructions.Resolved
-  /** Its tools: `AssistantLoop.tools(toolkit)` of a native toolkit. */
+  /** Its tools: `AssistantLoop.fromToolkit(toolkit)` of a native toolkit. */
   readonly toolkit?: AssistantLoop.Tools<RT> | undefined
   /** Playbooks: a catalog in the prompt, loaded with `load_skill` when a task matches. */
   readonly skills?: ReadonlyArray<Skill<RS>> | undefined
@@ -217,9 +143,6 @@ interface Run {
  * A specialist's handler: runs a brief, as a stream of what the loop did. It
  * may return the stream from an Effect. `R` is what the stream needs, `RE`
  * what the Effect needs.
- *
- * @category models
- * @since 0.1.0
  */
 export type Handler<R = never, RE = R> = (
   run: Run
@@ -231,9 +154,6 @@ export type Handler<R = never, RE = R> = (
  * A specialist's handler as its layer provides it: `open` runs the build for
  * a chat (once per chat activation, see `AssistantChat`), and returns the
  * handler with the layer's services already provided.
- *
- * @category models
- * @since 0.1.0
  */
 export interface Built {
   readonly open: Effect.Effect<
@@ -250,12 +170,7 @@ const toStream = <R, RE>(
     | Effect.Effect<Stream.Stream<AssistantLoop.Event, unknown, R>, unknown, RE>
 ): Stream.Stream<AssistantLoop.Event, unknown, R | RE> => (Effect.isEffect(result) ? Stream.unwrap(result) : result)
 
-/**
- * Defines a specialist: its name, and when to use it.
- *
- * @category constructors
- * @since 0.1.0
- */
+/** Defines a specialist: its name, and when to use it. */
 export const make = <const Name extends string>(
   name: Name,
   options: {
@@ -275,52 +190,43 @@ export const make = <const Name extends string>(
   ): Layer.Layer<SpecialistHandler<Name>, never, any> {
     return Layer.effect(
       Handler,
-      Effect.map(Effect.context(), (context) => ({
-        // The build runs per chat activation, in the chat; here it only keeps the layer's services for it.
-        open: (Effect.isEffect(build) ? build : Effect.succeed(build)).pipe(
-          Effect.map((handler) => (run: Run) => Stream.provideContext(toStream(handler(run)), context)),
-          Effect.provideContext(context),
-          Effect.orDie
-        )
-      }))
+      Effect.gen(function* () {
+        const context = yield* Effect.context()
+
+        return {
+          // The build runs per chat activation, in the chat; here it only keeps the layer's services for it.
+          open: Effect.gen(function* () {
+            const handler = Effect.isEffect(build) ? yield* build : build
+
+            return (run: Run) => Stream.provideContext(toStream(handler(run)), context)
+          }).pipe(Effect.provideContext(context), Effect.orDie)
+        }
+      })
     )
   }
 
   return { [TypeId]: TypeId, name, description: options.description, Handler, toLayer }
 }
 
-/**
- * Schema for what the assistant tells a specialist. Only `goal` is required.
- *
- * @category schemas
- * @since 0.1.0
- */
+/** Schema for what the assistant tells a specialist. Only `goal` is required. */
 export const Brief = Schema.Struct({
   goal: Schema.String.annotate({ description: "What to find out or do." }),
   context: Schema.optional(Schema.String).annotate({
     description: "What it needs to know. It can't see this chat."
   }),
   successCriteria: Schema.optional(Schema.String).annotate({ description: "When it is done." }),
-  report: Schema.optional(Schema.String).annotate({ description: "What to put in the answer, and how." }),
+  report: Schema.optional(Schema.String).annotate({
+    description: "What to put in the answer, and how."
+  }),
   limits: Schema.optional(Schema.String).annotate({
     description: "Hard limits for this job, like read-only or a deadline."
   })
 })
 
-/**
- * A brief.
- *
- * @category models
- * @since 0.1.0
- */
+/** A brief. */
 export type Brief = typeof Brief.Type
 
-/**
- * A request to start a specialist run in the runner's chat.
- *
- * @category models
- * @since 0.1.0
- */
+/** A request to start a specialist run in the runner's chat. */
 export interface SpawnRequest {
   /** The specialist's name. */
   readonly kind: string
@@ -330,9 +236,6 @@ export interface SpawnRequest {
 /**
  * Why a run request can't be done, written for the model: an unknown
  * specialist, a run that's gone, or one that isn't running.
- *
- * @category errors
- * @since 0.1.0
  */
 export class SpecialistError extends Schema.TaggedError<SpecialistError>()("SpecialistError", {
   message: Schema.String
@@ -342,9 +245,6 @@ export class SpecialistError extends Schema.TaggedError<SpecialistError>()("Spec
  * Service that runs a chat's specialists and keeps finished runs warm for
  * follow-ups. The engine provides it to every turn: the specialist tools use
  * it, and so can a handler.
- *
- * @category services
- * @since 0.1.0
  */
 export class Runner extends Context.Service<
   Runner,
@@ -395,6 +295,32 @@ interface Built {
 
 <small>Since 0.1.0</small>
 
+### make
+
+Defines a specialist: its name, and when to use it.
+
+```ts
+const make: <const Name extends string>(
+  name: Name,
+  options: {
+    /** When to use it. The assistant sees this. */
+    readonly description: string
+  }
+) => Specialist<Name>
+```
+
+<small>Since 0.1.0</small>
+
+### Brief
+
+Schema for what the assistant tells a specialist. Only `goal` is required.
+
+```ts
+const Brief = Schema.Struct({ …
+```
+
+<small>Since 0.1.0</small>
+
 ### Brief
 
 A brief.
@@ -419,9 +345,6 @@ interface SpawnRequest {
 /**
  * Why a run request can't be done, written for the model: an unknown
  * specialist, a run that's gone, or one that isn't running.
- *
- * @category errors
- * @since 0.1.0
  */
 export class SpecialistError extends Schema.TaggedError<SpecialistError>()("SpecialistError", {
   message: Schema.String
@@ -431,9 +354,6 @@ export class SpecialistError extends Schema.TaggedError<SpecialistError>()("Spec
  * Service that runs a chat's specialists and keeps finished runs warm for
  * follow-ups. The engine provides it to every turn: the specialist tools use
  * it, and so can a handler.
- *
- * @category services
- * @since 0.1.0
  */
 export class Runner extends Context.Service<
   Runner,
@@ -450,20 +370,6 @@ export class Runner extends Context.Service<
 
 <small>Since 0.1.0</small>
 
-## Schemas
-
-### Brief
-
-Schema for what the assistant tells a specialist. Only `goal` is required.
-
-```ts
-const Brief = Schema.Struct({ …
-```
-
-<small>Since 0.1.0</small>
-
-## Errors
-
 ### SpecialistError
 
 Why a run request can't be done, written for the model: an unknown
@@ -477,41 +383,24 @@ class SpecialistError extends Schema.TaggedError<SpecialistError>()("SpecialistE
 
 <small>Since 0.1.0</small>
 
-## Utility types
+### Runner
 
-### CheckServices
-
-What `toLayer` checks a handler against: every service it uses must be one
-the run (or turn) provides, or one its build Effect required (the layer
-provides those). A handler that uses anything else gets this error, naming
-the services.
-
-**Details**
-
-The build Effect runs once, with the layer's services; the handler runs for
-every brief (or turn). Like Effect AI's `Tool` handlers, the handler can't
-reach for a service nothing provides: yield it in the build Effect, or
-provide it to the loop yourself, like a user looked up from the chat.
+Service that runs a chat's specialists and keeps finished runs warm for
+follow-ups. The engine provides it to every turn: the specialist tools use
+it, and so can a handler.
 
 ```ts
-type CheckServices<Undeclared> = [Undeclared] extends [never]
-  ? unknown
-  : {
-      readonly "~undeclaredServices": {
-        readonly error: "The handler uses services that neither the turn provides nor its build Effect requires"
-        readonly services: Undeclared
-      }
-    }
-```
-
-<small>Since 0.1.0</small>
-
-### HandlerOf
-
-Returns the handlers these specialists need.
-
-```ts
-type HandlerOf<S> = S extends Specialist<infer Name> ? SpecialistHandler<Name> : never
+class Runner extends Context.Service<
+  Runner,
+  {
+    /** Starts a run and returns its id. */
+    readonly spawn: (request: SpawnRequest) => Effect.Effect<RunId, SpecialistError>
+    /** Steers a running run, or continues a finished one. */
+    readonly message: (runId: string, text: string) => Effect.Effect<"steered" | "continued", SpecialistError>
+    /** Interrupts a running run. */
+    readonly stop: (runId: string) => Effect.Effect<void, SpecialistError>
+  }
+>()("effect-assistant/Specialist/Runner")
 ```
 
 <small>Since 0.1.0</small>
