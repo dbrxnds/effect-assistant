@@ -74,7 +74,8 @@ once; `ChatView.fromEntries(entries)` makes one from a log on the server.
   with `at` (epoch milliseconds). An assistant's message has its `block`,
   if it has one: its `kind` and `props`, its `status` (`"open"`,
   `"answered"`, or `"closed"`), the user's `answer`, and for a decision
-  block its `decisions`, each with its `preview` and `outcome`.
+  block its `decisions`, each with its call (`tool` and `params`) and
+  `outcome`.
 - **`activity`**: `working` while a turn runs, or is about to start for
   something that arrived; `specialists`, the ones working (which, since
   when). `ChatView.isIdle(view)` is neither. A workflow waiting on a timer

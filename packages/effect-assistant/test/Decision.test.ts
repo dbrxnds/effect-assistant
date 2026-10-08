@@ -18,7 +18,6 @@ import {
   Assistant,
   AssistantEngine,
   AssistantEvent,
-  AssistantLoop,
   AssistantToolCall,
   BlockKit,
   ChatId,
@@ -45,7 +44,9 @@ import {
   text,
   toolsRun,
   traceEntries,
-  viewedMessages
+  viewedMessages,
+  withHandlers,
+  withTools
 } from "./utils/fixtures.ts"
 import * as Scripted from "./utils/scripted.ts"
 
@@ -72,31 +73,20 @@ interface Ran {
   readonly params: typeof Order.Type
 }
 
-/** `place_order`, recording every run, with a preview that refuses orders over 1000. */
+/** `place_order`, recording every run. */
 const orderTools = Effect.gen(function* () {
   const ran = yield* Ref.make<ReadonlyArray<Ran>>([])
 
-  const toolkit = AssistantLoop.fromToolkit(
-    Toolkit.make(PlaceOrder),
-    {
-      place_order: (params) =>
-        Effect.gen(function* () {
-          const call = yield* AssistantToolCall.AssistantToolCall
-          const key = yield* AssistantToolCall.idempotencyKey
-          yield* Ref.update(ran, (all) => [...all, { callId: call.callId, key, params }])
+  const toolkit = withHandlers(Toolkit.make(PlaceOrder), {
+    place_order: (params) =>
+      Effect.gen(function* () {
+        const call = yield* AssistantToolCall.AssistantToolCall
+        const key = yield* AssistantToolCall.idempotencyKey
+        yield* Ref.update(ran, (all) => [...all, { callId: call.callId, key, params }])
 
-          return { reference: "R-1" }
-        })
-    },
-    {
-      previews: {
-        place_order: ({ sku, quantity }) =>
-          quantity > 1000
-            ? ToolFailure.fail("Too many for one order.")
-            : Effect.succeed({ sku, quantity, total: quantity * 2 })
-      }
-    }
-  )
+        return { reference: "R-1" }
+      })
+  })
 
   return { ran: Ref.get(ran), toolkit }
 })
@@ -229,7 +219,7 @@ describe("closing a block", () => {
         yield* Deciding.submit(chat, answerWith(asked(first)!, "approved"))
 
         return yield* collectUntil(Deciding, chat, (es) => text(es).includes("placed") && idle(es), "10 seconds")
-      }).pipe(Effect.provide(runMemory(Deciding.toLayer(simple({ instructions, toolkit })), model.layer)))
+      }).pipe(Effect.provide(runMemory(Deciding.toLayer(withTools({ instructions, toolkit })), model.layer)))
 
       const refusals = events
         .ToolResult(entries)
@@ -245,7 +235,7 @@ describe("closing a block", () => {
 })
 
 describe("a call that needs the user's decision", () => {
-  it.live("is parked with its preview, and the user's yes runs exactly that call", () =>
+  it.live("is parked, and the user's yes runs exactly that call", () =>
     Effect.gen(function* () {
       const { ran, toolkit } = yield* orderTools
       const model = yield* Scripted.make(orderScript())
@@ -260,7 +250,7 @@ describe("a call that needs the user's decision", () => {
         yield* Deciding.submit(chat, answerWith(asked(first)!, "approved"))
 
         return yield* collectUntil(Deciding, chat, (es) => text(es).includes("placed") && idle(es), "10 seconds")
-      }).pipe(Effect.provide(runMemory(Deciding.toLayer(simple({ instructions, toolkit })), model.layer)))
+      }).pipe(Effect.provide(runMemory(Deciding.toLayer(withTools({ instructions, toolkit })), model.layer)))
 
       const [call] = events
         .ModelOutput(entries)
@@ -280,7 +270,6 @@ describe("a call that needs the user's decision", () => {
           params: call!.params
         })
       )
-      expect(request?.preview).toEqual({ sku: "tote", quantity: 300, total: 600 })
       expect(resolved?.outcome).toBe("approved")
       // The same call, run once, with its id and key: a crash after this runs it again, and the key finds it.
       expect(yield* ran).toEqual([
@@ -299,7 +288,6 @@ describe("a call that needs the user's decision", () => {
       const requests = yield* model.requests
       // Parking didn't end the first turn: the model read the parked result and asked.
       expect(Option.getOrUndefined(Scripted.lastResult(requests[1]!, "place_order"))).toContain("waiting_for_decision")
-      expect(Option.getOrUndefined(Scripted.lastResult(requests[1]!, "place_order"))).toContain('"total":600')
       // After the answer, the model read what was decided, then the call's result.
       const after = Scripted.inputs(requests.at(-1)!)
       expect(after.at(-2)).toContain(`${request!.id}: approved: place_order runs now`)
@@ -320,7 +308,7 @@ describe("a call that needs the user's decision", () => {
 
         return yield* collectUntil(Deciding, chat, (es) => text(es).includes("cancelled") && idle(es), "10 seconds")
       }).pipe(
-        Effect.provide(runMemory(Deciding.toLayer(simple({ instructions, toolkit })), Scripted.layer(orderScript())))
+        Effect.provide(runMemory(Deciding.toLayer(withTools({ instructions, toolkit })), Scripted.layer(orderScript())))
       )
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
@@ -372,7 +360,7 @@ describe("a call that needs the user's decision", () => {
         expect(yield* ran).toHaveLength(1)
       }).pipe(
         Effect.provide(
-          Deciding.toLayer(simple({ instructions, toolkit })).pipe(
+          Deciding.toLayer(withTools({ instructions, toolkit })).pipe(
             Layer.provideMerge(AssistantEngine.layerMemory),
             Layer.provide(Scripted.layer(orderScript()))
           )
@@ -414,37 +402,13 @@ describe("a call that needs the user's decision", () => {
         expect(yield* ran).toHaveLength(resolved[0]?.outcome === "approved" ? 1 : 0)
       }).pipe(
         Effect.provide(
-          Deciding.toLayer(simple({ instructions, toolkit })).pipe(
+          Deciding.toLayer(withTools({ instructions, toolkit })).pipe(
             Layer.provideMerge(AssistantEngine.layerMemory),
             Layer.provide(Scripted.layer(orderScript()))
           )
         )
       )
     }).pipe(Effect.provide(layerStorage))
-  )
-
-  it.live("isn't parked when its preview fails: the model reads why", () =>
-    Effect.gen(function* () {
-      const { ran, toolkit } = yield* orderTools
-
-      const entries = yield* Effect.gen(function* () {
-        const chat = yield* newChat
-        yield* Deciding.submit(chat, say("Order 5000 totes."))
-
-        return yield* collectUntil(Deciding, chat, idle, "10 seconds")
-      }).pipe(
-        Effect.provide(
-          runMemory(Deciding.toLayer(simple({ instructions, toolkit })), Scripted.layer(orderScript(5000)))
-        )
-      )
-
-      const [result] = events.ToolResult(entries).filter((result) => result.tool === "place_order")
-
-      expect(events.DecisionRequested(entries)).toEqual([])
-      expect([result?.outcome, result?.kind]).toEqual(["failure", "ToolFailure"])
-      expect(text(entries)).toContain("didn't work")
-      expect(yield* ran).toEqual([])
-    })
   )
 
   it.live("waits only when its needsApproval says so, for these params", () =>
@@ -456,7 +420,7 @@ describe("a call that needs the user's decision", () => {
         needsApproval: ({ amount }) => amount > 100
       })
 
-      const toolkit = AssistantLoop.fromToolkit(Toolkit.make(Refund), {
+      const toolkit = withHandlers(Toolkit.make(Refund), {
         refund: ({ amount }) => Effect.succeed(`refunded ${amount}`)
       })
 
@@ -471,7 +435,7 @@ describe("a call that needs the user's decision", () => {
         yield* Deciding.submit(chat, say("Refund both."))
 
         return yield* collectUntil(Deciding, chat, idle, "10 seconds")
-      }).pipe(Effect.provide(runMemory(Deciding.toLayer(simple({ instructions, toolkit })), Scripted.layer(script))))
+      }).pipe(Effect.provide(runMemory(Deciding.toLayer(withTools({ instructions, toolkit })), Scripted.layer(script))))
 
       expect(events.ToolResult(entries).map((result) => result.result)).toContain("refunded 20")
       expect(
@@ -514,7 +478,7 @@ describe("a call that needs the user's decision", () => {
         yield* NoBlocks.submit(chat, say("Order 300 totes."))
 
         return yield* collectUntil(NoBlocks, chat, (es) => failures(es).length > 0, "10 seconds")
-      }).pipe(Effect.provide(runMemory(NoBlocks.toLayer(simple({ instructions, toolkit })), Scripted.unused)))
+      }).pipe(Effect.provide(runMemory(NoBlocks.toLayer(withTools({ instructions, toolkit })), Scripted.unused)))
 
       expect(failures(entries)[0]).toContain("add Decision.block")
     })
@@ -531,7 +495,7 @@ describe("a call that needs the user's decision", () => {
         yield* Deciding.submit(chat, answerWith(asked(first)!, "approved"))
         yield* collectUntil(Deciding, chat, (es) => text(es).includes("placed") && idle(es), "10 seconds")
       }).pipe(
-        Effect.provide(runEntity(Deciding.toLayer(simple({ instructions, toolkit })), Scripted.layer(orderScript())))
+        Effect.provide(runEntity(Deciding.toLayer(withTools({ instructions, toolkit })), Scripted.layer(orderScript())))
       )
 
       expect(yield* ran).toHaveLength(1)
@@ -547,7 +511,11 @@ describe("a specialist's call that needs a decision", () => {
       const WithBuyer = Assistant.make("buyer-test", { blocks: Blocks, specialists: [Buyer] })
 
       const handlers = WithBuyer.toLayer(simple({ instructions })).pipe(
-        Layer.provide(Buyer.toLayer((run) => run.loop({ instructions: "Buy it.", toolkit })))
+        Layer.provide(
+          Buyer.toLayer((run) => run.loop({ instructions: "Buy it.", toolkit: toolkit.toolkit })).pipe(
+            Layer.provide(toolkit.toolkit.toLayer(toolkit.handlers))
+          )
+        )
       )
 
       const script: Scripted.Script = (request) => {
@@ -611,8 +579,7 @@ describe("decisions across a restart", () => {
     }),
     AssistantEvent.DecisionRequested.make({
       id: decisionId,
-      origin: AssistantEvent.CallOrigin.make({ callId, tool: "place_order", params }),
-      preview: { total: 600 }
+      origin: AssistantEvent.CallOrigin.make({ callId, tool: "place_order", params })
     }),
     AssistantEvent.ModelOutput.make({
       parts: [
@@ -655,7 +622,7 @@ describe("decisions across a restart", () => {
     Effect.gen(function* () {
       const RecordingTools = Toolkit.make(PlaceOrder)
 
-      const toolkit = AssistantLoop.fromToolkit(RecordingTools, {
+      const toolkit = withHandlers(RecordingTools, {
         place_order: (order) =>
           Effect.gen(function* () {
             const call = yield* AssistantToolCall.AssistantToolCall
@@ -669,7 +636,7 @@ describe("decisions across a restart", () => {
           })
       })
 
-      const handlers = Deciding.toLayer(simple({ instructions, toolkit })).pipe(
+      const handlers = Deciding.toLayer(withTools({ instructions, toolkit })).pipe(
         Layer.provideMerge(AssistantEngine.layerMemory),
         Layer.provide(Scripted.layer(orderScript()))
       )

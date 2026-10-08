@@ -52,11 +52,11 @@ export type Answer = typeof Answer.Type
  * The decision block: approve / decline for decisions waiting for the user.
  * Put it in the assistant's `BlockKit`; an assistant with a tool that needs
  * a decision must have it. The client renders it like any block, with the
- * previews from {@link fromEntries}.
+ * calls from {@link fromEntries}: their tool and params.
  */
 export const block = Block.make(kind, {
   description:
-    "Approve / decline buttons for decisions waiting for the user: a call of yours that waits for their decision, or a <decision> request. The only way such a decision is made: write what they decide on (the preview's key facts), and put the decision ids in decisionIds.",
+    "Approve / decline buttons for decisions waiting for the user: a call of yours that waits for their decision. The only way such a decision is made: write what they decide on (the call's key facts), and put the decision ids in decisionIds.",
   props: Props,
   answer: Answer
 })

@@ -108,8 +108,7 @@ export type CallOrigin = typeof CallOrigin.Type
 /** The user is asked to decide something: approve or decline. */
 export class DecisionRequested extends Schema.TaggedClass<DecisionRequested>()("DecisionRequested", {
   id: DecisionId,
-  origin: CallOrigin,
-  preview: Schema.Json
+  origin: CallOrigin
 }) {}
 
 /**

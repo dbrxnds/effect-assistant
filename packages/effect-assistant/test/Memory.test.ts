@@ -1,10 +1,11 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Prompt from "effect/ai/Prompt"
+import * as Toolkit from "effect/ai/Toolkit"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Stream from "effect/Stream"
-import { type Assistant, AssistantLoop, ChatId, Memory } from "../src/index.ts"
+import { type Assistant, ChatId, Memory } from "../src/index.ts"
 import { collectUntil, newChat, runMemory, say, TestAssistant, turnsDone } from "./utils/fixtures.ts"
 import * as Scripted from "./utils/scripted.ts"
 
@@ -21,7 +22,7 @@ const remembering = Effect.gen(function* () {
 
         return turn.loop({
           instructions: "Be brief.",
-          toolkit: Memory.makeToolkit(scopes),
+          toolkit: Memory.Tools,
           history: (entries) => [
             ...Option.toArray(
               Option.map(memory, (text) => Prompt.userMessage({ content: [Prompt.textPart({ text })] }))
@@ -30,16 +31,17 @@ const remembering = Effect.gen(function* () {
           ]
         })
       })
-    ).pipe(Stream.provideService(Memory.MemoryStore, store))
+    ).pipe(Stream.provideService(Memory.MemoryStore, store), Stream.provideService(Memory.CurrentScopes, scopes))
 })
 
 const run = (script: Scripted.Script) =>
   Effect.gen(function* () {
     const model = yield* Scripted.make(script)
 
-    const layer = runMemory(TestAssistant.toLayer(remembering), model.layer).pipe(
-      Layer.provideMerge(Memory.layerMemory)
-    )
+    const layer = runMemory(
+      TestAssistant.toLayer(remembering).pipe(Layer.provide(Memory.layerTools)),
+      model.layer
+    ).pipe(Layer.provideMerge(Memory.layerMemory))
 
     return { model, layer }
   })
@@ -192,9 +194,7 @@ describe("Memory", () => {
     })
   )
 
-  it("merges with other tools", () => {
-    const tools = AssistantLoop.merge(AssistantLoop.empty, Memory.makeToolkit(scopes))
-
-    expect(tools.definitions.map((tool) => tool.name)).toEqual(["remember", "forget", "recall"])
+  it("is a native toolkit, to merge with the app's", () => {
+    expect(Object.keys(Toolkit.merge(Memory.Tools, Toolkit.make()).tools)).toEqual(["remember", "forget", "recall"])
   })
 })

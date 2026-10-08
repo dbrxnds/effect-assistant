@@ -2,62 +2,50 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Tool from "effect/ai/Tool"
 import * as Toolkit from "effect/ai/Toolkit"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
-import { AssistantEvent, AssistantLoop } from "../src/index.ts"
+import * as Stream from "effect/Stream"
+import { Assistant, AssistantLoop } from "../src/index.ts"
+import { collectUntil, newChat, runMemory, say, toolsRun, turnsDone } from "./utils/fixtures.ts"
+import * as Scripted from "./utils/scripted.ts"
 
-const Public = Tool.make("public_lookup", {
-  description: "Open to everyone.",
+const Lookup = Tool.make("lookup", {
+  description: "Looks a thing up.",
   parameters: Schema.Struct({ id: Schema.String }),
   success: Schema.String
 })
 
-const Secret = Tool.make("secret_lookup", {
-  description: "Not for everyone.",
-  parameters: Schema.Struct({ id: Schema.String }),
-  success: Schema.String
-})
+const LookupTools = Toolkit.make(Lookup)
 
-const tools = AssistantLoop.fromToolkit(Toolkit.make(Public, Secret), {
-  public_lookup: ({ id }) => Effect.succeed(`public ${id}`),
-  secret_lookup: ({ id }) => Effect.succeed(`secret ${id}`)
-})
+const LookupToolsLive = LookupTools.toLayer({ lookup: ({ id }) => Effect.succeed(`found ${id}`) })
 
-const decodeCall = Schema.decodeUnknownSync(AssistantEvent.ToolCallPart)
+const Own = Assistant.make("own-loop-tools")
 
-const call = (name: string) => decodeCall({ type: "tool-call", id: `call_${name}`, name, params: { id: "7" } })
-
-describe("AssistantLoop.only", () => {
-  const admitted = AssistantLoop.only(tools, (tool) => tool.name === "public_lookup")
-
-  it("offers only the tools it admits", () => {
-    expect(admitted.definitions.map((tool) => tool.name)).toEqual(["public_lookup"])
-  })
-
-  it.effect("runs a call to an admitted tool", () =>
+describe("AssistantLoop.run in a turn", () => {
+  it.live("runs the app's native toolkit, with the assistant's own tools next to it", () =>
     Effect.gen(function* () {
-      expect(yield* admitted.run(call("public_lookup"))).toMatchObject({
-        outcome: "success",
-        result: "public 7"
-      })
-    })
-  )
+      const model = Scripted.layer((request) =>
+        Scripted.hasCalled(request, "lookup") ? Scripted.reply("Found it.") : [Scripted.call("lookup", { id: "7" })]
+      )
 
-  it.effect("refuses a call to a tool it doesn't admit, as if it didn't exist", () =>
-    Effect.gen(function* () {
-      expect(yield* admitted.run(call("secret_lookup"))).toMatchObject({
-        outcome: "failure",
-        kind: "ToolNotFoundError"
-      })
-    })
-  )
+      // The handlers come from the layer; leaving out LookupToolsLive is a type error.
+      const handlers = Own.toLayer((turn) =>
+        AssistantLoop.run({
+          instructions: turn.instructions("Be brief."),
+          toolkit: LookupTools,
+          history: turn.history()
+        }).pipe(Stream.concat(turn.replyIfOwed({ instructions: "Be brief." })))
+      ).pipe(Layer.provide(LookupToolsLive))
 
-  it.effect("refuses to decide on or preview a call to a tool it doesn't admit", () =>
-    Effect.gen(function* () {
-      expect(yield* admitted.needsDecision?.(call("secret_lookup"), []) ?? Effect.succeed(false)).toBe(false)
-      expect(yield* admitted.preview?.(call("secret_lookup")) ?? Effect.die("no preview")).toMatchObject({
-        outcome: "failure",
-        kind: "ToolNotFoundError"
-      })
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* Own.submit(chat, say("Look up 7."))
+
+        return yield* collectUntil(Own, chat, (es) => turnsDone(es) >= 1, "10 seconds")
+      }).pipe(Effect.provide(runMemory(handlers, model)))
+
+      // The app's tool ran, and send_user_message, the assistant's own, too.
+      expect(toolsRun(entries)).toEqual(["lookup", "send_user_message"])
     })
   )
 })

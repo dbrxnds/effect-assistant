@@ -136,8 +136,7 @@ export const parkedResult = (
         result: {
           status: "waiting_for_decision",
           decisionId: request.id,
-          preview: request.preview,
-          next: "Not run: it runs only if the user approves it. Send them a message with a decision block for this decisionId that says what they approve (the preview's key facts). Their answer runs it, or declines it."
+          next: "Not run: it runs only if the user approves it. Send them a message with a decision block for this decisionId that says what they approve (the call's key facts). Their answer runs it, or declines it."
         },
         providerExecuted: false
       })

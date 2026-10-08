@@ -70,7 +70,7 @@ type Answer = typeof Answer.Type
 The decision block: approve / decline for decisions waiting for the user.
 Put it in the assistant's `BlockKit`; an assistant with a tool that needs
 a decision must have it. The client renders it like any block, with the
-previews from `fromEntries`.
+calls from `fromEntries`: their tool and params.
 
 ```ts
 const block = Block.make(kind, { …

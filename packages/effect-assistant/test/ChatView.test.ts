@@ -40,9 +40,8 @@ const request = AssistantEvent.DecisionRequested.make({
   origin: AssistantEvent.CallOrigin.make({
     callId: "toolu_quote",
     tool: "quote_order",
-    params: { secret: "internal" }
-  }),
-  preview: { total: 1200 }
+    params: { sku: "tote", quantity: 300 }
+  })
 })
 
 const ask = AssistantEvent.AssistantMessage.make({
@@ -75,7 +74,7 @@ const deciding = [
 ]
 
 describe("ChatView.fromEntries", () => {
-  it("has the messages and their blocks, with a decision's preview and outcome, and nothing internal", () => {
+  it("has the messages and their blocks, with a decision's call and outcome, and nothing internal", () => {
     const shown = view(deciding)
 
     expect(shown.messages).toEqual([
@@ -89,14 +88,16 @@ describe("ChatView.fromEntries", () => {
           props: { decisionIds: [request.id] },
           status: "answered",
           answer: { decisions: { [request.id]: "approved" } },
-          decisions: [{ id: request.id, preview: { total: 1200 }, outcome: "approved" }]
+          decisions: [
+            { id: request.id, tool: "quote_order", params: { sku: "tote", quantity: 300 }, outcome: "approved" }
+          ]
         }
       })
     ])
 
     const json = JSON.stringify(Schema.encodeSync(ChatView.View)(shown))
 
-    for (const internal of ["toolu_quote", "quote_order", "secret", "ModelOutput", "TurnStarted"]) {
+    for (const internal of ["toolu_quote", "ModelOutput", "TurnStarted"]) {
       expect(json).not.toContain(internal)
     }
   })

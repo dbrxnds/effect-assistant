@@ -3,8 +3,7 @@
  *
  * The assistant collects the audience and budget in chat, then calls
  * `start_campaign`, which needs the user's decision: the call waits, and the
- * user sees what they approve (the campaign, office, audience, budget, and
- * the budget left). Their yes runs it: it checks the budget again and starts
+ * user approves the campaign, office, audience, and budget. Their yes runs it: it checks the budget again and starts
  * the `CreateCampaign` workflow, which reports each stage as a `WorkflowStep`:
  *
  * 1. `creative_in_progress`, then `scheduled`;
@@ -182,7 +181,7 @@ const CampaignStarted = Schema.Struct({
  */
 export const StartCampaign = Tool.make("start_campaign", {
   description:
-    "Order a campaign. Needs the product id, the office paying, who it should reach, and the budget in USD. Ask the user for anything missing first. It waits for the user's decision, with the campaign, budget, and the office's budget left; once they approve, it checks the budget again, starts, and reports each stage back as a <workflow> update.",
+    "Order a campaign. Needs the product id, the office paying, who it should reach, and the budget in USD. Ask the user for anything missing first. It waits for the user's decision; once they approve, it checks the budget again, starts, and reports each stage back as a <workflow> update.",
   parameters: Schema.Struct({
     campaignId: Schema.String,
     office: Schema.String.annotate({ description: "The office paying for it, like Amsterdam." }),
@@ -201,8 +200,8 @@ export const StartCampaign = Tool.make("start_campaign", {
 type CampaignInput = typeof StartCampaign.parametersSchema.Type
 
 /**
- * What a campaign order comes to: what the user approves, and what the order
- * checks again when it runs. Fails for an unknown product or office, a budget
+ * Whether a campaign order can go ahead, checked when the approved call
+ * runs. Fails for an unknown product or office, a budget
  * under the product's minimum, or one over the office's budget.
  */
 const check = Effect.fn(function* ({ campaignId, office, audience, budget }: CampaignInput) {
@@ -230,32 +229,6 @@ const check = Effect.fn(function* ({ campaignId, office, audience, budget }: Cam
   }
 
   return { product, location, audience, budget, remainingBudget: officeBudget.remaining - budget }
-})
-
-/**
- * What the user sees before they approve a campaign order, on the orders
- * placed through Acme.
- *
- * @category layers
- * @since 0.1.0
- */
-export const previews = Effect.gen(function* () {
-  const orders = yield* LiveOrders.LiveOrders
-
-  return {
-    start_campaign: (input: CampaignInput) =>
-      check(input).pipe(
-        Effect.map(({ product, location, audience, budget, remainingBudget }) => ({
-          campaign: product.name,
-          office: location.name,
-          audience,
-          budget,
-          channels: product.channels,
-          remainingBudget
-        })),
-        Effect.provideService(LiveOrders.LiveOrders, orders)
-      )
-  }
 })
 
 /**

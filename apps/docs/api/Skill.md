@@ -57,14 +57,3 @@ const withCatalog: <R>(prompt: string, skills: ReadonlyArray<Skill<R>>) => strin
 ```
 
 <small>Since 0.1.0</small>
-
-### toTools
-
-Returns the `load_skill` tool for these skills, or no tools when there are
-none.
-
-```ts
-const toTools: <R>(skills: ReadonlyArray<Skill<R>>) => AssistantLoop.Tools<R>
-```
-
-<small>Since 0.1.0</small>

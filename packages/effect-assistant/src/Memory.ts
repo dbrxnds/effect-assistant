@@ -14,7 +14,6 @@ import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as SqlClient from "effect/sql/SqlClient"
 import { AssistantChat } from "./AssistantChat.ts"
-import * as AssistantLoop from "./AssistantLoop.ts"
 import { ChatId } from "./ChatId.ts"
 import * as Uuid from "./internal/uuid.ts"
 import * as ToolFailure from "./ToolFailure.ts"
@@ -266,6 +265,12 @@ const NOTE_DAYS = 14
 
 const DAY_MILLIS = 24 * 60 * 60 * 1000
 
+/**
+ * Whose memory the tools read and write: a turn provides it, from whom the
+ * chat is for (`Stream.provideService(Memory.CurrentScopes, scopes)`).
+ */
+export class CurrentScopes extends Context.Service<CurrentScopes, Scopes>()("effect-assistant/Memory/CurrentScopes") {}
+
 const Remember = Tool.make("remember", {
   description: `Remember something for later chats. Only what you can't look up again and that will still matter: a preference, a standing decision, how they like to work ("Rotterdam's copy is always Dutch"), as kind profile; short-lived context ("out of office until Friday") as kind note, which expires. Not records your tools can read (orders, locations, budgets, people), not the state of a task in progress, and nothing you'd only need in this chat. One fact per call, in one short sentence that stands on its own. When it changes one you already have, pass that one's id as replaces.`,
   parameters: Schema.Struct({
@@ -283,7 +288,7 @@ const Remember = Tool.make("remember", {
   }),
   success: Schema.String,
   failure: ToolFailure.ToolFailure,
-  dependencies: [AssistantChat, MemoryStore]
+  dependencies: [AssistantChat, MemoryStore, CurrentScopes]
 })
 
 const Forget = Tool.make("forget", {
@@ -291,7 +296,7 @@ const Forget = Tool.make("forget", {
   parameters: Schema.Struct({ id: Schema.String }),
   success: Schema.String,
   failure: ToolFailure.ToolFailure,
-  dependencies: [MemoryStore]
+  dependencies: [MemoryStore, CurrentScopes]
 })
 
 const Recall = Tool.make("recall", {
@@ -300,10 +305,15 @@ const Recall = Tool.make("recall", {
   parameters: Schema.Struct({ query: Schema.String }),
   success: Schema.Array(Schema.String),
   failure: ToolFailure.ToolFailure,
-  dependencies: [MemoryStore]
+  dependencies: [MemoryStore, CurrentScopes]
 })
 
-const MemoryToolkit = Toolkit.make(Remember, Forget, Recall)
+/**
+ * The `remember`, `forget` and `recall` tools. Merge them into the loop's
+ * toolkit, provide {@link layerTools}, and provide {@link CurrentScopes} for
+ * each turn.
+ */
+export const Tools = Toolkit.make(Remember, Forget, Recall)
 
 const words = (text: string): ReadonlyArray<string> =>
   text
@@ -321,74 +331,73 @@ const matches = (fact: Fact, query: ReadonlyArray<string>): number => {
 const lastDay = (until: string): Option.Option<number> =>
   Option.map(DateTime.make(`${until}T23:59:59Z`), DateTime.toEpochMillis)
 
-/**
- * The `remember`, `forget` and `recall` tools, over these scopes. They need
- * the {@link MemoryStore}.
- */
-export const makeToolkit = (scopes: Scopes): AssistantLoop.Tools<MemoryStore | AssistantChat> =>
-  AssistantLoop.fromToolkit(MemoryToolkit, {
-    remember: Effect.fnUntraced(function* ({ text, kind, team, until, replaces }) {
-      const store = yield* MemoryStore
-      const chat = yield* AssistantChat
-      const now = yield* Clock.currentTimeMillis
-      const scope = team === true ? scopes.shared : scopes.personal
+/** Layer for the {@link Tools}' handlers. They use the {@link MemoryStore} and the turn's {@link CurrentScopes}. */
+export const layerTools = Tools.toLayer({
+  remember: Effect.fnUntraced(function* ({ text, kind, team, until, replaces }) {
+    const scopes = yield* CurrentScopes
+    const store = yield* MemoryStore
+    const chat = yield* AssistantChat
+    const now = yield* Clock.currentTimeMillis
+    const scope = team === true ? scopes.shared : scopes.personal
 
-      if (scope === undefined) {
-        return yield* ToolFailure.fail("There's no team memory here: remember it for them.")
-      }
+    if (scope === undefined) {
+      return yield* ToolFailure.fail("There's no team memory here: remember it for them.")
+    }
 
-      const expiresAt =
-        kind === "profile"
-          ? Option.none<number>()
-          : until === undefined
-            ? Option.some(now + NOTE_DAYS * DAY_MILLIS)
-            : lastDay(until)
+    const expiresAt =
+      kind === "profile"
+        ? Option.none<number>()
+        : until === undefined
+          ? Option.some(now + NOTE_DAYS * DAY_MILLIS)
+          : lastDay(until)
 
-      if (kind === "note" && Option.isNone(expiresAt)) {
-        return yield* ToolFailure.fail(`until must be a date as YYYY-MM-DD, not ${until}.`)
-      }
+    if (kind === "note" && Option.isNone(expiresAt)) {
+      return yield* ToolFailure.fail(`until must be a date as YYYY-MM-DD, not ${until}.`)
+    }
 
-      const existing = yield* store.list(scopeKeys(scopes), now)
-      const same = existing.find((fact) => fact.scope === scope && fact.text.trim() === text.trim())
+    const existing = yield* store.list(scopeKeys(scopes), now)
+    const same = existing.find((fact) => fact.scope === scope && fact.text.trim() === text.trim())
 
-      if (replaces !== undefined) yield* store.remove(scopeKeys(scopes), replaces)
+    if (replaces !== undefined) yield* store.remove(scopeKeys(scopes), replaces)
 
-      const id = same?.id ?? `f-${(yield* Uuid.make).slice(0, 8)}`
+    const id = same?.id ?? `f-${(yield* Uuid.make).slice(0, 8)}`
 
-      yield* store.put(
-        new Fact({
-          id,
-          scope,
-          kind,
-          text: text.trim(),
-          chatId: chat.chatId,
-          at: now,
-          expiresAt: Option.getOrNull(expiresAt)
-        })
+    yield* store.put(
+      new Fact({
+        id,
+        scope,
+        kind,
+        text: text.trim(),
+        chatId: chat.chatId,
+        at: now,
+        expiresAt: Option.getOrNull(expiresAt)
+      })
+    )
+
+    return `Remembered as ${id}.`
+  }),
+  forget: Effect.fnUntraced(function* ({ id }) {
+    const scopes = yield* CurrentScopes
+    const store = yield* MemoryStore
+
+    return (yield* store.remove(scopeKeys(scopes), id))
+      ? `Forgot ${id}.`
+      : yield* ToolFailure.fail(`Nothing remembered as ${id}.`)
+  }),
+  recall: Effect.fnUntraced(function* ({ query }) {
+    const scopes = yield* CurrentScopes
+    const all = yield* facts(scopes)
+    const wanted = words(query)
+
+    return all
+      .map((fact) => ({ fact, score: matches(fact, wanted) }))
+      .filter(({ score }) => score > 0)
+      .sort((a, b) => b.score - a.score || newestFirst(a.fact, b.fact))
+      .slice(0, 10)
+      .map(({ fact }) =>
+        fact.kind === "log"
+          ? `${day(fact.at)} (chat): ${fact.text}`
+          : `[${fact.id}] ${fact.text} (${fact.kind}${fact.scope === scopes.personal ? "" : ", team"})`
       )
-
-      return `Remembered as ${id}.`
-    }),
-    forget: Effect.fnUntraced(function* ({ id }) {
-      const store = yield* MemoryStore
-
-      return (yield* store.remove(scopeKeys(scopes), id))
-        ? `Forgot ${id}.`
-        : yield* ToolFailure.fail(`Nothing remembered as ${id}.`)
-    }),
-    recall: Effect.fnUntraced(function* ({ query }) {
-      const all = yield* facts(scopes)
-      const wanted = words(query)
-
-      return all
-        .map((fact) => ({ fact, score: matches(fact, wanted) }))
-        .filter(({ score }) => score > 0)
-        .sort((a, b) => b.score - a.score || newestFirst(a.fact, b.fact))
-        .slice(0, 10)
-        .map(({ fact }) =>
-          fact.kind === "log"
-            ? `${day(fact.at)} (chat): ${fact.text}`
-            : `[${fact.id}] ${fact.text} (${fact.kind}${fact.scope === scopes.personal ? "" : ", team"})`
-        )
-    })
   })
+})

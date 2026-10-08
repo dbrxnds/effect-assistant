@@ -129,14 +129,14 @@ or their results: they're its own work. It sends a message by calling
 ## Give it a tool
 
 Tools are Effect's own (`effect/ai/Tool`): a name, a description,
-schemas for the parameters and the result, and a handler. `AssistantLoop.fromToolkit`
-turns a toolkit and its handlers into tools for `turn.loop`.
+schemas for the parameters and the result. A toolkit groups them, and its
+handlers are a layer: pass the toolkit to `turn.loop`, and provide the layer.
 
 **Example** (A weather tool)
 
 ```ts
-import { AssistantLoop } from "effect-assistant"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as Tool from "effect/ai/Tool"
 import * as Toolkit from "effect/ai/Toolkit"
@@ -147,13 +147,15 @@ const GetWeather = Tool.make("get_weather", {
   success: Schema.Struct({ city: Schema.String, weather: Schema.String })
 })
 
-const toolkit = AssistantLoop.fromToolkit(Toolkit.make(GetWeather), {
+const WeatherTools = Toolkit.make(GetWeather)
+
+const WeatherToolsLive = WeatherTools.toLayer({
   get_weather: ({ city }) => Effect.succeed({ city, weather: "sunny, 21°C" })
 })
 
 const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
-  turn.loop({ instructions: "You help a small marketing team. Be brief.", toolkit })
-)
+  turn.loop({ instructions: "You help a small marketing team. Be brief.", toolkit: WeatherTools })
+).pipe(Layer.provide(WeatherToolsLive))
 ```
 
 Ask it "What's the weather in Oslo?" and it calls `get_weather`, then tells

@@ -22,7 +22,7 @@ export const BlockContext = createContext<BlockContextValue>({
   respond: () => {}
 })
 
-/** A preview's fields, one per line: what the user decides on. */
+/** A call's params, one per line: what the user decides on. */
 function Preview(props: { readonly value: unknown }) {
   if (!Predicate.isObject(props.value) || Array.isArray(props.value)) return null
 
@@ -53,7 +53,7 @@ function DecisionBlock(props: {
   return (
     <div className="block-decision">
       {props.decisions.map((decision) => (
-        <Preview key={decision.id} value={decision.preview} />
+        <Preview key={decision.id} value={decision.params} />
       ))}
       <ChooseOne
         options={[approve, decline]}

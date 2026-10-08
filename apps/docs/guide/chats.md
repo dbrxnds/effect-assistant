@@ -91,7 +91,9 @@ const Greet = Tool.make("greet", {
 
 const greet = () => CurrentUser.useSync((user) => `hi ${user.name}`)
 
-const toolkit = AssistantLoop.fromToolkit(Toolkit.make(Greet), { greet })
+const UserTools = Toolkit.make(Greet)
+
+const UserToolsLive = UserTools.toLayer({ greet })
 
 const MyAssistantLive = MyAssistant.toLayer(
   Effect.gen(function* () {
@@ -100,11 +102,13 @@ const MyAssistantLive = MyAssistant.toLayer(
     return (turn) =>
       Stream.unwrap(
         Effect.map(users.forChat(turn.chatId), (user) =>
-          turn.loop({ instructions: `You help ${user.name}.`, toolkit }).pipe(Stream.provideService(CurrentUser, user))
+          turn
+            .loop({ instructions: `You help ${user.name}.`, toolkit: UserTools })
+            .pipe(Stream.provideService(CurrentUser, user))
         )
       )
   })
-)
+).pipe(Layer.provide(UserToolsLive))
 ```
 
 This works for every turn, however it started: a user's message, a
@@ -135,23 +139,19 @@ const MyAssistantLive = MyAssistant.toLayer(
     return (turn) =>
       Stream.unwrap(
         Effect.map(users.forChat(turn.chatId), (user) =>
-          turn
-            .loop({
-              instructions,
-              toolkit: user.admin
-                ? AssistantLoop.fromToolkit(Toolkit.make(AdminReport, Greet), { admin_report: adminReport, greet })
-                : AssistantLoop.fromToolkit(Toolkit.make(Greet), { greet })
-            })
-            .pipe(Stream.provideService(CurrentUser, user))
+          (user.admin
+            ? turn.loop({ instructions, toolkit: AdminTools }) // Toolkit.make(AdminReport, Greet)
+            : turn.loop({ instructions, toolkit: UserTools })
+          ).pipe(Stream.provideService(CurrentUser, user))
         )
       )
   })
-)
+).pipe(Layer.provide(AdminToolsLive)) // both toolkits' handlers: admin_report and greet
 ```
 
 The model only sees the tools the turn got, so it can't call one the user
-may not use. Tools found on demand work the same way: build
-`ToolDiscovery.make(...)` over the tools the user may use. Still check
+may not use. A [catalog](./tools#many-tools-a-catalog) works the same
+way: pass the one for the tools the user may use. Still check
 permissions in the tool, or in the service it calls, if that's where the
 rest of your app enforces them.
 
@@ -164,7 +164,6 @@ handler does the same lookup from `run.chatId`:
 const ResearchLive = Research.toLayer(
   Effect.gen(function* () {
     const users = yield* ChatUsers
-    const toolkit = AssistantLoop.fromToolkit(yield* OrderTools)
 
     return (run) =>
       Stream.unwrap(
@@ -172,7 +171,7 @@ const ResearchLive = Research.toLayer(
           run
             .loop({
               instructions: "Answer with the findings and numbers the colleague needs, in a few short lines.",
-              toolkit
+              toolkit: OrderTools
             })
             .pipe(Stream.provideService(CurrentUser, user))
         )

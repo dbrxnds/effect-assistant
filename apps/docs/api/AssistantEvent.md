@@ -175,8 +175,7 @@ The user is asked to decide something: approve or decline.
 ```ts
 class DecisionRequested extends Schema.TaggedClass<DecisionRequested>()("DecisionRequested", {
   id: DecisionId,
-  origin: CallOrigin,
-  preview: Schema.Json
+  origin: CallOrigin
 })
 ```
 

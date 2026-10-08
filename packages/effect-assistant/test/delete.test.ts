@@ -9,8 +9,18 @@ import * as Predicate from "effect/Predicate"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { Assistant, AssistantEvent, AssistantLoop, ChatId, ChatLog, Chats, Specialist } from "../src/index.ts"
-import { collectUntil, newChat, runEntity, runMemory, say, turnsDone, update, UpdateEvent } from "./utils/fixtures.ts"
+import { Assistant, AssistantEvent, ChatId, ChatLog, Chats, Specialist } from "../src/index.ts"
+import {
+  collectUntil,
+  newChat,
+  runEntity,
+  runMemory,
+  say,
+  turnsDone,
+  update,
+  UpdateEvent,
+  withHandlers
+} from "./utils/fixtures.ts"
 import * as Scripted from "./utils/scripted.ts"
 
 const engines = { memory: runMemory, cluster: runEntity }
@@ -200,7 +210,7 @@ for (const [name, run] of Object.entries(engines)) {
         // The model's first call closes the chat in the app; the second never comes.
         const Close = Tool.make("close_chat", { description: "Closes the chat.", success: Schema.String })
 
-        const toolkit = AssistantLoop.fromToolkit(Toolkit.make(Close), {
+        const toolkit = withHandlers(Toolkit.make(Close), {
           close_chat: () =>
             Ref.get(chatRef).pipe(
               Effect.flatMap((chat) => (chat === undefined ? Effect.void : chats.remove(chat))),
@@ -209,7 +219,8 @@ for (const [name, run] of Object.entries(engines)) {
         })
 
         const layer = run(
-          Deleting.toLayer((turn) => turn.loop({ instructions: "Be brief.", toolkit })).pipe(
+          Deleting.toLayer((turn) => turn.loop({ instructions: "Be brief.", toolkit: toolkit.toolkit })).pipe(
+            Layer.provide(toolkit.toolkit.toLayer(toolkit.handlers)),
             Layer.provide(slowLive(yield* signals))
           ),
           Scripted.layer((request) =>

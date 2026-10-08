@@ -10,7 +10,6 @@ stream.
 | Piece                                           | What it is                                                                                       |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | `turn.instructions(text)`                       | The full system prompt: `Instructions.protocol`, your text, and the specialist runs working now. |
-| `turn.tools`                                    | The assistant's own tools: `send_user_message`, `wait`, and the specialist tools.                |
 | `turn.history(view?)`                           | The model's history from the chat's entries: all of them, or what a view keeps.                  |
 | `turn.entries`                                  | The chat's entries, with the assistant's own events decoded.                                     |
 | [`AssistantLoop.step`](/api/AssistantLoop#step) | One step: call the model, run its tool calls.                                                    |
@@ -18,7 +17,10 @@ stream.
 | `turn.replyIfOwed(...)`                         | One more pass, reply-only, when the user's latest message has no reply.                          |
 
 `turn.loop` is `AssistantLoop.run` with these wired in, the skill catalog,
-and a tool call required at every step, followed by `turn.replyIfOwed`.
+and a tool call required at every step, followed by `turn.replyIfOwed`. In a
+turn, `AssistantLoop.step` and `run` add the assistant's own tools
+(`send_user_message`, `wait`, the specialist tools) to the toolkit you pass,
+so a loop of your own can message the user. A specialist's run has none.
 
 ## A loop of your own
 
@@ -44,7 +46,7 @@ const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
     AssistantLoop.step(
       {
         instructions: turn.instructions(instructions),
-        toolkit: AssistantLoop.merge(turn.tools, toolkit),
+        toolkit: MyTools, // the assistant's own tools come with them
         history: turn.history(),
         toolChoice: "required"
       },
@@ -52,7 +54,7 @@ const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
         result.done || state.steps >= 12 ? AssistantLoop.stop() : AssistantLoop.next({ steps: state.steps + 1 })
     )
   ).pipe(Stream.concat(turn.replyIfOwed({ instructions })))
-)
+).pipe(Layer.provide(MyToolsLive))
 ```
 
 The loop's state is yours: step limits, budgets, anything `then` decides on.

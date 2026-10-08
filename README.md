@@ -39,16 +39,7 @@ is `ANTHROPIC_API_KEY`.
 ```ts
 import * as AnthropicClient from "@effect/ai-anthropic/AnthropicClient"
 import * as AnthropicLanguageModel from "@effect/ai-anthropic/AnthropicLanguageModel"
-import {
-  Assistant,
-  AssistantEngine,
-  AssistantEvent,
-  AssistantLoop,
-  ChatId,
-  ChatLog,
-  ChatView,
-  InputId
-} from "effect-assistant"
+import { Assistant, AssistantEngine, AssistantEvent, ChatId, ChatLog, ChatView, InputId } from "effect-assistant"
 import * as Tool from "effect/ai/Tool"
 import * as Toolkit from "effect/ai/Toolkit"
 import * as Config from "effect/Config"
@@ -63,21 +54,23 @@ import * as Stream from "effect/Stream"
 // 1. The definition. Your server and UI import it to submit and subscribe.
 export const MyAssistant = Assistant.make("my-assistant")
 
-// 2. A native Effect tool, with its handler.
+// 2. A native Effect toolkit, and its handlers as a layer.
 const GetWeather = Tool.make("get_weather", {
   description: "Current weather for a city.",
   parameters: Schema.Struct({ city: Schema.String }),
   success: Schema.Struct({ city: Schema.String, weather: Schema.String })
 })
 
-const toolkit = AssistantLoop.fromToolkit(Toolkit.make(GetWeather), {
+const WeatherTools = Toolkit.make(GetWeather)
+
+const WeatherToolsLive = WeatherTools.toLayer({
   get_weather: ({ city }) => Effect.succeed({ city, weather: "sunny, 21°C" })
 })
 
-// 3. The handler. Every turn runs the agent loop.
+// 3. The handler. Every turn runs the agent loop, with the toolkit next to the assistant's own tools.
 const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
-  turn.loop({ instructions: "You help a small team. Be brief.", toolkit })
-)
+  turn.loop({ instructions: "You help a small team. Be brief.", toolkit: WeatherTools })
+).pipe(Layer.provide(WeatherToolsLive)) // leaving this out is a type error
 
 // 4. The model the loop calls. Any LanguageModel works.
 const ModelLive = AnthropicLanguageModel.model("claude-sonnet-5-5").pipe(
@@ -258,8 +251,8 @@ demo serves all of this over an Effect RPC WebSocket
 ### Ask before acting: decisions
 
 A tool with Effect's `needsApproval` doesn't run when the model calls it.
-The call waits, with a preview, until the user approves or declines it in a
-decision block. Only that answer runs the call.
+The call waits until the user approves or declines it in a decision block.
+Only that answer runs the call, exactly as the model made it.
 
 ```ts
 import { BlockKit, Decision } from "effect-assistant"
@@ -274,15 +267,19 @@ const PlaceOrder = Tool.make("place_order", {
   needsApproval: true // or a function of the params
 })
 
-const orders = AssistantLoop.fromToolkit(
-  Toolkit.make(PlaceOrder),
-  { place_order: () => Effect.succeed({ reference: "R-1042" }) },
-  // What the user sees before they decide.
-  { previews: { place_order: ({ sku, quantity }) => Effect.succeed({ sku, quantity, total: quantity * 2.5 }) } }
-)
+const OrderTools = Toolkit.make(PlaceOrder)
 
-const ShopHandlers = Shop.toLayer((turn) => turn.loop({ instructions, toolkit: orders }))
+const OrderToolsLive = OrderTools.toLayer({ place_order: () => Effect.succeed({ reference: "R-1042" }) })
+
+const ShopHandlers = Shop.toLayer((turn) => turn.loop({ instructions, toolkit: OrderTools })).pipe(
+  Layer.provide(OrderToolsLive)
+)
 ```
+
+What the user sees about the call is your app's: the view gives the client
+the paused call's `tool` and `params`, and it shows them as it likes (or
+looks up more, like a quote). The tool checks everything again when it
+runs.
 
 Work that needs approval asks before it starts: put `needsApproval` on the
 tool that starts the workflow. See [decisions](./apps/docs/guide/decisions.md).
@@ -319,7 +316,7 @@ const renderBlock = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
   decision: ({ props, open, decisions, respond }) => (
     <div>
       {decisions.map((decision) => (
-        <pre key={decision.id}>{JSON.stringify(decision.preview)}</pre>
+        <pre key={decision.id}>{JSON.stringify(decision.params)}</pre>
       ))}
       <button disabled={!open} onClick={() => respond(Decision.answerAll(props, "approved"))}>
         Approve
@@ -369,11 +366,12 @@ its layer. See [specialists](./apps/docs/guide/specialists.md).
 
 A skill is a playbook. Only its name and a single line appear in the
 prompt, and the model loads the rest with `load_skill` when a task matches.
-`ToolDiscovery.make` turns a large toolkit into `search_tools` and
-`execute_tool`, so the prompt doesn't carry every tool definition.
+A `catalog` is a large toolkit the model searches instead: it gets
+`search_tools` and `execute_tool` over it, so the prompt doesn't carry
+every tool definition.
 
 ```ts
-import { Skill, ToolDiscovery } from "effect-assistant"
+import { Skill } from "effect-assistant"
 
 const reorder = Skill.make({
   name: "reorder",
@@ -382,17 +380,13 @@ const reorder = Skill.make({
 })
 
 MyAssistant.toLayer((turn) =>
-  turn.loop({
-    instructions,
-    toolkit: AssistantLoop.merge(coreTools, ToolDiscovery.make(catalog)),
-    skills: [reorder]
-  })
-)
+  turn.loop({ instructions, toolkit: CoreTools, catalog: AllOtherTools, skills: [reorder] })
+).pipe(Layer.provide([CoreToolsLive, AllOtherToolsLive]))
 ```
 
 A skill's `instructions` can be an Effect, resolved each time it loads, for
-example from a prompt store. `AssistantLoop.only(tools, predicate)` hides
-tools a user may not use. See [skills](./apps/docs/guide/skills.md) and
+example from a prompt store. To give a user fewer tools, build a smaller
+`Toolkit.make(...)` for their turn. See [skills](./apps/docs/guide/skills.md) and
 [tools](./apps/docs/guide/tools.md).
 
 ### Your own events: webhooks, workflows, drafts
@@ -487,19 +481,20 @@ const MyAssistantHandlers = MyAssistant.toLayer(
           return Stream.concat(
             turn.loop({
               instructions: `You help ${user.name}. Be brief.\n\n${remembered}`,
-              toolkit: AssistantLoop.merge(toolkit, Memory.makeToolkit(scopes)),
+              toolkit: Toolkit.merge(WeatherTools, Memory.Tools),
               history: sinceSummary
             }),
             // After the reply, so the user doesn't wait for it.
             Stream.drain(Stream.fromEffect(compact))
           ).pipe(
             Stream.provideService(CurrentUser, user), // for tools that declare it as a dependency
+            Stream.provideService(Memory.CurrentScopes, scopes), // whose memory the tools read and write
             Stream.provideService(Memory.MemoryStore, store)
           )
         })
       )
   })
-)
+).pipe(Layer.provide([WeatherToolsLive, Memory.layerTools]))
 ```
 
 A prompt that changes between turns breaks the provider's prompt cache.

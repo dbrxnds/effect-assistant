@@ -34,7 +34,6 @@ nothing the model writes reaches you unless it chooses to send it.
 | [`AssistantLoop`](/api/AssistantLoop)                              | The agent loop, as a stream a handler returns, changes, or replaces.    |
 | [`Specialist`](/api/Specialist)                                    | Focused agents the assistant hands work to, in the background.          |
 | [`Skill`](/api/Skill)                                              | Playbooks the assistant loads when a task matches.                      |
-| [`ToolDiscovery`](/api/ToolDiscovery)                              | Search-and-run for tool catalogs too big for the prompt.                |
 | [`ToolFailure`](/api/ToolFailure)                                  | A tool's failure, as a message the model reads.                         |
 | [`Block`](/api/Block), [`BlockKit`](/api/BlockKit)                 | Small UI in messages: options, inputs.                                  |
 | [`Decision`](/api/Decision)                                        | What the user approves or declines: a parked tool call.                 |

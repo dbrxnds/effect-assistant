@@ -37,5 +37,4 @@ import * as Assistant from "effect-assistant/Assistant"
 - [RunId](./RunId)
 - [Skill](./Skill)
 - [Specialist](./Specialist)
-- [ToolDiscovery](./ToolDiscovery)
 - [ToolFailure](./ToolFailure)

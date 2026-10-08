@@ -28,9 +28,7 @@ until it loads the skill.
 Skill instructions can be [managed prompts](./instructions): an Effect is
 resolved each time the skill is loaded, with the services the handler
 provides to its loop (like a user it [looked up](./chats)), so a skill can be
-tailored to the user. A specialist's `run.loop` takes `skills` the same way, and
-`Skill.withCatalog` and `Skill.toTools` give a custom loop the catalog and
-`load_skill`.
+tailored to the user. A specialist's `run.loop` takes `skills` the same way.
 
 ## Skills, tools, or specialists?
 

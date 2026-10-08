@@ -205,8 +205,7 @@ describe("History.fromEntries, decisions", () => {
     }),
     AssistantEvent.DecisionRequested.make({
       id,
-      origin: AssistantEvent.CallOrigin.make({ callId: "a", tool: "place_order", params }),
-      preview: { total: 600 }
+      origin: AssistantEvent.CallOrigin.make({ callId: "a", tool: "place_order", params })
     }),
     ModelOutput.make({ parts: [call("b", "send_user_message")], seenThroughSeq: 4 }),
     result("b", "send_user_message"),
@@ -237,7 +236,7 @@ describe("History.fromEntries, decisions", () => {
       message.role === "user" ? [message.content.map((part) => (part.type === "text" ? part.text : "")).join("")] : []
     )
 
-  it("answers a parked call with its decision: waiting, with the decision's id and the preview", () => {
+  it("answers a parked call with its decision: waiting, with the decision's id", () => {
     const history = fromEntries(entries(parked))
 
     const [first] = history.flatMap((message) =>
@@ -254,8 +253,7 @@ describe("History.fromEntries, decisions", () => {
     expect(first?.isFailure).toBe(false)
     expect(first?.result).toMatchObject({
       status: "waiting_for_decision",
-      decisionId: id,
-      preview: { total: 600 }
+      decisionId: id
     })
     // Parked is answered: the loop doesn't run it again.
     expect(History.unansweredCalls(history)).toEqual([])

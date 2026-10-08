@@ -13,8 +13,9 @@ gets, and all it gets.
 
 ### Decision
 
-Schema for a decision as the user sees it on a decision block: what they
-decide on (the preview), and how they decided, once they did.
+Schema for a decision as the user sees it on a decision block: the call
+it's for (its tool and params, which the app shows as it likes), and how
+they decided, once they did.
 
 ```ts
 const Decision = Schema.Struct({ …
@@ -345,17 +346,12 @@ const folding = (wakes: ReadonlySet<string>): Folding => {
     const shown = ids.flatMap((id) => {
       const decision = decisions.get(id)
 
-      return decision === undefined
-        ? []
-        : [
-            decision.outcome === undefined
-              ? { id: decision.request.id, preview: decision.request.preview }
-              : {
-                  id: decision.request.id,
-                  preview: decision.request.preview,
-                  outcome: decision.outcome
-                }
-          ]
+      if (decision === undefined) return []
+
+      const { tool, params } = decision.request.origin
+      const shown = { id: decision.request.id, tool, params }
+
+      return [decision.outcome === undefined ? shown : { ...shown, outcome: decision.outcome }]
     })
 
     const block: Block = { kind: message.block.kind, props: toJson(message.block.props), status }

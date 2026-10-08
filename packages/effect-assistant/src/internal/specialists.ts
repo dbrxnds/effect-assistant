@@ -22,10 +22,13 @@ import * as Semaphore from "effect/Semaphore"
 import * as Stream from "effect/Stream"
 import { AssistantChat } from "../AssistantChat.ts"
 import * as AssistantEvent from "../AssistantEvent.ts"
-import * as AssistantLoop from "../AssistantLoop.ts"
+import type * as AssistantLoop from "../AssistantLoop.ts"
+import * as Loop from "./loop.ts"
 import * as InputId from "../InputId.ts"
 import * as RunId from "../RunId.ts"
 import * as Skill from "../Skill.ts"
+import * as Discovery from "./discovery.ts"
+import * as Skills from "./skills.ts"
 import * as Specialist from "../Specialist.ts"
 import * as ToolFailure from "../ToolFailure.ts"
 import * as Decisions from "./decisions.ts"
@@ -91,9 +94,12 @@ export const runBrief = Effect.fnUntraced(
       loop: (loop) => {
         const skills = loop.skills ?? []
 
-        return AssistantLoop.run({
+        return Loop.run({
           instructions: mapText(loop.instructions, (text) => Skill.withCatalog(text, skills)),
-          toolkit: Toolkits.merge(Skill.toTools(skills), loop.toolkit ?? Toolkits.empty),
+          toolkit: Toolkits.merge(
+            Skills.toTools(skills),
+            Toolkits.merge(Toolkits.fromToolkitOrEmpty(loop.toolkit), Toolkits.catalogOf(loop.catalog, Discovery.make))
+          ),
           history: current,
           maxSteps: loop.maxSteps ?? 8
         })
@@ -187,7 +193,7 @@ const refused = <A, R>(effect: Effect.Effect<A, Specialist.SpecialistError, R>) 
  */
 export const toolkit = Effect.fnUntraced(function* (
   specialists: ReadonlyArray<Specialist.Any>
-): Effect.fn.Return<AssistantLoop.Tools<Specialist.Runner>> {
+): Effect.fn.Return<Toolkits.Tools<Specialist.Runner>> {
   if (specialists.length === 0) return Toolkits.empty
 
   const catalog = specialists.map((specialist) => `- ${specialist.name}: ${specialist.description}`).join("\n")
@@ -286,6 +292,8 @@ export const makeRunner = Effect.fnUntraced(function* (options: {
       Effect.provideContext(Context.merge(options.model, services)),
       // Spawned from a turn, a run would inherit the turn's decisions: it can't park a call or run an approved one.
       Effect.provideService(Decisions.TurnDecisions, Option.none()),
+      // Nor its own tools: a run can't message the user.
+      Effect.provideService(Loop.TurnTools, Option.none()),
       Effect.matchCause({
         onSuccess: (answer): Outcome => ({ status: "answered", report: answer }),
         onFailure: unanswered

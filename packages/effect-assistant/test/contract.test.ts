@@ -24,7 +24,6 @@ import {
   Assistant,
   AssistantEngine,
   AssistantEvent,
-  AssistantLoop,
   AssistantToolCall,
   Block,
   BlockKit,
@@ -49,7 +48,9 @@ import {
   toolsRun,
   traceEntries,
   turnsDone,
-  viewedMessages
+  viewedMessages,
+  withHandlers,
+  withTools
 } from "./utils/fixtures.ts"
 import { realModel } from "./utils/realModel.ts"
 
@@ -61,7 +62,7 @@ const GetWeather = Tool.make("get_weather", {
   success: Schema.Struct({ city: Schema.String, weather: Schema.String })
 })
 
-const weather = AssistantLoop.fromToolkit(Toolkit.make(GetWeather), {
+const weather = withHandlers(Toolkit.make(GetWeather), {
   get_weather: ({ city }) => Effect.succeed({ city, weather: "hail, 3 degrees celsius" })
 })
 
@@ -86,7 +87,7 @@ describe("with a real model", () => {
       expect(failures(entries), traceEntries(entries)).toEqual([])
       expect(toolsRun(entries)).toContain("get_weather")
       expect(text(entries)).toContain("hail")
-    }).pipe(Effect.provide(memoryAssistant(simple({ instructions, toolkit: weather }), realModel)))
+    }).pipe(Effect.provide(memoryAssistant(withTools({ instructions, toolkit: weather }), realModel)))
   )
 
   // The loop only waited; the reply pass runs the real model, with wait in its history.
@@ -175,18 +176,10 @@ describe("with a real model", () => {
     return Effect.gen(function* () {
       const ran = yield* Deferred.make<string>()
 
-      const toolkit = AssistantLoop.fromToolkit(
-        Toolkit.make(PlaceOrder),
-        {
-          place_order: ({ product, quantity }) =>
-            Deferred.succeed(ran, `${quantity} ${product}`).pipe(Effect.as({ reference: "ACM-7K2Q9X" }))
-        },
-        {
-          previews: {
-            place_order: ({ product, quantity }) => Effect.succeed({ product, quantity, total: quantity * 2 })
-          }
-        }
-      )
+      const toolkit = withHandlers(Toolkit.make(PlaceOrder), {
+        place_order: ({ product, quantity }) =>
+          Deferred.succeed(ran, `${quantity} ${product}`).pipe(Effect.as({ reference: "ACM-7K2Q9X" }))
+      })
 
       yield* Effect.gen(function* () {
         const chat = yield* newChat
@@ -223,7 +216,7 @@ describe("with a real model", () => {
         // The provider took the parked call and its decision's result, and the model told the user.
         expect(failures(entries), traceEntries(entries)).toEqual([])
         expect(text(entries)).toContain("acm-7k2q9x")
-      }).pipe(Effect.provide(runMemory(Deciding.toLayer(simple({ instructions, toolkit })), realModel)))
+      }).pipe(Effect.provide(runMemory(Deciding.toLayer(withTools({ instructions, toolkit })), realModel)))
     })
   })
 
@@ -240,7 +233,7 @@ describe("with a real model", () => {
         dependencies: [AssistantToolCall.AssistantToolCall]
       })
 
-      const sendReport = AssistantLoop.fromToolkit(Toolkit.make(SendReport), {
+      const sendReport = withHandlers(Toolkit.make(SendReport), {
         send_report: () =>
           Effect.gen(function* () {
             yield* Deferred.succeed(ran, (yield* AssistantToolCall.AssistantToolCall).callId)
@@ -267,7 +260,7 @@ describe("with a real model", () => {
         AssistantEvent.ToolStarted.make({ callId: "toolu_report_1", tool: "send_report" })
       ])
 
-      const layer = Resumer.toLayer(simple({ instructions, toolkit: sendReport })).pipe(
+      const layer = Resumer.toLayer(withTools({ instructions, toolkit: sendReport })).pipe(
         Layer.provideMerge(AssistantEngine.layerMemory),
         Layer.provide(realModel)
       )

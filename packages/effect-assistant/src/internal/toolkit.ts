@@ -13,15 +13,45 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import type * as AssistantEvent from "../AssistantEvent.ts"
-import type * as AssistantLoop from "../AssistantLoop.ts"
 import { AssistantToolCall } from "../AssistantToolCall.ts"
 import * as ToolFailure from "../ToolFailure.ts"
 import { toJson } from "./schema.ts"
 
+/**
+ * How a tool call went: success or failure, its result in JSON, as the model
+ * reads it, and a failure's kind when it has one.
+ */
+export interface CallResult {
+  readonly outcome: AssistantEvent.ToolOutcome
+  readonly result: Schema.Json
+  readonly kind?: string | undefined
+}
+
+/**
+ * Tools as the loop runs them: their definitions, as the model sees them, how
+ * to run a call to one, and whether a call waits for the user's decision.
+ * `R` is what running them needs. Apps give the loop native toolkits; these
+ * are what the loop makes of them, merged with its own.
+ */
+export interface Tools<out R = never> {
+  readonly definitions: ReadonlyArray<Tool.Any>
+  readonly run: (call: AssistantEvent.ToolCallPart) => Effect.Effect<CallResult, never, R>
+  /** Whether a call waits for the user's decision instead of running: its tool's `needsApproval`. Default: never. */
+  readonly needsDecision?:
+    | ((call: AssistantEvent.ToolCallPart, history: ReadonlyArray<Prompt.Message>) => Effect.Effect<boolean, never, R>)
+    | undefined
+}
+
+/** What a toolkit's handlers need to run, besides the call the loop provides. */
+export type ToolServices<T extends Record<string, Tool.Any>> =
+  | Exclude<Tool.HandlerServices<T[keyof T]>, AssistantToolCall>
+  // Already in the handlers' services; stated for the loop, which decodes params to decide on a call.
+  | T[keyof T]["parametersSchema"]["DecodingServices"]
+
 const encodeFailure = Schema.encodeSync(ToolFailure.ToolFailure)
 
 /** A failed call's outcome, with a message for the model. */
-export const failed = (message: string, kind: string): AssistantLoop.CallResult => ({
+export const failed = (message: string, kind: string): CallResult => ({
   outcome: "failure",
   result: toJson(encodeFailure(ToolFailure.ToolFailure.make({ message, kind }))),
   kind
@@ -32,7 +62,7 @@ const decodeKind = Schema.decodeUnknownOption(Schema.Struct({ kind: Schema.Strin
 const decodeTag = Schema.decodeUnknownOption(Schema.Struct({ _tag: Schema.String }))
 
 /** A failure in its JSON form, with its kind: a `ToolFailure`'s `kind`, or its tag. */
-const failure = (result: Schema.Json): AssistantLoop.CallResult => ({
+const failure = (result: Schema.Json): CallResult => ({
   outcome: "failure",
   result,
   kind: Option.getOrUndefined(
@@ -43,17 +73,14 @@ const failure = (result: Schema.Json): AssistantLoop.CallResult => ({
   )
 })
 
-const hasTool = <Tools extends Record<string, Tool.Any>>(
-  toolkit: { readonly tools: Tools },
+const hasTool = <T extends Record<string, Tool.Any>>(
+  toolkit: { readonly tools: T },
   name: PropertyKey
-): name is keyof Tools => Object.hasOwn(toolkit.tools, name)
+): name is keyof T => Object.hasOwn(toolkit.tools, name)
 
 // With noUncheckedIndexedAccess, an index doesn't narrow on `hasTool`.
 const toolNamed = (toolkit: { readonly tools: Record<string, Tool.Any> }, name: string): Tool.Any | undefined =>
   Object.hasOwn(toolkit.tools, name) ? toolkit.tools[name] : undefined
-
-/** What a parked call shows the user when its tool has no preview. */
-export const noPreview: AssistantLoop.CallResult = { outcome: "success", result: null }
 
 const decodeParams = (tool: Tool.Any, params: Schema.Json) => Schema.decodeUnknownEffect(tool.parametersSchema)(params)
 
@@ -62,11 +89,11 @@ const decodeParams = (tool: Tool.Any, params: Schema.Json) => Schema.decodeUnkno
  * with the params decoded when it's a function. Params that don't fit the
  * tool don't park: the call runs, and fails with why.
  */
-export const needsDecision = Effect.fnUntraced(function* <Tools extends Record<string, Tool.Any>>(
-  toolkit: { readonly tools: Tools },
+export const needsDecision = Effect.fnUntraced(function* <T extends Record<string, Tool.Any>>(
+  toolkit: { readonly tools: T },
   call: AssistantEvent.ToolCallPart,
   history: ReadonlyArray<Prompt.Message>
-): Effect.fn.Return<boolean, never, AssistantLoop.ToolServices<Tools>> {
+): Effect.fn.Return<boolean, never, ToolServices<T>> {
   const tool = toolNamed(toolkit, call.name)
 
   if (tool === undefined) return false
@@ -85,48 +112,6 @@ export const needsDecision = Effect.fnUntraced(function* <Tools extends Record<s
   }).pipe(Effect.orElseSucceed(() => false))
 })
 
-/**
- * Computes a parked call's preview, as `AssistantToolCall` for the call: its
- * value in JSON, or its `ToolFailure` as a failed result the model reads.
- */
-export const preview = Effect.fnUntraced(function* <Tools extends Record<string, Tool.Any>, R>(
-  toolkit: { readonly tools: Tools },
-  previews: AssistantLoop.Previews<Tools, R> | undefined,
-  call: AssistantEvent.ToolCallPart
-): Effect.fn.Return<
-  AssistantLoop.CallResult,
-  never,
-  AssistantLoop.ToolServices<Tools> | Exclude<R, AssistantToolCall>
-> {
-  const name: PropertyKey = call.name
-
-  const tool = toolNamed(toolkit, call.name)
-
-  if (previews === undefined || tool === undefined || !hasTool(toolkit, name)) {
-    return noPreview
-  }
-
-  const make = previews[name]
-
-  if (make === undefined) return noPreview
-
-  return yield* Effect.gen(function* () {
-    const value = yield* make(yield* decodeParams(tool, call.params))
-    const result: AssistantLoop.CallResult = { outcome: "success", result: toJson(value) }
-
-    return result
-  }).pipe(
-    Effect.catch((error) =>
-      Effect.succeed(
-        Predicate.isTagged(error, "ToolFailure")
-          ? failed(error.message, error.kind ?? "ToolFailure")
-          : failed(`Invalid parameters for ${call.name}.`, "ToolParameterValidationError")
-      )
-    ),
-    Effect.provideService(AssistantToolCall, { callId: call.id, tool: call.name })
-  )
-})
-
 // The toolkit decodes the params with the tool's schema before its handler sees them, and a call whose params don't
 // fit fails with a validation error the model reads: the model's JSON is what `handle` takes.
 const isParams = <T>(params: unknown): params is Tool.ParametersEncoded<T> => params !== undefined
@@ -138,27 +123,27 @@ const isParams = <T>(params: unknown): params is Tool.ParametersEncoded<T> => pa
  * its JSON form (with `failureMode: "return"`, the toolkit encodes it with its
  * schema first).
  */
-export const runNative = Effect.fnUntraced(function* <Tools extends Record<string, Tool.Any>>(
-  toolkit: Toolkit.WithHandler<Tools>,
+export const runNative = Effect.fnUntraced(function* <T extends Record<string, Tool.Any>>(
+  toolkit: Toolkit.WithHandler<T>,
   call: AssistantEvent.ToolCallPart
-): Effect.fn.Return<AssistantLoop.CallResult, never, AssistantLoop.ToolServices<Tools>> {
+): Effect.fn.Return<CallResult, never, ToolServices<T>> {
   const name: PropertyKey = call.name
 
   if (!hasTool(toolkit, name)) return failed(`No tool named ${call.name}.`, "ToolNotFoundError")
 
   const params: unknown = call.params
 
-  if (!isParams<Tools[keyof Tools]>(params)) {
+  if (!isParams<T[keyof T]>(params)) {
     return failed(`Invalid parameters for ${call.name}.`, "ToolParameterValidationError")
   }
 
   return yield* Effect.gen(function* () {
-    const results = yield* toolkit.handle<keyof Tools>(name, params, call.id)
+    const results = yield* toolkit.handle<keyof T>(name, params, call.id)
     const last = yield* Stream.runLast(Stream.filter(results, (result) => !result.preliminary))
 
     return Option.match(last, {
       onNone: () => failed(`${call.name} returned no result.`, "NoResult"),
-      onSome: (result): AssistantLoop.CallResult =>
+      onSome: (result): CallResult =>
         result.isFailure
           ? failure(toJson(result.encodedResult))
           : { outcome: "success", result: toJson(result.encodedResult) }
@@ -176,20 +161,18 @@ export const runNative = Effect.fnUntraced(function* <Tools extends Record<strin
 })
 
 /** Tools from a resolved native toolkit. */
-export const fromWithHandler = <Tools extends Record<string, Tool.Any>, R = never>(
-  toolkit: Toolkit.WithHandler<Tools>,
-  previews?: AssistantLoop.Previews<Tools, R>
-): AssistantLoop.Tools<AssistantLoop.ToolServices<Tools> | Exclude<R, AssistantToolCall>> => ({
+export const fromWithHandler = <T extends Record<string, Tool.Any>>(
+  toolkit: Toolkit.WithHandler<T>
+): Tools<ToolServices<T>> => ({
   definitions: Object.values(toolkit.tools),
   run: (call) => runNative(toolkit, call),
-  needsDecision: (call, history) => needsDecision(toolkit, call, history),
-  preview: (call) => preview(toolkit, previews, call)
+  needsDecision: (call, history) => needsDecision(toolkit, call, history)
 })
 
 /** Tools from a native toolkit whose handlers are in context when a call runs. */
-export const fromToolkit = <Tools extends Record<string, Tool.Any>>(
-  toolkit: Toolkit.Toolkit<Tools>
-): AssistantLoop.Tools<AssistantLoop.ToolServices<Tools> | Tool.HandlersFor<Tools>> => ({
+export const fromToolkit = <T extends Record<string, Tool.Any>>(
+  toolkit: Toolkit.Toolkit<T>
+): Tools<ToolServices<T> | Tool.HandlersFor<T>> => ({
   definitions: Object.values(toolkit.tools),
   run: Effect.fnUntraced(function* (call) {
     return yield* runNative(yield* toolkit, call)
@@ -197,30 +180,14 @@ export const fromToolkit = <Tools extends Record<string, Tool.Any>>(
   needsDecision: (call, history) => needsDecision(toolkit, call, history)
 })
 
-/** Tools from a native toolkit and its handlers. */
-export const withHandlers = <Tools extends Record<string, Tool.Any>, R = never>(
-  toolkit: Toolkit.Toolkit<Tools>,
-  handlers: Toolkit.HandlersFrom<Tools>,
-  previews?: AssistantLoop.Previews<Tools, R>
-): AssistantLoop.Tools<AssistantLoop.ToolServices<Tools> | Exclude<R, AssistantToolCall>> => ({
-  definitions: Object.values(toolkit.tools),
-  run: Effect.fnUntraced(function* (call) {
-    const resolved = yield* Effect.provideContext(toolkit, yield* toolkit.toHandlers(handlers))
-
-    return yield* runNative(resolved, call)
-  }),
-  needsDecision: (call, history) => needsDecision(toolkit, call, history),
-  preview: (call) => preview(toolkit, previews, call)
-})
-
 /**
  * Tools from a native toolkit whose handlers use services of the loop they
  * run in: they're made for each call, with its context.
  */
-export const withContext = <Tools extends Record<string, Tool.Any>, R>(
-  toolkit: Toolkit.Toolkit<Tools>,
-  handlers: (context: Context.Context<R>) => Toolkit.HandlersFrom<Tools>
-): AssistantLoop.Tools<R | AssistantLoop.ToolServices<Tools>> => ({
+export const withContext = <T extends Record<string, Tool.Any>, R>(
+  toolkit: Toolkit.Toolkit<T>,
+  handlers: (context: Context.Context<R>) => Toolkit.HandlersFrom<T>
+): Tools<R | ToolServices<T>> => ({
   definitions: Object.values(toolkit.tools),
   run: Effect.fnUntraced(function* (call) {
     const context = yield* Effect.context<R>()
@@ -231,42 +198,52 @@ export const withContext = <Tools extends Record<string, Tool.Any>, R>(
   needsDecision: (call, history) => needsDecision(toolkit, call, history)
 })
 
+/** Tools from a native toolkit whose handlers are in context, or none. */
+export const fromToolkitOrEmpty = <T extends Record<string, Tool.Any>>(
+  toolkit: Toolkit.Toolkit<T> | undefined
+): Tools<ToolServices<T> | Tool.HandlersFor<T>> => (toolkit === undefined ? empty : fromToolkit(toolkit))
+
+/** `search_tools` and `execute_tool` over a catalog toolkit, or none. */
+export const catalogOf = <T extends Record<string, Tool.Any>>(
+  catalog: Toolkit.Toolkit<T> | undefined,
+  discover: <R>(tools: Tools<R>) => Tools<R>
+): Tools<ToolServices<T> | Tool.HandlersFor<T>> => (catalog === undefined ? empty : discover(fromToolkit(catalog)))
+
 /** No tools. */
-export const empty: AssistantLoop.Tools = {
+export const empty: Tools = {
   definitions: [],
   run: (call) => Effect.succeed(failed(`No tool named ${call.name}.`, "ToolNotFoundError"))
 }
 
 /** Two sets of tools together. A call goes to the one that has its tool. */
-export const merge = <A, B>(self: AssistantLoop.Tools<A>, that: AssistantLoop.Tools<B>): AssistantLoop.Tools<A | B> => {
+export const merge = <A, B>(self: Tools<A>, that: Tools<B>): Tools<A | B> => {
   const inSelf = (call: AssistantEvent.ToolCallPart) => self.definitions.some((tool) => tool.name === call.name)
 
   return {
     definitions: [...self.definitions, ...that.definitions],
     run: (call) => (inSelf(call) ? self.run(call) : that.run(call)),
     needsDecision: (call, history) =>
-      inSelf(call) ? needsDecisionOf(self, call, history) : needsDecisionOf(that, call, history),
-    preview: (call) => (inSelf(call) ? previewOf(self, call) : previewOf(that, call))
+      inSelf(call) ? needsDecisionOf(self, call, history) : needsDecisionOf(that, call, history)
   }
 }
 
 /** Whether these tools park a call: never, unless they say how. */
 export const needsDecisionOf = <R>(
-  tools: AssistantLoop.Tools<R>,
+  tools: Tools<R>,
   call: AssistantEvent.ToolCallPart,
   history: ReadonlyArray<Prompt.Message>
 ): Effect.Effect<boolean, never, R> =>
   tools.needsDecision === undefined ? Effect.succeed(false) : tools.needsDecision(call, history)
 
-/** A parked call's preview from these tools: none, unless they have one. */
-export const previewOf = <R>(
-  tools: AssistantLoop.Tools<R>,
-  call: AssistantEvent.ToolCallPart
-): Effect.Effect<AssistantLoop.CallResult, never, R> =>
-  tools.preview === undefined ? Effect.succeed(noPreview) : tools.preview(call)
+/** These tools with the services they need provided: a turn's own, for a loop the app writes. */
+export const provide = <R>(tools: Tools<R>, context: Context.Context<R>): Tools => ({
+  definitions: tools.definitions,
+  run: (call) => Effect.provideContext(tools.run(call), context),
+  needsDecision: (call, history) => Effect.provideContext(needsDecisionOf(tools, call, history), context)
+})
 
 /** The names used by more than one tool. */
-export const duplicateNames = (tools: AssistantLoop.Tools<unknown>): ReadonlyArray<string> => {
+export const duplicateNames = (tools: Tools<unknown>): ReadonlyArray<string> => {
   const names = tools.definitions.map((tool) => tool.name)
 
   return names.filter((name, i) => names.indexOf(name) !== i)
@@ -276,38 +253,9 @@ export const duplicateNames = (tools: AssistantLoop.Tools<unknown>): ReadonlyArr
  * The same tools offered, so the prompt doesn't change, but only the named
  * ones run: a call to any other fails with this message.
  */
-export const runOnly = <R>(
-  tools: AssistantLoop.Tools<R>,
-  names: ReadonlyArray<string>,
-  message: string
-): AssistantLoop.Tools<R> => ({
+export const runOnly = <R>(tools: Tools<R>, names: ReadonlyArray<string>, message: string): Tools<R> => ({
   definitions: tools.definitions,
   run: (call) => (names.includes(call.name) ? tools.run(call) : Effect.succeed(failed(message, "not_now"))),
   needsDecision: (call, history) =>
-    names.includes(call.name) ? needsDecisionOf(tools, call, history) : Effect.succeed(false),
-  preview: (call) => previewOf(tools, call)
+    names.includes(call.name) ? needsDecisionOf(tools, call, history) : Effect.succeed(false)
 })
-
-/**
- * Only the tools `allowed` admits: the model doesn't see the others, and a
- * call to one (to run, to decide on, or to preview) fails as if it didn't
- * exist.
- */
-export const only = <R>(
-  tools: AssistantLoop.Tools<R>,
-  allowed: (tool: Tool.Any) => boolean
-): AssistantLoop.Tools<R> => {
-  const definitions = tools.definitions.filter(allowed)
-  const names = new Set(definitions.map((tool) => tool.name))
-
-  const missing = (call: AssistantEvent.ToolCallPart) =>
-    Effect.succeed(failed(`No tool named ${call.name}.`, "ToolNotFoundError"))
-
-  return {
-    definitions,
-    run: (call) => (names.has(call.name) ? tools.run(call) : missing(call)),
-    needsDecision: (call, history) =>
-      names.has(call.name) ? needsDecisionOf(tools, call, history) : Effect.succeed(false),
-    preview: (call) => (names.has(call.name) ? previewOf(tools, call) : missing(call))
-  }
-}

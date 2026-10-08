@@ -1,5 +1,5 @@
 /**
- * The `ToolDiscovery` module turns a toolkit into two tools, so the prompt
+ * A loop's `catalog`: a toolkit turned into two tools, so the prompt
  * doesn't carry every definition: `search_tools` finds tools by what the
  * model needs to do (name, description, input schema), and `execute_tool`
  * validates an input and runs one.
@@ -10,10 +10,9 @@ import * as Toolkit from "effect/ai/Toolkit"
 import type * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import type * as AssistantLoop from "./AssistantLoop.ts"
-import { toJson } from "./internal/schema.ts"
-import * as Toolkits from "./internal/toolkit.ts"
-import * as Uuid from "./internal/uuid.ts"
+import { toJson } from "./schema.ts"
+import * as Toolkits from "./toolkit.ts"
+import * as Uuid from "./uuid.ts"
 
 const words = (text: string): ReadonlySet<string> =>
   new Set(
@@ -75,7 +74,7 @@ const ExecuteTool = Tool.make("execute_tool", {
 })
 
 /** Creates `search_tools` and `execute_tool` for these tools. */
-export const make = <R>(tools: AssistantLoop.Tools<R>): AssistantLoop.Tools<R> =>
+export const make = <R>(tools: Toolkits.Tools<R>): Toolkits.Tools<R> =>
   Toolkits.withContext(Toolkit.make(SearchTools, ExecuteTool), (context: Context.Context<R>) => ({
     search_tools: ({ query }) =>
       Effect.sync(() =>
