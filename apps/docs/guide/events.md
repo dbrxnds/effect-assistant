@@ -32,6 +32,7 @@ Each event is stored as an `AssistantEvent.Entry`: the chat id, a `seq`
 | `SpecialistStarted`, `SpecialistFinished`    | A [specialist](./specialists) run working, and done; a finished run's report wakes a turn.                               |
 | `BlocksClosed`                               | [Blocks](./blocks) closed without an answer.                                                                             |
 | `DecisionRequested`, `DecisionResolved`      | A [decision](./decisions) the user is asked to make for a parked call, and how they decided.                             |
+| `ChatDeleted`                                | The chat was [deleted](./chats#deleting-a-chat): nothing is stored after it.                                             |
 | Your own events                              | [Yours](./app-events), like a workflow's progress or a summary, stored as themselves.                                    |
 
 A `ModelOutput` is one model call: its response parts (text, reasoning, and
@@ -87,8 +88,7 @@ The log is the `ChatLog` service:
 - `ChatLog.layerMemory` keeps chats in memory, for tests and local
   runs.
 - `ChatLog.layerSql` stores them with a `SqlClient`, in a `chat_log` table
-  you create. It asks `ChatLog.DeletedChats` whether a chat was deleted, so
-  the app keeps that where it keeps its chats:
+  you create:
 
 ```sql
 CREATE TABLE chat_log (
@@ -100,10 +100,8 @@ CREATE TABLE chat_log (
 );
 ```
 
-`ChatLog.delete(chatId)` removes a chat's entries and remembers it was
-deleted, so nothing is stored in it again. Delete through the assistant,
-`MyAssistant.delete(chatId)`, so an open chat stops too (see
-[deleting a chat](./chats#deleting-a-chat)).
+Entries are never removed. A deleted chat's log ends with a `ChatDeleted`,
+and nothing is stored after it (see [deleting a chat](./chats#deleting-a-chat)).
 
 Each chat writes its log one append at a time, so a turn and a specialist
 run writing at once get entries in order. The `ChatLog` a handler, tool, or

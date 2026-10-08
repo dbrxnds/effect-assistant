@@ -457,6 +457,17 @@ class SpecialistStarted extends Schema.TaggedClass<SpecialistStarted>()("Special
 
 <small>Since 0.1.0</small>
 
+### ChatDeleted
+
+The chat was deleted: it stores nothing after this, what worked in it
+stopped, and its subscribers' streams end here. Its log stays.
+
+```ts
+class ChatDeleted extends Schema.TaggedClass<ChatDeleted>()("ChatDeleted",
+```
+
+<small>Since 0.1.0</small>
+
 ### BlocksClosed
 
 Blocks closed without an answer, like the ones `turn.loop`'s

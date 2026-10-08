@@ -275,7 +275,8 @@ export const fromEntries = (
         SpecialistFinished: (finished) => input(index, userText(finishedText(entries, index, finished))),
         // Every run starts in a call of the model's own (a spawn or a follow-up), whose result says so.
         SpecialistStarted: () => undefined,
-        BlocksClosed: () => undefined
+        BlocksClosed: () => undefined,
+        ChatDeleted: () => undefined
       })
     )
   })

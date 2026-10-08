@@ -156,6 +156,18 @@ describe("ChatView.fromEntries", () => {
     expect(woken.activity.working).toBe(true)
     expect(woken.messages).toEqual([])
   })
+
+  it("says when the chat was deleted, and that nothing works in it any more, even mid-turn", () => {
+    const shown = view([
+      hi,
+      AssistantEvent.TurnStarted.make({ assistant: "test" }),
+      AssistantEvent.ChatDeleted.make({})
+    ])
+
+    expect(shown.deleted).toBe(true)
+    expect(ChatView.isIdle(shown)).toBe(true)
+    expect(shown.messages.map((message) => message.id)).toEqual([hi.id])
+  })
 })
 
 describe("ChatView.apply", () => {
@@ -167,7 +179,8 @@ describe("ChatView.apply", () => {
         ChatView.AssistantMessage.make({ id: "m1", text: "Pick", at: 2 })
       ],
       activity: { working: true, specialists: [] },
-      failed: false
+      failed: false,
+      deleted: false
     }
 
     const second: ChatView.Update = {
@@ -182,7 +195,8 @@ describe("ChatView.apply", () => {
         ChatView.AssistantMessage.make({ id: "m2", text: "Done", at: 5 })
       ],
       activity: { working: false, specialists: [] },
-      failed: false
+      failed: false,
+      deleted: false
     }
 
     const once = [first, second].reduce(ChatView.apply, ChatView.empty)

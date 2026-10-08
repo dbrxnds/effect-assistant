@@ -9,5 +9,5 @@ New: `Memory` (facts across chats, per personal and team scope, with `remember` 
 Breaking changes, and how to migrate:
 
 - **`AssistantLoop.tools` is `AssistantLoop.fromToolkit`**, with the same arguments. `Skill.toolkit` is `Skill.toTools`, and `Decision.states` is `Decision.fromEntries`.
-- **`ChatLog.layerSql` creates no tables** and needs a `ChatLog.DeletedChats`: where the app records that a chat was deleted. Create `chat_log` (`chat_id`, `seq`, `at`, `event`; primary key `chat_id, seq`) in a migration.
+- **`ChatLog.layerSql` creates no tables.** Create `chat_log` (`chat_id`, `seq`, `at`, `event`; primary key `chat_id, seq`) in a migration.
 - **effect 4.0.0**: imports from `effect/unstable/ai/*`, `effect/unstable/cluster/*`, and so on become `effect/ai/*`, `effect/cluster/*`.

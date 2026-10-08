@@ -10,6 +10,7 @@
  * @since 0.1.0
  */
 import * as AssistantEvent from "effect-assistant/AssistantEvent"
+import * as Chats from "effect-assistant/Chats"
 import * as ChatId from "effect-assistant/ChatId"
 import * as ChatView from "effect-assistant/ChatView"
 import * as Schema from "effect/Schema"
@@ -38,7 +39,8 @@ export const Subscribe = Rpc.make("Subscribe", {
  * @since 0.1.0
  */
 export const Submit = Rpc.make("Submit", {
-  payload: { chatId: ChatId.ChatId, input: AssistantEvent.UserInput }
+  payload: { chatId: ChatId.ChatId, input: AssistantEvent.UserInput },
+  error: Chats.ChatUnavailable
 })
 
 /**

@@ -15,6 +15,7 @@ import * as AssistantEvent from "./AssistantEvent.ts"
 import type * as AssistantLoop from "./AssistantLoop.ts"
 import type * as BlockKit from "./BlockKit.ts"
 import { ChatId } from "./ChatId.ts"
+import * as Chats from "./Chats.ts"
 import * as ChatView from "./ChatView.ts"
 import type * as Instructions from "./Instructions.ts"
 import * as AppEvents from "./internal/events.ts"
@@ -182,8 +183,13 @@ export interface Assistant<Name extends string = string, Specs extends Specialis
    * Stores an input or one of the assistant's own events, and returns: a
    * user's message or block answer, a workflow's progress, the draft the
    * user opened. The assistant works on what wakes a turn in the background.
+   * Fails when the app says the chat can't be used (see `Chats`): it doesn't
+   * know it, or deleted it.
    */
-  readonly submit: (chatId: ChatId, input: AssistantEvent.Input | Events) => Effect.Effect<void, never, AssistantEngine>
+  readonly submit: (
+    chatId: ChatId,
+    input: AssistantEvent.Input | Events
+  ) => Effect.Effect<void, Chats.ChatUnavailable, AssistantEngine>
   /**
    * Streams the chat's whole log (the entries after `after`, for a reader
    * that has the rest), then live ones, with the assistant's own events
@@ -204,10 +210,15 @@ export interface Assistant<Name extends string = string, Specs extends Specialis
     options?: { readonly after?: number | undefined }
   ) => Stream.Stream<ChatView.Update, never, AssistantEngine>
   /**
-   * Deletes a chat: its log, and what works in it. A turn or specialist run
-   * working in it stops, subscribers' streams end, and the chat stores
-   * nothing again: a later `submit`, a run's report, or a workflow's event
-   * for it is dropped, quietly. Deleting it again does nothing.
+   * Deletes a chat: stores a `ChatDeleted`, and stops what works in it. A
+   * turn or specialist run working in it stops, subscribers' streams end with
+   * the `ChatDeleted`, and the chat stores nothing again: a later input, a
+   * run's report, or a workflow's event for it is dropped, quietly. The log
+   * stays; removing it is the app's. Deleting it again does nothing.
+   *
+   * A chat the app says is deleted (see `Chats`) is deleted the same way
+   * when the assistant next asks: before an input is stored, and before each
+   * model call.
    */
   readonly delete: (chatId: ChatId) => Effect.Effect<void, never, AssistantEngine>
   /** Schema for the chat's entries, the assistant's own events included, in JSON. */
@@ -320,6 +331,9 @@ export const make = <
       chatId: ChatId,
       input: AssistantEvent.Input | AppEvent.Type<Events[number]>
     ) {
+      // Checked here, where the caller can handle it: the chat checks again when it stores the input.
+      yield* (yield* Chats.Chats).get(chatId)
+
       const event = yield* stored(input)
 
       yield* AssistantEngine.use((engine) => engine.submit(name, chatId, event))

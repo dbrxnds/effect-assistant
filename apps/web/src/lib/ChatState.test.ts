@@ -10,7 +10,8 @@ const update = (seq: number, messages: ReadonlyArray<ChatView.Message>, working:
   seq,
   messages,
   activity: { working, specialists: [] },
-  failed: false
+  failed: false,
+  deleted: false
 })
 
 test("works while the view says the assistant or a specialist works", () => {

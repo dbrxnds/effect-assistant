@@ -260,7 +260,8 @@ const failTurn = Effect.fnUntraced(function* (chat: AssistantChat["Service"], ca
 const makeTurnApi = (
   registration: Registration,
   chat: AssistantChat["Service"],
-  startSeq: number
+  startSeq: number,
+  checkOpen: Effect.Effect<void>
 ): Assistant.Turn<any> => {
   const { definition, builtins } = registration
   const { app } = definition
@@ -270,7 +271,10 @@ const makeTurnApi = (
   })
 
   // With how far into the chat it goes: the step records it on the model's output.
+  // Read before every model call: a chat the app deleted meanwhile stops here.
   const history = Effect.fnUntraced(function* (view: Assistant.HistoryView<any> = identity) {
+    yield* checkOpen
+
     const all = yield* chat.entries
 
     const read: AssistantLoop.ChatHistory = {
@@ -319,6 +323,8 @@ const makeTurnApi = (
             "Not now: reply to the user with send_user_message."
           ),
           history: Effect.gen(function* () {
+            yield* checkOpen
+
             const entries = yield* chat.entries
 
             return {
@@ -404,6 +410,8 @@ export const run = Effect.fnUntraced(
     readonly chat: AssistantChat["Service"]
     /** What a turn provides to its handler's stream. */
     readonly services: Context.Context<Assistant.TurnServices | LanguageModel.LanguageModel>
+    /** Whether the app still has the chat: one it deleted is deleted, and the turn stops. */
+    readonly checkOpen: Effect.Effect<void>
   }) {
     const { chat } = options
     const before = yield* chat.entries
@@ -423,7 +431,7 @@ export const run = Effect.fnUntraced(
     ])
 
     const startSeq = lastSeq(started, 0)
-    const turn = makeTurnApi(options.registration, chat, startSeq)
+    const turn = makeTurnApi(options.registration, chat, startSeq, options.checkOpen)
 
     const record = (event: AssistantLoop.Event) => chat.append([event])
 

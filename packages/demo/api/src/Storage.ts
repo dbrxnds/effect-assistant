@@ -93,14 +93,15 @@ const layerFor = (url: Option.Option<string>, maxConnections: number): Layer.Lay
   Option.isNone(url)
     ? Layer.mergeAll(ChatLog.layerMemory, Chats.layerMemory, LiveOrders.layerMemory, TestRunner.layer)
     : Layer.mergeAll(
-        ChatLog.layerSql.pipe(Layer.provide([Chats.layerDeletedChats, layerChatLogTable])),
+        ChatLog.layerSql.pipe(Layer.provide(layerChatLogTable)),
         Chats.layerSql,
         LiveOrders.layerSql,
         layerSqlRunner
       ).pipe(Layer.provideMerge(layerPg(url.value, maxConnections)))
 
 /**
- * Layer that provides the event log, the thread list, and the cluster runner:
+ * Layer that provides the event log, the thread list (also as the assistant's
+ * `Chats`), and the cluster runner:
  * on Postgres when `DATABASE_URL` is set, in memory otherwise.
  *
  * @category layers
@@ -112,6 +113,7 @@ export const layer: Layer.Layer<Services, unknown> = Layer.unwrap(
     const maxConnections = yield* Config.Int("ACME_PG_MAX_CONNECTIONS").pipe(Config.withDefault(8))
     yield* Effect.logInfo(`storage: ${Option.isSome(url) ? "postgres" : "memory"}`)
 
-    return layerFor(url, maxConnections)
+    // The assistant asks the thread list which chats exist: the engine and the server see it from here.
+    return Chats.layerAssistantChats.pipe(Layer.provideMerge(layerFor(url, maxConnections)))
   })
 )

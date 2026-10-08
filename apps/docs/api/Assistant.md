@@ -211,8 +211,13 @@ interface Assistant<Name extends string = string, Specs extends Specialist.Any =
    * Stores an input or one of the assistant's own events, and returns: a
    * user's message or block answer, a workflow's progress, the draft the
    * user opened. The assistant works on what wakes a turn in the background.
+   * Fails when the app says the chat can't be used (see `Chats`): it doesn't
+   * know it, or deleted it.
    */
-  readonly submit: (chatId: ChatId, input: AssistantEvent.Input | Events) => Effect.Effect<void, never, AssistantEngine>
+  readonly submit: (
+    chatId: ChatId,
+    input: AssistantEvent.Input | Events
+  ) => Effect.Effect<void, Chats.ChatUnavailable, AssistantEngine>
   /**
    * Streams the chat's whole log (the entries after `after`, for a reader
    * that has the rest), then live ones, with the assistant's own events
@@ -233,99 +238,20 @@ interface Assistant<Name extends string = string, Specs extends Specialist.Any =
     options?: { readonly after?: number | undefined }
   ) => Stream.Stream<ChatView.Update, never, AssistantEngine>
   /**
-   * Deletes a chat: its log, and what works in it. A turn or specialist run
-   * working in it stops, subscribers' streams end, and the chat stores
-   * nothing again: a later `submit`, a run's report, or a workflow's event
-   * for it is dropped, quietly. Deleting it again does nothing.
+   * Deletes a chat: stores a `ChatDeleted`, and stops what works in it. A
+   * turn or specialist run working in it stops, subscribers' streams end with
+   * the `ChatDeleted`, and the chat stores nothing again: a later input, a
+   * run's report, or a workflow's event for it is dropped, quietly. The log
+   * stays; removing it is the app's. Deleting it again does nothing.
+   *
+   * A chat the app says is deleted (see `Chats`) is deleted the same way
+   * when the assistant next asks: before an input is stored, and before each
+   * model call.
    */
   readonly delete: (chatId: ChatId) => Effect.Effect<void, never, AssistantEngine>
   /** Schema for the chat's entries, the assistant's own events included, in JSON. */
   readonly Entry: Schema.Codec<Entry<Events>, Schema.Json>
 }
-
-/** Any assistant. */
-export type Any = Assistant<any, any, any>
-
-/** The entry schema for these app events, in JSON: the library's events, and the app's. */
-function entrySchema<E>(events: ReadonlyArray<AppEvent.Any>): Schema.Codec<Entry<E>, Schema.Json>
-// The overload states the decoded type: the library's events, or one of these schemas' types.
-function entrySchema(events: ReadonlyArray<AppEvent.Any>): Schema.Top {
-  return Schema.toCodecJson(
-    Schema.Struct({
-      chatId: ChatId,
-      seq: Schema.Int,
-      at: Schema.Finite,
-      event: Schema.Union([AssistantEvent.AssistantEvent, ...events.map((event) => event.schema)])
-    })
-  )
-}
-
-/**
- * Defines an assistant: its name, its UI blocks, its specialists, and the
- * app's own events it stores (see `AppEvent`).
- */
-export const make = <
-  const Name extends string,
-  const Specs extends ReadonlyArray<Specialist.Any> = readonly [],
-  const Events extends ReadonlyArray<AppEvent.Any> = readonly []
->(
-  name: Name,
-  options?: {
-    /** UI blocks the assistant can add to its messages. */
-    readonly blocks?: BlockKit.BlockKit | undefined
-    /**
-     * The specialists it can hand work to; each needs its `toLayer` provided to the assistant's.
-     */
-    readonly specialists?: Specs | undefined
-    /**
-     * The app's own events: `AppEvent.make(schema, { wakes, render })` for
-     * each. `submit` and `turn.append` store them, and `turn.entries` reads
-     * them back, typed. Those that wake a turn are inputs, and the model
-     * reads each one it has a `render` for.
-     */
-    readonly events?: Events | undefined
-  }
-): Assistant<Name, Specs[number], AppEvent.Type<Events[number]>> => {
-  const events = options?.events ?? []
-
-  const definition: Turns.Definition = {
-    name,
-    blocks: options?.blocks,
-    specialists: options?.specialists ?? [],
-    app: AppEvents.make(events)
-  }
-
-  // The signature checks what the handler uses (`CheckServices`); the layer's services, which the build
-  // required, are provided to it and to every turn's stream, so what's left is the turn services.
-  function toLayer<R = never, RE = never, E = never, RX = never>(
-    build: (
-      | Handler<R, RE, AppEvent.Type<Events[number]>>
-      | Effect.Effect<Handler<R, RE, AppEvent.Type<Events[number]>>, E, RX>
-    ) &
-      Specialist.CheckServices<Exclude<HandlerServices<R | RE>, RX>>
-  ): Layer.Layer<
-    never,
-    never,
-    | AssistantEngine
-    | LanguageModel.LanguageModel
-    | Specialist.HandlerOf<Specs[number]>
-    | Exclude<RX, Scope.Scope | AssistantChat>
-  >
-  function toLayer(
-    build: Handler<any, any, any> | Effect.Effect<Handler<any, any, any>, unknown, any>
-  ): Layer.Layer<never, never, any> {
-    return Layer.effectDiscard(
-      Effect.gen(function* () {
-        const context = yield* Effect.context()
-
-        const registration = yield* Turns.register(definition, {
-          // The build runs per chat activation, in the chat; here it only keeps the layer's services for it.
-          open: Effect.gen(function* () {
-            const handler = Effect.isEffect(build) ? yield* build : build
-
-            return (turn: Turn<any>) => Stream.provideContext(toStream(handler(turn)), context)
-          }).pipe(Effect.provideContext(context), Effect.orDie)
-        })
 ```
 
 <small>Since 0.1.0</small>

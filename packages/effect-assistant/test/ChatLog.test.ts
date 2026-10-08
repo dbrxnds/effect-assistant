@@ -20,24 +20,6 @@ for (const [name, store] of Object.entries(stores)) {
         ])
       }).pipe(Effect.provide(store))
     )
-
-    it.effect("deletes a chat: its entries go, it's remembered as deleted, and the others stay", () =>
-      Effect.gen(function* () {
-        const log = yield* ChatLog.ChatLog
-        const [gone, kept] = yield* Effect.all([ChatId.make, ChatId.make])
-        yield* log.append(gone, [say("one"), say("two")])
-        yield* log.append(kept, [say("other")])
-
-        yield* log.delete(gone)
-        yield* log.delete(gone)
-
-        expect(yield* log.read(gone)).toEqual([])
-        expect(yield* log.isDeleted(gone)).toBe(true)
-        expect(yield* log.isDeleted(kept)).toBe(false)
-        expect((yield* log.read(kept)).length).toBe(1)
-        expect(yield* log.unfinished).toEqual([kept])
-      }).pipe(Effect.provide(store))
-    )
   })
 }
 

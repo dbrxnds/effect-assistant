@@ -190,10 +190,24 @@ the assistant's [events](./app-events). It doesn't carry the user: the
 handler looks the user up from the chat, as for any turn. See
 [whom an event acts for](./app-events#whom-an-event-acts-for).
 
+## Which chats exist
+
+Provide `Chats`, and the assistant asks your app whether a chat exists:
+`get(chatId)` returns the chat, or fails with `ChatUnavailable` and a
+`reason`, `"NotFound"` or `"Deleted"`. When a chat is created is yours to
+decide: up front (and `get` fails for one you don't know), or on its first
+message (and `get` creates it). Without `Chats`, every chat exists from
+its first input.
+
+The assistant asks before `submit` sends (so `submit` fails with
+`ChatUnavailable`, which your server can turn into a 404), when the chat
+stores an input, and before every model call. Provide it where you provide
+the log, so the engine and your server see the same one.
+
 ## Deleting a chat
 
-When the user deletes a chat, delete it from your table and from the
-assistant:
+When the user deletes a chat, mark it deleted in your table, then delete it
+from the assistant:
 
 ```ts
 const deleteChat = (userId: string, chatId: ChatId.ChatId) =>
@@ -202,24 +216,29 @@ const deleteChat = (userId: string, chatId: ChatId.ChatId) =>
 
     if (chat?.ownerId !== userId) return yield* Effect.fail("not_found" as const)
 
-    yield* chats.remove(chatId)
+    yield* chats.markDeleted(chatId)
     yield* MyAssistant.delete(chatId)
   })
 ```
 
 `MyAssistant.delete` goes through the engine to the chat, which:
 
-- removes its log (`ChatLog.delete`), and remembers it was deleted;
+- appends a `ChatDeleted` to its log, which stays;
 - stops what works in it: a turn, specialist runs, what the handler's build
   set up;
-- ends its subscribers' streams.
+- ends its subscribers' streams after they get the `ChatDeleted`, and a
+  client's view says `deleted: true`.
 
-After that the chat stores nothing, also after a restart: a later `submit`,
-a specialist's report, or a workflow's event for it is dropped, quietly (no
-failure, no turn). Work that reports into it, like a workflow, goes on and
+After that the chat stores nothing, also after a restart: a later input, a
+specialist's report, or a workflow's event for it is dropped, quietly (no
+turn). Work that reports into it, like a workflow, goes on and
 ends as it would; what it reports does nothing. Deleting a chat again does
 nothing.
 
-Your own records about the chat (orders it placed, say) are yours to
-delete. The demo deletes a thread's orders with it
+If your app marks a chat deleted and never calls `delete`, the assistant
+finds out from [`Chats`](#which-chats-exist) the next time it asks, and
+deletes it the same way.
+
+The log stays: removing old logs is yours, like your own records about the
+chat (orders it placed, say). The demo deletes a thread's orders with it
 (`packages/demo/api/src/Server.ts`).
