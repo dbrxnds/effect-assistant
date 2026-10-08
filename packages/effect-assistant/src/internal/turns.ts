@@ -12,11 +12,12 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import type * as Assistant from "../Assistant.ts"
-import type { AssistantChat } from "../AssistantChat.ts"
+import type { ChatId } from "../ChatId.ts"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import type * as AssistantLoop from "../AssistantLoop.ts"
 import * as Loop from "./loop.ts"
 import type * as BlockKit from "../BlockKit.ts"
+import type { CurrentChat } from "../CurrentChat.ts"
 import * as Decision from "../Decision.ts"
 import * as Instructions from "../Instructions.ts"
 import * as Skill from "../Skill.ts"
@@ -58,11 +59,20 @@ export type TurnHandler = (
   turn: Assistant.Turn<any>
 ) => Stream.Stream<AssistantLoop.Event, unknown, Assistant.TurnServices | LanguageModel.LanguageModel>
 
+// The chat `CurrentChat` gives, with its entries typed as the assistant's decode returns them: the assistant's typed
+// chat is this one, so it needs no check of its own.
+/** @internal */
+export interface TypedChat {
+  readonly chatId: ChatId
+  readonly entries: Effect.Effect<AppEvents.DecodedEntries>
+  readonly append: CurrentChat["Service"]["append"]
+}
+
 /** @internal */
 export interface Registration {
   readonly definition: Definition
   readonly model: Context.Context<LanguageModel.LanguageModel>
-  readonly open: Effect.Effect<TurnHandler, never, Scope.Scope | AssistantChat>
+  readonly open: (chat: TypedChat) => Effect.Effect<TurnHandler, never, Scope.Scope | CurrentChat>
   readonly specialists: ReadonlyArray<{
     readonly specialist: Specialist.Any
     readonly built: Specialist.Built
@@ -176,8 +186,8 @@ const closeOpenCalls = Effect.fnUntraced(function* (chat: Writer, startSeq: numb
         tool: call.name,
         outcome: "failure",
         ...(started.has(call.id)
-          ? { result: History.mayHaveRunOutput, kind: "may_have_run" }
-          : { result: History.notRunOutput, kind: "not_run" })
+          ? { result: History.mayHaveRunOutput, reason: "MayHaveRun" }
+          : { result: History.notRunOutput, reason: "NotRun" })
       })
     )
   )

@@ -16,7 +16,7 @@ import * as Uuid from "./internal/uuid.ts"
  * @category schemas
  * @since 0.1.0
  */
-export const ChatId = Schema.TemplateLiteral(["chat:", Uuid.Uuid]).pipe(Schema.brand("effect-assistant/ChatId"))
+export const ChatId = Schema.TemplateLiteral(["chat:", Uuid.Uuid]).pipe(Schema.brand("~effect-assistant/ChatId"))
 
 /**
  * Represents a chat id.

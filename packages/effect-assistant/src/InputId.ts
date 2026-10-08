@@ -14,7 +14,7 @@ import * as Uuid from "./internal/uuid.ts"
  * @category schemas
  * @since 0.1.0
  */
-export const InputId = Schema.String.pipe(Schema.brand("effect-assistant/InputId"))
+export const InputId = Schema.String.pipe(Schema.brand("~effect-assistant/InputId"))
 
 /**
  * Represents an input id.

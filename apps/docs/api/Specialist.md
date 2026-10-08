@@ -75,9 +75,9 @@ class Runner extends Context.Service<
     /** Starts a run and returns its id. */
     readonly spawn: (request: SpawnRequest) => Effect.Effect<RunId, SpecialistError>
     /** Steers a running run, or continues a finished one. */
-    readonly message: (runId: string, text: string) => Effect.Effect<"steered" | "continued", SpecialistError>
+    readonly message: (runId: RunId, text: string) => Effect.Effect<"steered" | "continued", SpecialistError>
     /** Interrupts a running run. */
-    readonly stop: (runId: string) => Effect.Effect<void, SpecialistError>
+    readonly stop: (runId: RunId) => Effect.Effect<void, SpecialistError>
   }
 >()("effect-assistant/Specialist/Runner")
 ```
@@ -105,7 +105,7 @@ interface Specialist<Name extends string = string> {
   readonly toLayer: <R = never, RE = never, E = never, RX = never>(
     build: (Handler<R, RE> | Effect.Effect<Handler<R, RE>, E, RX>) &
       CheckServices<Exclude<R | RE, RunServices | RX | Tool.Handler<string>>>
-  ) => Layer.Layer<SpecialistHandler<Name>, never, Exclude<RX, Scope.Scope | AssistantChat> | ToolHandlers<R | RE>>
+  ) => Layer.Layer<SpecialistHandler<Name>, never, Exclude<RX, Scope.Scope | CurrentChat> | ToolHandlers<R | RE>>
 }
 ```
 
@@ -146,7 +146,7 @@ interface LoopOptions<T extends Record<string, Tool.Any> = Record<never, never>,
  */
 export interface Run {
   readonly runId: RunId
-  /** The chat the run works in, which is the chat of the turn that spawned it. */
+  /** The chat the run belongs to, which is the chat of the turn that spawned it. */
   readonly chatId: ChatId
   readonly brief: Brief
   /**
@@ -183,7 +183,7 @@ export type Handler<R = never, RE = R> = (
 /**
  * Represents a specialist's handler as its layer provides it.
  *
- * `open` runs the build for a chat (once per chat activation, see `AssistantChat`) and returns
+ * `open` runs the build for a chat (once per chat activation, see `CurrentChat`) and returns
  * the handler with the layer's services already provided.
  *
  * @category models
@@ -193,7 +193,7 @@ export interface Built {
   readonly open: Effect.Effect<
     (run: Run) => Stream.Stream<AssistantLoop.Event, unknown, RunServices>,
     never,
-    Scope.Scope | AssistantChat
+    Scope.Scope | CurrentChat
   >
 }
 
@@ -254,7 +254,7 @@ export const make = <const Name extends string>(
   function toLayer<R = never, RE = never, E = never, RX = never>(
     build: (Handler<R, RE> | Effect.Effect<Handler<R, RE>, E, RX>) &
       CheckServices<Exclude<R | RE, RunServices | RX | Tool.Handler<string>>>
-  ): Layer.Layer<SpecialistHandler<Name>, never, Exclude<RX, Scope.Scope | AssistantChat> | ToolHandlers<R | RE>>
+  ): Layer.Layer<SpecialistHandler<Name>, never, Exclude<RX, Scope.Scope | CurrentChat> | ToolHandlers<R | RE>>
   function toLayer(
     build: Handler<any, any> | Effect.Effect<Handler<any, any>, unknown, any>
   ): Layer.Layer<SpecialistHandler<Name>, never, any> {
@@ -317,19 +317,25 @@ export type Brief = typeof Brief.Type
  */
 export interface SpawnRequest {
   /** The specialist's name. */
-  readonly kind: string
+  readonly specialist: string
   readonly brief: Brief
 }
 
 /**
- * Represents why a run request can't be carried out, written for the model.
+ * Represents why a run request can't be carried out.
  *
- * The request names an unknown specialist, a run that's gone, or a run that isn't running.
+ * **Details**
+ *
+ * The `reason` says which request failed: `"UnknownSpecialist"` when `spawn` names no specialist
+ * of the assistant, `"RunNotFound"` when `message` names a run that is gone, and `"NotRunning"`
+ * when `stop` names a run that isn't running. The `message` is written for the model.
  *
  * @category errors
  * @since 0.1.0
  */
-export class SpecialistError extends Schema.TaggedError<SpecialistError>()("SpecialistError", {
+export class SpecialistError extends Schema.Error<SpecialistError>("effect-assistant/Specialist/SpecialistError")({
+  _tag: Schema.tag("SpecialistError"),
+  reason: Schema.Literals(["UnknownSpecialist", "RunNotFound", "NotRunning"]),
   message: Schema.String
 }) {}
 
@@ -347,9 +353,9 @@ export class Runner extends Context.Service<
     /** Starts a run and returns its id. */
     readonly spawn: (request: SpawnRequest) => Effect.Effect<RunId, SpecialistError>
     /** Steers a running run, or continues a finished one. */
-    readonly message: (runId: string, text: string) => Effect.Effect<"steered" | "continued", SpecialistError>
+    readonly message: (runId: RunId, text: string) => Effect.Effect<"steered" | "continued", SpecialistError>
     /** Interrupts a running run. */
-    readonly stop: (runId: string) => Effect.Effect<void, SpecialistError>
+    readonly stop: (runId: RunId) => Effect.Effect<void, SpecialistError>
   }
 >()("effect-assistant/Specialist/Runner")
 ```
@@ -363,7 +369,7 @@ Represents one run of a specialist on a brief, as its handler sees it.
 ```ts
 interface Run {
   readonly runId: RunId
-  /** The chat the run works in, which is the chat of the turn that spawned it. */
+  /** The chat the run belongs to, which is the chat of the turn that spawned it. */
   readonly chatId: ChatId
   readonly brief: Brief
   /**
@@ -406,7 +412,7 @@ type Handler<R = never, RE = R> = (
 
 Represents a specialist's handler as its layer provides it.
 
-`open` runs the build for a chat (once per chat activation, see `AssistantChat`) and returns
+`open` runs the build for a chat (once per chat activation, see `CurrentChat`) and returns
 the handler with the layer's services already provided.
 
 ```ts
@@ -414,7 +420,7 @@ interface Built {
   readonly open: Effect.Effect<
     (run: Run) => Stream.Stream<AssistantLoop.Event, unknown, RunServices>,
     never,
-    Scope.Scope | AssistantChat
+    Scope.Scope | CurrentChat
   >
 }
 ```
@@ -438,19 +444,25 @@ Represents a request to start a specialist run in the runner's chat.
 ```ts
 interface SpawnRequest {
   /** The specialist's name. */
-  readonly kind: string
+  readonly specialist: string
   readonly brief: Brief
 }
 
 /**
- * Represents why a run request can't be carried out, written for the model.
+ * Represents why a run request can't be carried out.
  *
- * The request names an unknown specialist, a run that's gone, or a run that isn't running.
+ * **Details**
+ *
+ * The `reason` says which request failed: `"UnknownSpecialist"` when `spawn` names no specialist
+ * of the assistant, `"RunNotFound"` when `message` names a run that is gone, and `"NotRunning"`
+ * when `stop` names a run that isn't running. The `message` is written for the model.
  *
  * @category errors
  * @since 0.1.0
  */
-export class SpecialistError extends Schema.TaggedError<SpecialistError>()("SpecialistError", {
+export class SpecialistError extends Schema.Error<SpecialistError>("effect-assistant/Specialist/SpecialistError")({
+  _tag: Schema.tag("SpecialistError"),
+  reason: Schema.Literals(["UnknownSpecialist", "RunNotFound", "NotRunning"]),
   message: Schema.String
 }) {}
 
@@ -468,9 +480,9 @@ export class Runner extends Context.Service<
     /** Starts a run and returns its id. */
     readonly spawn: (request: SpawnRequest) => Effect.Effect<RunId, SpecialistError>
     /** Steers a running run, or continues a finished one. */
-    readonly message: (runId: string, text: string) => Effect.Effect<"steered" | "continued", SpecialistError>
+    readonly message: (runId: RunId, text: string) => Effect.Effect<"steered" | "continued", SpecialistError>
     /** Interrupts a running run. */
-    readonly stop: (runId: string) => Effect.Effect<void, SpecialistError>
+    readonly stop: (runId: RunId) => Effect.Effect<void, SpecialistError>
   }
 >()("effect-assistant/Specialist/Runner")
 ```
@@ -495,12 +507,18 @@ const Brief = Schema.Struct({ …
 
 ### SpecialistError
 
-Represents why a run request can't be carried out, written for the model.
+Represents why a run request can't be carried out.
 
-The request names an unknown specialist, a run that's gone, or a run that isn't running.
+**Details**
+
+The `reason` says which request failed: `"UnknownSpecialist"` when `spawn` names no specialist
+of the assistant, `"RunNotFound"` when `message` names a run that is gone, and `"NotRunning"`
+when `stop` names a run that isn't running. The `message` is written for the model.
 
 ```ts
-class SpecialistError extends Schema.TaggedError<SpecialistError>()("SpecialistError", {
+class SpecialistError extends Schema.Error<SpecialistError>("effect-assistant/Specialist/SpecialistError")({
+  _tag: Schema.tag("SpecialistError"),
+  reason: Schema.Literals(["UnknownSpecialist", "RunNotFound", "NotRunning"]),
   message: Schema.String
 })
 ```
@@ -571,7 +589,7 @@ The services a run provides to its handler, which are its chat, the chat's runne
 model.
 
 ```ts
-type RunServices = AssistantChat | Runner | LanguageModel.LanguageModel
+type RunServices = CurrentChat | Runner | LanguageModel.LanguageModel
 ```
 
 <small>Since 0.1.0</small>

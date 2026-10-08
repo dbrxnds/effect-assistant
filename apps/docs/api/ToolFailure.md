@@ -21,7 +21,7 @@ Fails a tool's handler with a message for the model.
 **Details**
 
 The tool must declare `failure: ToolFailure.ToolFailure`. The model reads the failure as the
-call's result, with its `kind` when one is given.
+call's result, with its `reason` when one is given.
 
 **Example** (Failing a tool call the model can correct)
 
@@ -46,7 +46,7 @@ const BudgetTools = Toolkit.make(
 const BudgetToolsLive = BudgetTools.toLayer({
   office_budget: ({ office }) =>
     Effect.fromNullishOr(budgets.get(office)).pipe(
-      Effect.catch(() => ToolFailure.fail(`No office named ${office}.`, { kind: "not_found" }))
+      Effect.catch(() => ToolFailure.fail(`No office named ${office}.`, { reason: "NotFound" }))
     )
 })
 ```
@@ -54,7 +54,7 @@ const BudgetToolsLive = BudgetTools.toLayer({
 ```ts
 const fail: (
   message: string,
-  options?: { readonly kind?: string | undefined }
+  options?: { readonly reason?: string | undefined }
 ) => Effect.Effect<never, ToolFailure>
 ```
 
@@ -66,13 +66,15 @@ const fail: (
 
 Represents a tool's failure, written for the model.
 
-It holds a message that says what went wrong and, optionally, a `kind` the model can tell apart,
-such as `"not_found"` or `"over_budget"`.
+It holds a message that says what went wrong and, optionally, a `reason` the model can tell
+apart, such as `"NotFound"` or `"OverBudget"`. The library's own reasons are PascalCase, like
+`"NeedsDecision"`.
 
 ```ts
-class ToolFailure extends Schema.TaggedError<ToolFailure>()("ToolFailure", {
+class ToolFailure extends Schema.Error<ToolFailure>("effect-assistant/ToolFailure/ToolFailure")({
+  _tag: Schema.tag("ToolFailure"),
   message: Schema.String,
-  kind: Schema.optional(Schema.String)
+  reason: Schema.optional(Schema.String)
 })
 ```
 

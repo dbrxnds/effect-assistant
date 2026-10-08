@@ -26,7 +26,7 @@ export interface Skill<R = never> {
 }
 
 /**
- * Creates a skill.
+ * Creates a skill from its name, a description of when to use it, and its instructions.
  *
  * **Details**
  *
@@ -39,8 +39,7 @@ export interface Skill<R = never> {
  * ```ts
  * import { Skill } from "effect-assistant"
  *
- * const orderingCampaigns = Skill.make({
- *   name: "Ordering a campaign",
+ * const orderingCampaigns = Skill.make("Ordering a campaign", {
  *   description: "Use when the user wants to order or start a campaign.",
  *   instructions: `1. Pick the product with list_campaign_products.
  * 2. You need who it should reach and a budget. Ask for what's missing, one question at a time.
@@ -55,7 +54,15 @@ export interface Skill<R = never> {
  * @category constructors
  * @since 0.1.0
  */
-export const make = <R = never>(skill: Skill<R>): Skill<R> => skill
+export const make = <R = never>(
+  name: string,
+  options: {
+    /** When to use it, in one line. This is all the model sees until it loads the skill. */
+    readonly description: string
+    /** Text, or an Effect resolved each time the skill is loaded. */
+    readonly instructions: Instructions.Instructions<R>
+  }
+): Skill<R> => ({ name, description: options.description, instructions: options.instructions })
 
 /**
  * Extracts the services that skills need when they're loaded.

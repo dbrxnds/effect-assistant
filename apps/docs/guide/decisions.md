@@ -20,7 +20,7 @@ params (`(params) => params.amount > 100`, or an Effect of a boolean).
 ```ts
 import * as Schema from "effect/Schema"
 import * as Tool from "effect/ai/Tool"
-import { AssistantChat, AssistantToolCall, ToolFailure } from "effect-assistant"
+import { AssistantToolCall, CurrentChat, ToolFailure } from "effect-assistant"
 
 const OrderInput = Schema.Struct({ office: Schema.String, product: Schema.String, quantity: Schema.Int })
 
@@ -29,7 +29,7 @@ export const OrderProducts = Tool.make("order_products", {
   parameters: OrderInput,
   success: Schema.Struct({ reference: Schema.String }),
   failure: ToolFailure.ToolFailure,
-  dependencies: [AssistantChat.AssistantChat, AssistantToolCall.AssistantToolCall],
+  dependencies: [CurrentChat.CurrentChat, AssistantToolCall.AssistantToolCall],
   needsApproval: true
 })
 ```
@@ -87,7 +87,7 @@ send_user_message({
 ```
 
 A decision block may only ask for decisions that wait: an id that doesn't is
-a failure the model reads (kind `not_waiting_for_decision`).
+a failure the model reads (reason `NotWaitingForDecision`).
 
 On the client, render it with the rest of the kit. The block's props only
 have ids; the [chat's view](./client) has each decision the block asks for,
@@ -132,7 +132,7 @@ model can send the decision block again.
 ## Specialists
 
 A specialist has no user to ask, so it can't park a call: a specialist's call
-to a tool that needs a decision fails (kind `needs_decision`), and the
+to a tool that needs a decision fails (reason `NeedsDecision`), and the
 specialist reports what needs deciding. The assistant then asks, or calls
 the tool itself.
 

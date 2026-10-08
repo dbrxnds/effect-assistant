@@ -2,7 +2,8 @@
  * Turns a catalog toolkit into two tools, so the prompt doesn't carry every tool definition.
  *
  * `search_tools` finds tools by what the model needs to do and returns their names, descriptions,
- * and input schemas. `execute_tool` validates an input and runs one of them.
+ * and input schemas. `execute_tool` validates an input and runs one of them. {@link make} returns
+ * the two tools as a native toolkit, and {@link layer} their handlers.
  *
  * @since 0.1.0
  */
@@ -85,13 +86,13 @@ const requiring =
     tool
 
 /**
- * Creates the `search_tools` and `execute_tool` tools over a catalog toolkit.
+ * Creates the `search_tools` and `execute_tool` tools over a catalog toolkit, as a native toolkit.
  *
  * **Details**
  *
- * It returns a native `toolkit` and its handlers' `layer`. Merge the toolkit into the loop's, and
- * provide the layer, which needs the catalog's handlers. A catalog tool's services are
- * `execute_tool`'s, so the turn provides them as it does for any tool.
+ * Merge the toolkit into the loop's, and provide {@link layer} for the same catalog, which has
+ * the tools' handlers. A catalog tool's services are `execute_tool`'s, so the turn provides them
+ * as it does for any tool.
  *
  * `execute_tool` doesn't run a tool that needs the user's decision; keep such tools in the loop's
  * toolkit directly.
@@ -105,23 +106,43 @@ const requiring =
  *
  * // OfficeTools is a big toolkit, found when needed. CommonTools stays in the prompt.
  * const OfficeDiscovery = ToolDiscovery.make(OfficeTools)
- * const OfficeDiscoveryLive = OfficeDiscovery.layer.pipe(Layer.provide(OfficeToolsLive))
+ * const OfficeDiscoveryLive = ToolDiscovery.layer(OfficeTools).pipe(Layer.provide(OfficeToolsLive))
  *
  * const MyAssistantLive = MyAssistant.toLayer((turn) =>
  *   turn.loop({
  *     instructions,
- *     toolkit: Toolkit.merge(CommonTools, OfficeDiscovery.toolkit)
+ *     toolkit: Toolkit.merge(CommonTools, OfficeDiscovery)
  *   })
  * ).pipe(Layer.provide([CommonToolsLive, OfficeDiscoveryLive]))
  * ```
  *
+ * @see {@link layer} for the tools' handlers
+ *
  * @category constructors
  * @since 0.1.0
  */
-export const make = <T extends Record<string, Tool.Any>>(catalog: Toolkit.Toolkit<T>) => {
-  const Tools = Toolkit.make(SearchTools, requiring<Toolkits.ToolServices<T>>()(ExecuteTool))
+export const make = <T extends Record<string, Tool.Any>>(
+  // Only its type is used here, for `execute_tool`'s services: `layer` runs its tools.
+  _catalog: Toolkit.Toolkit<T>
+) => Toolkit.make(SearchTools, requiring<Toolkits.ToolServices<T>>()(ExecuteTool))
 
-  const layer = Tools.toLayer(
+/**
+ * Creates the layer with the handlers of the `search_tools` and `execute_tool` tools over a
+ * catalog toolkit.
+ *
+ * **Details**
+ *
+ * The layer needs the catalog's handlers. It provides the handlers of the toolkit that
+ * {@link make} returns for the same catalog: handlers are keyed by tool name, so the two calls
+ * don't need to share a value. Give both the same catalog.
+ *
+ * @see {@link make} for the toolkit and an example
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const layer = <T extends Record<string, Tool.Any>>(catalog: Toolkit.Toolkit<T>) =>
+  make(catalog).toLayer(
     Effect.gen(function* () {
       const resolved = yield* catalog
       const definitions = Object.values(resolved.tools)
@@ -152,7 +173,7 @@ export const make = <T extends Record<string, Tool.Any>>(catalog: Toolkit.Toolki
             return yield* Effect.fail(
               Toolkits.failed(
                 `${name} needs the user's decision, so it can't run through execute_tool.`,
-                "needs_decision"
+                "NeedsDecision"
               ).result
             )
           }
@@ -164,6 +185,3 @@ export const make = <T extends Record<string, Tool.Any>>(catalog: Toolkit.Toolki
       }
     })
   )
-
-  return { toolkit: Tools, layer }
-}

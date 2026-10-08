@@ -1,11 +1,12 @@
 /**
- * This module provides the `AssistantChat` service, which gives code that runs inside a chat
+ * This module provides the `CurrentChat` service, which gives code that runs inside a chat
  * access to that chat: its id, its entries, and a way to append to it.
  *
- * A turn's handler, its tools, and its specialists' runs get the chat with `yield* AssistantChat`.
- * The service doesn't carry an assistant's event types, so code that doesn't know the assistant,
- * such as a shared tool, can use it. Code that knows the assistant can use `MyAssistant.Chat`,
- * which is the same chat typed with the assistant's events.
+ * A turn's handler, its tools, and its specialists' runs get the chat with `yield* CurrentChat`.
+ * Inside a specialist's run, it is the chat the run belongs to, which is the chat of the turn
+ * that spawned the run. The service doesn't carry an assistant's event types, so code that
+ * doesn't know the assistant, such as a shared tool, can use it. Code that knows the assistant
+ * can use `MyAssistant.Chat`, which is the same chat typed with the assistant's events.
  *
  * @since 0.1.0
  */
@@ -17,11 +18,17 @@ import type { ChatId } from "./ChatId.ts"
 /**
  * Service that represents the chat the current code runs in.
  *
+ * **Details**
+ *
+ * In a turn, it is the chat the turn runs in. In a specialist's run, and in its handler's build,
+ * it is the chat the run belongs to: the chat of the turn that spawned the run. A run's tools
+ * read and append to that chat.
+ *
  * @category services
  * @since 0.1.0
  */
-export class AssistantChat extends Context.Service<
-  AssistantChat,
+export class CurrentChat extends Context.Service<
+  CurrentChat,
   {
     readonly chatId: ChatId
     /**
@@ -37,4 +44,4 @@ export class AssistantChat extends Context.Service<
      */
     readonly append: (...events: ReadonlyArray<{ readonly _tag: string }>) => Effect.Effect<void>
   }
->()("effect-assistant/AssistantChat") {}
+>()("effect-assistant/CurrentChat") {}

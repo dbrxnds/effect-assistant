@@ -54,7 +54,7 @@ only those and the library's. Anything else is a type error, for `submit` and
 their types too.
 
 Code that doesn't know the assistant, like a tool shared by several, uses
-`AssistantChat`: the same chat, with the events decoded but untyped (read
+`CurrentChat`: the same chat, with the events decoded but untyped (read
 them with `Schema.is(MyEvent)`), and an `append` that fails the turn for an
 event the assistant didn't register.
 
@@ -82,18 +82,18 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Tool from "effect/ai/Tool"
 import * as Toolkit from "effect/ai/Toolkit"
-import { AssistantChat, AssistantToolCall, RunId } from "effect-assistant"
+import { AssistantToolCall, CurrentChat, RunId } from "effect-assistant"
 
 const StartCampaign = Tool.make("start_campaign", {
   description: "Order a campaign. The run reports each step back as a <campaign> update.",
   parameters: Schema.Struct({ campaignId: Schema.String, budget: Schema.Finite }),
   success: Schema.Struct({ runId: RunId.RunId, status: Schema.Literal("started") }),
-  dependencies: [AssistantChat.AssistantChat, AssistantToolCall.AssistantToolCall]
+  dependencies: [CurrentChat.CurrentChat, AssistantToolCall.AssistantToolCall]
 })
 
 const CampaignToolsLive = Toolkit.make(StartCampaign).toLayer({
   start_campaign: Effect.fn(function* ({ campaignId, budget }) {
-    const chat = yield* AssistantChat.AssistantChat
+    const chat = yield* CurrentChat.CurrentChat
     const runId = RunId.fromKey(yield* AssistantToolCall.idempotencyKey)
     yield* CreateCampaign.execute({ runId, chatId: chat.chatId, campaignId, budget }, { discard: true })
 
@@ -158,5 +158,5 @@ schema:
   Keep the old one registered, with its `render`, so the chats that have it
   read as they did.
 - An event that doesn't decode, like one whose tag is no longer registered,
-  is left out: the model doesn't read it, `AssistantChat`'s `entries` and `subscribe` skip
+  is left out: the model doesn't read it, `CurrentChat`'s `entries` and `subscribe` skip
   it, and it wakes nothing.

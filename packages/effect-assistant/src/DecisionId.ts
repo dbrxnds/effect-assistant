@@ -16,7 +16,7 @@ import * as Uuid from "./internal/uuid.ts"
  * @since 0.1.0
  */
 export const DecisionId = Schema.TemplateLiteral(["decision:", Uuid.Uuid]).pipe(
-  Schema.brand("effect-assistant/DecisionId")
+  Schema.brand("~effect-assistant/DecisionId")
 )
 
 /**

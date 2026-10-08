@@ -5,7 +5,7 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { AppEvent, Assistant, AssistantChat, AssistantEvent, ChatId, Compaction, DecisionId } from "../src/index.ts"
+import { AppEvent, Assistant, AssistantEvent, ChatId, Compaction, CurrentChat, DecisionId } from "../src/index.ts"
 import { collectUntil, newChat, runMemory, say, turnsDone } from "./utils/fixtures.ts"
 import * as Scripted from "./utils/scripted.ts"
 
@@ -25,12 +25,12 @@ const compacting = (turn: Assistant.Turn<Summary>) => {
   const options = { instructions: "Be brief.", history }
 
   const compact = Effect.gen(function* () {
-    const entries = yield* (yield* AssistantChat.AssistantChat).entries
+    const entries = yield* (yield* CurrentChat.CurrentChat).entries
 
     if (entries.some(({ event }) => event instanceof Summary)) return
 
     const { text } = yield* LanguageModel.generateText({ prompt: summarizePrompt })
-    yield* (yield* AssistantChat.AssistantChat).append(Summary.make({ text, throughSeq: entries.at(-1)?.seq ?? 0 }))
+    yield* (yield* CurrentChat.CurrentChat).append(Summary.make({ text, throughSeq: entries.at(-1)?.seq ?? 0 }))
   })
 
   return Stream.concat(turn.loop(options), Stream.drain(Stream.fromEffect(compact)))

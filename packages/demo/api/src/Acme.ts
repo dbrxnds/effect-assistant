@@ -19,14 +19,12 @@ import * as PrintOrders from "./PrintOrders.ts"
 import * as Prompts from "./Prompts.ts"
 import * as Tools from "./Tools.ts"
 
-const orderingCampaigns = Skill.make({
-  name: "Ordering a campaign",
+const orderingCampaigns = Skill.make("Ordering a campaign", {
   description: "Use when the user wants to order or start a campaign.",
   instructions: Prompts.instructions("acme-skill-ordering")
 })
 
-const orderingProducts = Skill.make({
-  name: "Ordering products",
+const orderingProducts = Skill.make("Ordering products", {
   description: "Use when the user wants to order branded products (pens, totes, banners, ...) for an office.",
   instructions: Prompts.instructions("acme-skill-products")
 })

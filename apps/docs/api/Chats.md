@@ -77,13 +77,13 @@ type Reason = typeof Reason.Type
 
 <small>Since 0.1.0</small>
 
-### Chat
+### ChatRecord
 
 Represents what the library needs to know about a chat, which is its id. The app's own record
 can carry more.
 
 ```ts
-interface Chat {
+interface ChatRecord {
   readonly chatId: ChatId
 }
 ```
@@ -97,7 +97,7 @@ Represents the app's chats, as the `Chats` service exposes them.
 ```ts
 interface Service {
   /** Returns the chat, or fails with a `GetChatError` that says why it can't be used. */
-  readonly get: (chatId: ChatId) => Effect.Effect<Chat, GetChatError>
+  readonly get: (chatId: ChatId) => Effect.Effect<ChatRecord, GetChatError>
 }
 
 /**
@@ -179,7 +179,8 @@ if (row === undefined) return yield* new GetChatError({ chatId, reason: "NotFoun
 ```
 
 ```ts
-class GetChatError extends Schema.TaggedError<GetChatError>()("GetChatError", {
+class GetChatError extends Schema.Error<GetChatError>("effect-assistant/Chats/GetChatError")({
+  _tag: Schema.tag("GetChatError"),
   chatId: ChatId,
   reason: Reason
 })

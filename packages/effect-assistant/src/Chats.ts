@@ -44,7 +44,8 @@ export type Reason = typeof Reason.Type
  * @category errors
  * @since 0.1.0
  */
-export class GetChatError extends Schema.TaggedError<GetChatError>()("GetChatError", {
+export class GetChatError extends Schema.Error<GetChatError>("effect-assistant/Chats/GetChatError")({
+  _tag: Schema.tag("GetChatError"),
   chatId: ChatId,
   reason: Reason
 }) {}
@@ -56,7 +57,7 @@ export class GetChatError extends Schema.TaggedError<GetChatError>()("GetChatErr
  * @category models
  * @since 0.1.0
  */
-export interface Chat {
+export interface ChatRecord {
   readonly chatId: ChatId
 }
 
@@ -68,7 +69,7 @@ export interface Chat {
  */
 export interface Service {
   /** Returns the chat, or fails with a `GetChatError` that says why it can't be used. */
-  readonly get: (chatId: ChatId) => Effect.Effect<Chat, GetChatError>
+  readonly get: (chatId: ChatId) => Effect.Effect<ChatRecord, GetChatError>
 }
 
 /**

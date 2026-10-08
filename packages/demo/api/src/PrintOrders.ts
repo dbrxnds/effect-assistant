@@ -16,8 +16,8 @@ import * as Budgets from "@acme/demo-shared/Budgets"
 import * as Locations from "@acme/demo-shared/Locations"
 import * as Products from "@acme/demo-shared/Products"
 import * as AssistantToolCall from "effect-assistant/AssistantToolCall"
-import * as AssistantChat from "effect-assistant/AssistantChat"
 import * as ChatId from "effect-assistant/ChatId"
+import * as CurrentChat from "effect-assistant/CurrentChat"
 import * as RunId from "effect-assistant/RunId"
 import * as ToolFailure from "effect-assistant/ToolFailure"
 import * as Effect from "effect/Effect"
@@ -162,7 +162,7 @@ export const quote = Effect.fn(function* ({ office, product, quantity }: typeof 
   if (total > budget.remaining) {
     return yield* ToolFailure.fail(
       `That's $${total}, and ${location.name} has $${budget.remaining} left in ${budget.quarter}. Ask about a smaller order or another office's budget.`,
-      { kind: "over_budget" }
+      { reason: "OverBudget" }
     )
   }
 
@@ -214,7 +214,7 @@ export const OrderProducts = Tool.make("order_products", {
     OrderPlaced
   ]),
   failure: ToolFailure.ToolFailure,
-  dependencies: [AssistantChat.AssistantChat, AssistantToolCall.AssistantToolCall],
+  dependencies: [CurrentChat.CurrentChat, AssistantToolCall.AssistantToolCall],
   needsApproval: true
 })
 
@@ -264,7 +264,7 @@ export const layerTools = PrintTools.toLayer(
 
           // The budget may have moved since the user approved the quote.
           const quoted = yield* quote(order)
-          const chat = yield* AssistantChat.AssistantChat
+          const chat = yield* CurrentChat.CurrentChat
 
           yield* orders.put(
             LiveOrders.LiveOrder.make({

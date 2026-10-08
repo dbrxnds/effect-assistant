@@ -14,7 +14,7 @@ import * as Uuid from "./internal/uuid.ts"
  * @category schemas
  * @since 0.1.0
  */
-export const RunId = Schema.TemplateLiteral(["run:", Uuid.Uuid]).pipe(Schema.brand("effect-assistant/RunId"))
+export const RunId = Schema.TemplateLiteral(["run:", Uuid.Uuid]).pipe(Schema.brand("~effect-assistant/RunId"))
 
 /**
  * Represents a run id.
@@ -30,11 +30,7 @@ export type RunId = typeof RunId.Type
  * @category constructors
  * @since 0.1.0
  */
-export const make: Effect.Effect<RunId> = Effect.gen(function* () {
-  const uuid = yield* Uuid.make
-
-  return RunId.make(`run:${uuid}`)
-})
+export const make = (): Effect.Effect<RunId> => Effect.map(Uuid.make, (uuid) => RunId.make(`run:${uuid}`))
 
 /**
  * Creates the run id for a key. The same key always gives the same id.

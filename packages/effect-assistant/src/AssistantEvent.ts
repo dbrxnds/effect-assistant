@@ -40,7 +40,7 @@ export const Attachment = Schema.Struct({
  * @category utils
  * @since 0.1.0
  */
-export const MAX_ATTACHMENTS = 10
+export const maxAttachments = 10
 
 /**
  * Represents a file the user attached to a message.
@@ -99,7 +99,7 @@ export const textWithAttachments = (text: string, attachments: ReadonlyArray<Att
 export class UserMessage extends Schema.TaggedClass<UserMessage>()("UserMessage", {
   id: InputId.pipe(Schema.withConstructorDefault(makeInputId())),
   text: Schema.String,
-  attachments: Schema.optional(Schema.Array(Attachment).check(Schema.isMaxLength(MAX_ATTACHMENTS)))
+  attachments: Schema.optional(Schema.Array(Attachment).check(Schema.isMaxLength(maxAttachments)))
 }) {}
 
 /**
@@ -366,8 +366,8 @@ export type ToolOutcome = typeof ToolOutcome.Type
  * Represents the result of one tool call, as the model reads it.
  *
  * It holds the tool's success or failure in its encoded (JSON) form, and which of the two it is. A
- * failure includes its kind when it has one, which is a `ToolFailure`'s `kind` or the failure's
- * tag.
+ * failure includes its reason when it has one, which is a `ToolFailure`'s `reason` or the
+ * failure's tag.
  *
  * @category schemas
  * @since 0.1.0
@@ -377,7 +377,7 @@ export class ToolResult extends Schema.TaggedClass<ToolResult>()("ToolResult", {
   tool: Schema.String,
   outcome: ToolOutcome,
   result: Schema.Json,
-  kind: Schema.optional(Schema.String)
+  reason: Schema.optional(Schema.String)
 }) {}
 
 /**
@@ -508,14 +508,14 @@ const libraryTags: ReadonlySet<string> = new Set(
  * @category schemas
  * @since 0.1.0
  */
-export const AppTag = Schema.String.pipe(Schema.brand("effect-assistant/AppTag"))
+export const AppTag = Schema.String.pipe(Schema.brand("~effect-assistant/AppTag"))
 
 /**
  * Schema for one of the application's own events as it is stored, with its `_tag` and its fields
  * in JSON.
  *
  * An assistant made with `events: [AppEvent.make(Summary)]` decodes it to a `Summary` in
- * `AssistantChat`'s `entries` and in its `subscribe`.
+ * `CurrentChat`'s `entries` and in its `subscribe`.
  *
  * @category schemas
  * @since 0.1.0

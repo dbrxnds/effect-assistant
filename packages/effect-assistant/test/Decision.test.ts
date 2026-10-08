@@ -226,7 +226,7 @@ describe("closing a block", () => {
         .filter((result) => result.outcome === "failure" && result.tool === "send_user_message")
 
       expect(failures(entries), traceEntries(entries)).toEqual([])
-      expect(refusals.map((result) => result.kind)).toEqual(["decision_waiting"])
+      expect(refusals.map((result) => result.reason)).toEqual(["DecisionWaiting"])
       expect(events.BlockAnswer(entries)).toHaveLength(1)
       expect(events.DecisionResolved(entries).map((resolved) => resolved.outcome)).toEqual(["approved"])
       expect(yield* ran).toHaveLength(1)
@@ -465,7 +465,7 @@ describe("a call that needs the user's decision", () => {
 
       const [result] = events.ToolResult(entries)
 
-      expect([result?.outcome, result?.kind]).toEqual(["failure", "not_waiting_for_decision"])
+      expect([result?.outcome, result?.reason]).toEqual(["failure", "NotWaitingForDecision"])
       expect(asked(entries)).toBeUndefined()
     })
   )
@@ -525,7 +525,7 @@ describe("a specialist's call that needs a decision", () => {
           const result = Scripted.lastResult(request, "place_order")
 
           return Option.isSome(result)
-            ? [Scripted.text(result.value.includes("needs_decision") ? "It needs the user's approval." : "Bought.")]
+            ? [Scripted.text(result.value.includes("NeedsDecision") ? "It needs the user's approval." : "Bought.")]
             : [Scripted.call("place_order", { sku: "tote", quantity: 300 })]
         }
 
@@ -536,7 +536,7 @@ describe("a specialist's call that needs a decision", () => {
 
         return Option.isSome(Scripted.lastResult(request, "spawn_specialist"))
           ? Scripted.wait()
-          : [Scripted.call("spawn_specialist", { kind: "buyer", goal: "Buy 300 totes." })]
+          : [Scripted.call("spawn_specialist", { specialist: "buyer", goal: "Buy 300 totes." })]
       }
 
       const entries = yield* Effect.gen(function* () {

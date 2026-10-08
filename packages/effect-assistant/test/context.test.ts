@@ -118,7 +118,7 @@ const recording = (seen: Queue.Queue<Seen>) =>
         // The clerk's report arrives as a <specialist> input: file only once.
         if (history.includes("file it") && !history.includes(`name=\\"clerk\\"`)) {
           const runner = yield* Specialist.Runner
-          yield* runner.spawn({ kind: "clerk", brief: { goal: "File it." } })
+          yield* runner.spawn({ specialist: "clerk", brief: { goal: "File it." } })
         }
       }).pipe(Effect.provideService(CurrentUser, user), Stream.fromEffect, Stream.drain)
     })

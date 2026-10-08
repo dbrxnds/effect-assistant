@@ -52,7 +52,7 @@ type InputId = typeof InputId.Type
 Schema for input ids. Any string is a valid input id, and the schema brands it.
 
 ```ts
-const InputId = Schema.String.pipe(Schema.brand("effect-assistant/InputId"))
+const InputId = Schema.String.pipe(Schema.brand("~effect-assistant/InputId"))
 ```
 
 <small>Since 0.1.0</small>

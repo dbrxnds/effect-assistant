@@ -60,7 +60,7 @@ const answerVerdict = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, answer: 
     return refuse(`${answer.messageId} has no decision block.`)
   }
 
-  if (BlockKit.blockStates(entries).get(message.id)?.open !== true)
+  if (BlockKit.fromEntries(entries).get(message.id)?.open !== true)
     return refuse(`The block on ${message.id} is closed.`)
 
   const props = decodeProps(message.block.props)

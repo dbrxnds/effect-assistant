@@ -110,6 +110,6 @@ const inputsOf = (chatId: ChatId.ChatId) =>
 ## Test the pure parts directly
 
 The history rules, block states, the chat's view, and client renderers are
-plain functions: test them without a model. `BlockKit.blockStates` and
+plain functions: test them without a model. `BlockKit.fromEntries` and
 `ChatView.fromEntries` take entries you build with the `AssistantEvent`
 constructors, and `BlockKit.toClient` renders the messages of the view.

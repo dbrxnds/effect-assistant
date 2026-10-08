@@ -75,7 +75,7 @@ const protocol = `Every step is a tool call. When you have nothing more to do ri
 Resolves instructions to their text and span attributes.
 
 ```ts
-const resolve = Effect.fnUntraced( …
+const resolve = Effect.fn("Instructions.resolve")(function* <R = never>(instructions: Instructions<R>) { …
 ```
 
 <small>Since 0.1.0</small>

@@ -13,10 +13,10 @@ import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
 import * as Stream from "effect/Stream"
 import * as SynchronizedRef from "effect/SynchronizedRef"
-import { AssistantChat } from "../AssistantChat.ts"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import type { ChatId } from "../ChatId.ts"
 import { ChatLog } from "../ChatLog.ts"
+import { CurrentChat } from "../CurrentChat.ts"
 import type { InputId } from "../InputId.ts"
 import * as Chats from "../Chats.ts"
 import * as SpecialistService from "../Specialist.ts"
@@ -173,11 +173,11 @@ export const make = Effect.fnUntraced(function* (options: {
         : Effect.die(`${event._tag} isn't one of the ${registration.definition.name} assistant's events.`)
 
   // What handlers, tools, and runs see: the assistant's own events decoded, and encoded when appended.
-  const handle = AssistantChat.of({
+  const handle: Turns.TypedChat = {
     chatId,
     entries: Effect.map(chat.entries, (all) => AppEvents.decodeEntries(app, all)),
     append: (...events) => Effect.asVoid(Effect.flatMap(Effect.forEach(events, toStored), chat.append))
-  })
+  }
 
   // An approved call runs at the turn's next step.
   const resolve = Effect.fnUntraced(function* (decided: ReadonlyArray<Decisions.Decided>, answer: InputId) {
@@ -246,12 +246,12 @@ export const make = Effect.fnUntraced(function* (options: {
   )
 
   // The handlers' builds run in the chat's working scope: what they set up lives until the chat closes or is deleted.
-  const handler = yield* inWorking(Effect.provideService(registration.open, AssistantChat, handle))
+  const handler = yield* inWorking(Effect.provideService(registration.open(handle), CurrentChat, handle))
 
   const specialists = yield* Effect.forEach(
     registration.specialists,
     Effect.fnUntraced(function* ({ specialist, built }) {
-      const handler = yield* inWorking(Effect.provideService(built.open, AssistantChat, handle))
+      const handler = yield* inWorking(Effect.provideService(built.open, CurrentChat, handle))
 
       return { specialist, handler }
     })
@@ -291,7 +291,7 @@ export const make = Effect.fnUntraced(function* (options: {
     })
   )
 
-  const services = Context.make(AssistantChat, handle).pipe(
+  const services = Context.make(CurrentChat, handle).pipe(
     Context.add(SpecialistService.Runner, runner),
     Context.add(
       Decisions.TurnDecisions,

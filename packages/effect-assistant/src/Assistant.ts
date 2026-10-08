@@ -20,11 +20,11 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Filter from "effect/Filter"
 import * as Layer from "effect/Layer"
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import type * as AppEvent from "./AppEvent.ts"
-import { AssistantChat } from "./AssistantChat.ts"
 import { AssistantEngine } from "./AssistantEngine.ts"
 import * as AssistantEvent from "./AssistantEvent.ts"
 import type * as AssistantLoop from "./AssistantLoop.ts"
@@ -32,20 +32,23 @@ import type * as BlockKit from "./BlockKit.ts"
 import { ChatId } from "./ChatId.ts"
 import * as Chats from "./Chats.ts"
 import * as ChatView from "./ChatView.ts"
+import type { CurrentChat } from "./CurrentChat.ts"
 import type * as Instructions from "./Instructions.ts"
 import * as AppEvents from "./internal/events.ts"
 import * as Turns from "./internal/turns.ts"
 import type { Skill } from "./Skill.ts"
 import type * as Specialist from "./Specialist.ts"
 
+const TypeId = "~effect-assistant/Assistant" as const
+
 /**
  * Represents the services that a turn provides to its tools, its loop, and its specialists. These
- * are the turn's chat (`AssistantChat`) and the chat's specialist runner (`Specialist.Runner`).
+ * are the turn's chat (`CurrentChat`) and the chat's specialist runner (`Specialist.Runner`).
  *
  * @category utility types
  * @since 0.1.0
  */
-export type TurnServices = AssistantChat | Specialist.Runner
+export type TurnServices = CurrentChat | Specialist.Runner
 
 /**
  * Represents the options accepted by `turn.loop`.
@@ -231,9 +234,9 @@ export interface ChatIdentifier<Name extends string> {
  * Represents the chat that a turn of this assistant runs in, typed with the assistant's events.
  *
  * Use `yield* MyAssistant.Chat` in the handler, in the handler's build, or in a tool that its
- * turns run. Code that doesn't know the assistant uses `AssistantChat` instead.
+ * turns run. Code that doesn't know the assistant uses `CurrentChat` instead.
  *
- * @see {@link AssistantChat} for the same chat without the assistant's event types
+ * @see {@link CurrentChat} for the same chat without the assistant's event types
  *
  * @category models
  * @since 0.1.0
@@ -256,7 +259,7 @@ export interface Chat<Events = never> {
 /**
  * Represents the service that `yield* MyAssistant` returns. It gives code outside a chat, such as
  * a server or a workflow, access to the assistant's chats. Code that runs inside a chat uses
- * `AssistantChat` instead.
+ * `CurrentChat` instead.
  *
  * @category models
  * @since 0.1.0
@@ -322,6 +325,7 @@ export interface Assistant<
   Specs extends Specialist.Any = never,
   Events = never
 > extends Context.Service<Identifier<Name>, Service<Events>> {
+  readonly [TypeId]: typeof TypeId
   readonly name: Name
   readonly blocks: BlockKit.BlockKit | undefined
   /** The specialists the assistant can hand work to. */
@@ -371,7 +375,7 @@ export interface Assistant<
     | AssistantEngine
     | LanguageModel.LanguageModel
     | Specialist.HandlerOf<Specs>
-    | Exclude<RX, Scope.Scope | AssistantChat | ChatIdentifier<Name>>
+    | Exclude<RX, Scope.Scope | CurrentChat | ChatIdentifier<Name>>
     | Specialist.ToolHandlers<R | RE>
   >
   /**
@@ -413,6 +417,14 @@ export interface Assistant<
  * @since 0.1.0
  */
 export type Any = Assistant<any, any, any>
+
+/**
+ * Returns `true` when the value is an assistant's definition, created with {@link make}.
+ *
+ * @category guards
+ * @since 0.1.0
+ */
+export const isAssistant = (u: unknown): u is Any => Predicate.hasProperty(u, TypeId)
 
 function entrySchema<E>(events: ReadonlyArray<AppEvent.Any>): Schema.Codec<Entry<E>, Schema.Json>
 // The overload states the decoded type: the library's events, or one of these schemas' types.
@@ -502,20 +514,6 @@ export const make = <
 
   const ChatKey = Context.Service<ChatIdentifier<Name>, Chat<OwnEvents>>(`effect-assistant/Assistant/${name}/Chat`)
 
-  // The assistant's own events, as its schemas decode them: what its typed chat keeps of the entries.
-  const isOwn = Schema.is(Schema.Union(events.map((event) => event.schema)))
-
-  const typedChat = (chat: AssistantChat["Service"]): Chat<OwnEvents> =>
-    ChatKey.of({
-      chatId: chat.chatId,
-      entries: Effect.map(chat.entries, (all) =>
-        all.flatMap(({ chatId, seq, at, event }) =>
-          AssistantEvent.isLibraryEvent(event) || isOwn(event) ? [{ chatId, seq, at, event }] : []
-        )
-      ),
-      append: (...appended) => chat.append(...appended)
-    })
-
   // On the engine and the app's `Chats` the layer was given, so every caller sees the same ones.
   const makeService = Effect.gen(function* () {
     const engine = yield* AssistantEngine
@@ -552,7 +550,7 @@ export const make = <
     | AssistantEngine
     | LanguageModel.LanguageModel
     | Specialist.HandlerOf<Specs[number]>
-    | Exclude<RX, Scope.Scope | AssistantChat | ChatIdentifier<Name>>
+    | Exclude<RX, Scope.Scope | CurrentChat | ChatIdentifier<Name>>
     | Specialist.ToolHandlers<R | RE>
   >
   function toLayer(
@@ -565,13 +563,15 @@ export const make = <
 
         const registration = yield* Turns.register(definition, {
           // The build runs per chat activation, in the chat; here it only keeps the layer's services for it.
-          open: Effect.gen(function* () {
-            const chat = typedChat(yield* AssistantChat)
-            const handler = Effect.isEffect(build) ? yield* Effect.provideService(build, ChatKey, chat) : build
+          open: (typed) =>
+            Effect.gen(function* () {
+              // The chat's entries are already decoded with this assistant's events.
+              const chat = ChatKey.of({ chatId: typed.chatId, entries: typed.entries, append: typed.append })
+              const handler = Effect.isEffect(build) ? yield* Effect.provideService(build, ChatKey, chat) : build
 
-            return (turn: Turn<any>) =>
-              Stream.provideContext(toStream(handler(turn)), context).pipe(Stream.provideService(ChatKey, chat))
-          }).pipe(Effect.provideContext(context), Effect.orDie)
+              return (turn: Turn<any>) =>
+                Stream.provideContext(toStream(handler(turn)), context).pipe(Stream.provideService(ChatKey, chat))
+            }).pipe(Effect.provideContext(context), Effect.orDie)
         })
 
         yield* (yield* AssistantEngine).register(registration)
@@ -585,6 +585,7 @@ export const make = <
   const named = Object.defineProperty(Key, "name", { value: name, writable: true })
 
   return Object.assign(named, {
+    [TypeId]: TypeId,
     name,
     blocks: options?.blocks,
     specialists: options?.specialists ?? [],

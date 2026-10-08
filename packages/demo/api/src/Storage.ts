@@ -114,6 +114,6 @@ export const layer: Layer.Layer<Services, unknown> = Layer.unwrap(
     yield* Effect.logInfo(`storage: ${Option.isSome(url) ? "postgres" : "memory"}`)
 
     // The assistant asks the thread list which chats exist: the engine and the server see it from here.
-    return Chats.layerAssistantChats.pipe(Layer.provideMerge(layerFor(url, maxConnections)))
+    return Chats.layerLibraryChats.pipe(Layer.provideMerge(layerFor(url, maxConnections)))
   })
 )

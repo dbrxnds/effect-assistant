@@ -16,8 +16,8 @@ import * as Budgets from "@acme/demo-shared/Budgets"
 import * as Locations from "@acme/demo-shared/Locations"
 import * as Orders from "@acme/demo-shared/Orders"
 import * as AssistantToolCall from "effect-assistant/AssistantToolCall"
-import * as AssistantChat from "effect-assistant/AssistantChat"
 import * as ChatId from "effect-assistant/ChatId"
+import * as CurrentChat from "effect-assistant/CurrentChat"
 import * as RunId from "effect-assistant/RunId"
 import * as ToolFailure from "effect-assistant/ToolFailure"
 import * as Effect from "effect/Effect"
@@ -193,7 +193,7 @@ export const StartCampaign = Tool.make("start_campaign", {
     CampaignStarted
   ]),
   failure: ToolFailure.ToolFailure,
-  dependencies: [AssistantChat.AssistantChat, AssistantToolCall.AssistantToolCall],
+  dependencies: [CurrentChat.CurrentChat, AssistantToolCall.AssistantToolCall],
   needsApproval: true
 })
 
@@ -211,7 +211,7 @@ const check = Effect.fn(function* ({ campaignId, office, audience, budget }: Cam
 
   if (budget < product.minimumBudget) {
     return yield* ToolFailure.fail(`${product.name} needs at least $${product.minimumBudget}.`, {
-      kind: "under_minimum"
+      reason: "UnderMinimum"
     })
   }
 
@@ -224,7 +224,7 @@ const check = Effect.fn(function* ({ campaignId, office, audience, budget }: Cam
   if (budget > officeBudget.remaining) {
     return yield* ToolFailure.fail(
       `${location.name} has $${officeBudget.remaining} left in ${Budgets.currentQuarter.name}, less than $${budget}.`,
-      { kind: "over_budget" }
+      { reason: "OverBudget" }
     )
   }
 
@@ -265,7 +265,7 @@ export const layerTools = CampaignTools.toLayer(
           // The budget may have moved since the user approved.
           const { product, location, audience, budget } = yield* check(input)
 
-          const chat = yield* AssistantChat.AssistantChat
+          const chat = yield* CurrentChat.CurrentChat
 
           yield* orders.put(
             LiveOrders.LiveOrder.make({

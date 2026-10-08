@@ -5,7 +5,7 @@ import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import * as Stream from "effect/Stream"
 import * as Tracer from "effect/Tracer"
-import { type Assistant, AssistantChat, AssistantEngine, AssistantEvent, BlockKit, ChatLog } from "../../src/index.ts"
+import { type Assistant, AssistantEngine, AssistantEvent, BlockKit, ChatLog, CurrentChat } from "../../src/index.ts"
 import { mayHaveRunOutput, notRunOutput } from "../../src/internal/history.ts"
 import { deliveryNudge, silentTurnMessage } from "../../src/internal/turns.ts"
 import * as Uuid from "../../src/internal/uuid.ts"
@@ -62,9 +62,7 @@ const lateUpdate = () => {
     yield* turn.history()
 
     if (turns === 1) {
-      yield* AssistantChat.AssistantChat.use((chat) =>
-        chat.append(update("specialist:research", { answer: "Ontario" }))
-      )
+      yield* CurrentChat.CurrentChat.use((chat) => chat.append(update("specialist:research", { answer: "Ontario" })))
 
       return Stream.make(
         AssistantEvent.ModelOutput.make({ parts: [toolCall("w1", "wait")] }),
@@ -77,7 +75,7 @@ const lateUpdate = () => {
       )
     }
 
-    yield* AssistantChat.AssistantChat.use((chat) =>
+    yield* CurrentChat.CurrentChat.use((chat) =>
       chat.append(AssistantEvent.AssistantMessage.make({ id: "answer", text: "It's in Ontario." }))
     )
 
@@ -230,15 +228,15 @@ describe("turn completion", () => {
         yield* turn.history()
 
         if (turns === 1) {
-          yield* AssistantChat.AssistantChat.use((chat) =>
+          yield* CurrentChat.CurrentChat.use((chat) =>
             chat.append(update("specialist:research", { answer: "Ontario" }))
           )
-          yield* (yield* AssistantChat.AssistantChat).entries
+          yield* (yield* CurrentChat.CurrentChat).entries
 
           return waitOnly()
         }
 
-        yield* AssistantChat.AssistantChat.use((chat) =>
+        yield* CurrentChat.CurrentChat.use((chat) =>
           chat.append(AssistantEvent.AssistantMessage.make({ id: "answer", text: "It's in Ontario." }))
         )
 
@@ -437,7 +435,7 @@ describe("BlockKit.closeStale", () => {
       expect(
         entries.flatMap(({ event }) => (Predicate.isTagged(event, "BlocksClosed") ? event.messageIds : []))
       ).toEqual(["m1"])
-      expect(BlockKit.blockStates(entries).get("m1")?.open).toBe(false)
+      expect(BlockKit.fromEntries(entries).get("m1")?.open).toBe(false)
     })
   )
 })

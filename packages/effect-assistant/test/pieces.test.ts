@@ -10,11 +10,11 @@ import * as Stream from "effect/Stream"
 import {
   AppEvent,
   Assistant,
-  AssistantChat,
   AssistantEvent,
   AssistantLoop,
   ChatId,
   ChatLog,
+  CurrentChat,
   InputId
 } from "../src/index.ts"
 import { collectUntil, failures, newChat, runMemory, say, turnsDone } from "./utils/fixtures.ts"
@@ -189,7 +189,7 @@ describe("the app's own events", () => {
       const other = yield* Schema.decodeUnknownEffect(AssistantEvent.StoredAppEvent)(Unknown.make({ n: 1 }))
 
       const handlers = Drafting.toLayer(() =>
-        Stream.fromEffect(AssistantChat.AssistantChat.use((chat) => chat.append(other))).pipe(Stream.drain)
+        Stream.fromEffect(CurrentChat.CurrentChat.use((chat) => chat.append(other))).pipe(Stream.drain)
       )
 
       const entries = yield* Effect.gen(function* () {
@@ -224,8 +224,8 @@ describe("the app's own events", () => {
         Stream.unwrap(
           Effect.gen(function* () {
             // The first turn writes the summary; the second reads through the view.
-            if ((yield* (yield* AssistantChat.AssistantChat).entries).every(({ event }) => !(event instanceof Summary)))
-              yield* (yield* AssistantChat.AssistantChat).append(summary)
+            if ((yield* (yield* CurrentChat.CurrentChat).entries).every(({ event }) => !(event instanceof Summary)))
+              yield* (yield* CurrentChat.CurrentChat).append(summary)
 
             return turn.loop({ instructions: "Be brief.", history: sinceSummary })
           })
@@ -297,8 +297,8 @@ describe("a history built from turn.entries", () => {
         Stream.fromEffect(
           Effect.gen(function* () {
             // Reads the chat only through entries, then replies.
-            yield* (yield* AssistantChat.AssistantChat).entries
-            yield* AssistantChat.AssistantChat.use((chat) =>
+            yield* (yield* CurrentChat.CurrentChat).entries
+            yield* CurrentChat.CurrentChat.use((chat) =>
               chat.append(AssistantEvent.AssistantMessage.make({ id: "r1", text: "Hi." }))
             )
           })
@@ -326,4 +326,12 @@ describe("a history built from turn.entries", () => {
       expect(end?.throughSeq).toBeGreaterThanOrEqual(2)
     })
   )
+})
+
+describe("Assistant.isAssistant", () => {
+  it("is true for a definition and false for anything else", () => {
+    expect(Assistant.isAssistant(Assistant.make("guarded"))).toBe(true)
+    expect(Assistant.isAssistant({ name: "guarded" })).toBe(false)
+    expect(Assistant.isAssistant(undefined)).toBe(false)
+  })
 })

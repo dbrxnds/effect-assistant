@@ -94,7 +94,7 @@ describe("BlockKit.toClient", () => {
   })
 })
 
-describe("BlockKit.blockStates", () => {
+describe("BlockKit.fromEntries", () => {
   it("closes a block on its answer, or when the assistant says it was answered in words", () => {
     const chatId = Effect.runSync(ChatId.make())
 
@@ -112,7 +112,7 @@ describe("BlockKit.blockStates", () => {
       message("m6") // a later assistant message doesn't close it
     ]
 
-    const states = BlockKit.blockStates(
+    const states = BlockKit.fromEntries(
       events.map((event, i) => AssistantEvent.Entry.make({ chatId, seq: i + 1, at: 0, event }))
     )
 
@@ -154,7 +154,7 @@ describe("BlockKit.blockStates", () => {
 
     const closed = [...entries, entry(AssistantEvent.BlocksClosed.make({ messageIds: ["m1"] }), entries.length)]
 
-    expect(BlockKit.blockStates(closed).get("m1")).toEqual({ open: false, answer: undefined })
-    expect(BlockKit.blockStates(closed).get("m2")?.open).toBe(true)
+    expect(BlockKit.fromEntries(closed).get("m1")).toEqual({ open: false, answer: undefined })
+    expect(BlockKit.fromEntries(closed).get("m2")?.open).toBe(true)
   })
 })

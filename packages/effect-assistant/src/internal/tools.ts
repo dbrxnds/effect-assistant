@@ -4,10 +4,10 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import { AssistantChat } from "../AssistantChat.ts"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import { AssistantToolCall } from "../AssistantToolCall.ts"
 import * as BlockKit from "../BlockKit.ts"
+import { CurrentChat } from "../CurrentChat.ts"
 import * as Decision from "../Decision.ts"
 import * as ToolFailure from "../ToolFailure.ts"
 import * as Toolkits from "./toolkit.ts"
@@ -43,7 +43,7 @@ export const isTurnEnding = (call: AssistantEvent.ToolCallPart): boolean =>
 const messageId = AssistantToolCall.useSync((call) => Uuid.fromKey(`message:${call.callId}`))
 
 const append = Effect.fnUntraced(function* (message: AssistantEvent.AssistantMessage) {
-  const chat = yield* AssistantChat
+  const chat = yield* CurrentChat
   const entries = yield* chat.entries
 
   const sent = entries.some(
@@ -59,7 +59,7 @@ const PlainMessage = Tool.make(sendUserMessageName, {
   parameters: Schema.Struct({ text: Schema.String, wait: WaitFlag }),
   success: Schema.String,
   failure: ToolFailure.ToolFailure,
-  dependencies: [AssistantChat, AssistantToolCall]
+  dependencies: [CurrentChat, AssistantToolCall]
 })
 
 const PlainTools = Toolkit.make(PlainMessage, Wait)
@@ -80,13 +80,13 @@ const plainTools = Effect.gen(function* () {
 const decodeDecisionProps = Schema.decodeUnknownOption(Decision.Props)
 
 const checkDecisions = Effect.fnUntraced(function* (ids: ReadonlyArray<string>) {
-  const states = Decision.fromEntries(yield* AssistantChat.use((chat) => chat.entries))
+  const states = Decision.fromEntries(yield* CurrentChat.use((chat) => chat.entries))
   const notWaiting = ids.filter((id) => states.get(id)?.outcome !== undefined || !states.has(id))
 
   if (notWaiting.length > 0) {
     return yield* ToolFailure.fail(
       `Not waiting for the user's decision: ${notWaiting.join(", ")}. Use the ids of decisions that wait for one.`,
-      { kind: "not_waiting_for_decision" }
+      { reason: "NotWaitingForDecision" }
     )
   }
 })
@@ -94,8 +94,8 @@ const checkDecisions = Effect.fnUntraced(function* (ids: ReadonlyArray<string>) 
 // A decision block closes when the user decides on it, not because the model says so: the order it asks about would
 // otherwise never be approved.
 const checkCloses = Effect.fnUntraced(function* (ids: ReadonlyArray<string>) {
-  const entries = yield* AssistantChat.use((chat) => chat.entries)
-  const states = BlockKit.blockStates(entries)
+  const entries = yield* CurrentChat.use((chat) => chat.entries)
+  const states = BlockKit.fromEntries(entries)
 
   const waiting = ids.filter((id) =>
     entries.some(
@@ -111,7 +111,7 @@ const checkCloses = Effect.fnUntraced(function* (ids: ReadonlyArray<string>) {
   if (waiting.length > 0) {
     return yield* ToolFailure.fail(
       `${waiting.join(", ")} asks for a decision that still waits for the user: only their answer in the block closes it. Send the message again without ${waiting.length === 1 ? "that id" : "those ids"} in closes.`,
-      { kind: "decision_waiting" }
+      { reason: "DecisionWaiting" }
     )
   }
 })
@@ -142,7 +142,7 @@ ${catalog}`,
     }),
     success: Schema.String,
     failure: ToolFailure.ToolFailure,
-    dependencies: [AssistantChat, AssistantToolCall]
+    dependencies: [CurrentChat, AssistantToolCall]
   })
 
   const BlockTools = Toolkit.make(BlockMessage, Wait)
@@ -153,7 +153,7 @@ ${catalog}`,
       if (text.trim() === "") {
         return yield* ToolFailure.fail(
           "The message has no text: the user sees only what you send here, and a block alone is an empty bubble. Send it again with the words they should read (a short lead-in for the block).",
-          { kind: "empty_message" }
+          { reason: "EmptyMessage" }
         )
       }
 
@@ -200,7 +200,7 @@ ${catalog}`,
 })
 
 /** @internal */
-export const makeMessaging: (kit: BlockKit.BlockKit | undefined) => Effect.Effect<Toolkits.Tools<AssistantChat>> =
+export const makeMessaging: (kit: BlockKit.BlockKit | undefined) => Effect.Effect<Toolkits.Tools<CurrentChat>> =
   Effect.fnUntraced(function* (kit) {
     if (kit === undefined || kit.blocks.length === 0) {
       return Toolkits.fromWithHandler(yield* plainTools)
