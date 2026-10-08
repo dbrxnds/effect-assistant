@@ -192,14 +192,14 @@ handler looks the user up from the chat, as for any turn. See
 ## Which chats exist
 
 Provide `Chats`, and the assistant asks your app whether a chat exists:
-`get(chatId)` returns the chat, or fails with `ChatUnavailable` and a
+`get(chatId)` returns the chat, or fails with `GetChatError` and a
 `reason`, `"NotFound"` or `"Deleted"`. When a chat is created is yours to
 decide: up front (and `get` fails for one you don't know), or on its first
 message (and `get` creates it). Without `Chats`, every chat exists from
 its first input.
 
 The assistant asks before `submit` sends (so `submit` fails with
-`ChatUnavailable`, which your server can turn into a 404), when the chat
+`GetChatError`, which your server can turn into a 404), when the chat
 stores an input, and before every model call. Provide it where you provide
 the log, so the engine and your server see the same one.
 
