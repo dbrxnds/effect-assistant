@@ -8,79 +8,77 @@ nothing between chats.
 
 ## Memory across chats
 
-A **fact** is one short sentence in a **scope**. A turn reads two scopes:
-the user's own (`personal`) and, if there is one, their team's (`shared`).
-The app picks the keys, so memory never crosses whatever line the app draws
-(a company, a workspace).
+Memory is facts the assistant keeps between chats, and through a long chat's
+summaries: a preference, a standing decision, something short-lived like
+"out of office until Friday". The model keeps them with three tools,
+`Memory.Tools`:
 
-| Kind      | What it is                                                    | Written by                      |
-| --------- | ------------------------------------------------------------- | ------------------------------- |
-| `profile` | Lasting: a preference, how they like to work.                 | The model, with `remember`      |
-| `note`    | Short-lived context; expires (14 days unless the model says). | The model, with `remember`      |
-| `log`     | One line per chat: what happened in it, for later chats.      | Your handler, with `Memory.log` |
+| Tool       | What it does                                                                                     |
+| ---------- | ------------------------------------------------------------------------------------------------ |
+| `remember` | Keeps a fact, one short sentence. `until` (a date) makes it short-lived; `replaces` updates one. |
+| `forget`   | Drops a fact by its id.                                                                          |
+| `recall`   | Searches the facts by their words, for what isn't shown up front.                                |
 
-The model gets three tools, `remember`, `forget`, and `recall` (search,
-including older chat lines), as a native toolkit, `Memory.Tools`. Its
-handlers are `Memory.layerTools`; they need the `MemoryStore`, and the
-turn's scopes as `Memory.CurrentScopes`.
+Where facts are kept, and who shares them, is your app's: it implements
+`Memory.MemoryStore`. Every method gets the chat it's for, and your code
+decides whose facts that means: the chat's user, their team, or anything
+else.
 
 ```ts
 import { Memory } from "effect-assistant"
-import * as Toolkit from "effect/ai/Toolkit"
 
-const MyAssistantHandlers = MyAssistant.toLayer(
+const MemoryStoreLive = Layer.effect(
+  Memory.MemoryStore,
   Effect.gen(function* () {
-    const owners = yield* ChatOwners // your service: whom a chat is for
-    const store = yield* Memory.MemoryStore
+    const owners = yield* ChatOwners // yours: whom a chat is for
+
+    return {
+      facts: (chatId) => ..., // the owner's unexpired facts
+      remember: (chatId, { text, expiresAt, replaces }) => ..., // returns the new fact's id
+      forget: (chatId, id) => ..., // fails with a ToolFailure when there's no such fact
+      recall: (chatId, query) => ... // the owner's facts that match, best first
+    }
+  })
+)
+```
+
+The tools' handlers (`Memory.layerTools`) call the store with the chat they
+run in. The model writes `until` as a `YYYY-MM-DD`; the tool turns it into a
+`DateTime.Utc` for the store, or tells the model it can't read it.
+
+Show the facts in the turn's instructions with `Memory.render`, which lists
+them with their ids so the model can replace or forget one:
+
+```ts
+const MyAssistantLive = MyAssistant.toLayer(
+  Effect.gen(function* () {
+    const memory = yield* Memory.MemoryStore
 
     return (turn) =>
       Stream.unwrap(
-        Effect.gen(function* () {
-          const user = yield* owners.forChat(turn.chatId)
-          const scopes = { personal: `user:${user.id}`, shared: `team:${user.teamId}` }
-          const facts = yield* Memory.facts(scopes).pipe(Effect.provideService(Memory.MemoryStore, store))
-          const remembered = Option.getOrElse(Memory.render(facts, scopes), () => "")
-
-          return turn
-            .loop({
-              instructions: `You help ${user.name}.\n\n${remembered}`,
-              toolkit: Toolkit.merge(MyTools, Memory.Tools)
-            })
-            .pipe(Stream.provideService(Memory.CurrentScopes, scopes), Stream.provideService(Memory.MemoryStore, store))
-        })
-      )
+        Effect.map(memory.facts(turn.chatId), (facts) =>
+          turn.loop({
+            instructions: `${instructions}\n\n${Memory.render(facts)}`,
+            toolkit: Toolkit.merge(MyTools, Memory.Tools)
+          })
+        )
+      ).pipe(Stream.provideService(Memory.MemoryStore, memory))
   })
-).pipe(Layer.provide([MyToolsLive, Memory.layerTools]))
+).pipe(Layer.provide([MyToolsLive, Memory.layerTools]), Layer.provide(MemoryStoreLive))
 ```
 
-`Memory.render` writes the facts as the model reads them: profile facts and
-notes with their ids (so it can replace or forget one), and the newest log
-lines, dated. `Memory.facts(scopes, { exceptLogOf: chatId })` leaves out this
-chat's own log line.
+A fact another chat keeps is in this chat's instructions from its next turn,
+and `recall` finds it right away. When the facts change, the instructions
+change, and the provider's prompt cache starts over for that turn: facts
+change rarely, so that's a small cost.
 
-**Keep the prompt stable.** Facts another chat writes would change this
-chat's system prompt between turns, and a changed prompt starts the
-provider's prompt cache over. The steadier pattern: when a chat starts,
-store what it remembered as one of [your own events](./app-events), and put
-it in the history with a `history` view. The chat then reads the same memory
-until you choose to refresh it, for example after a summary.
+Don't keep what your tools can look up (orders, budgets, people): the
+`remember` tool's description tells the model so. A line per earlier chat
+("asked about Q4 budgets") is a fact your own code can keep in the store,
+after a turn.
 
-**Storage.** `Memory.layerMemory` keeps facts in memory, for tests and local
-runs. `Memory.layerSql` stores them with a `SqlClient`, in a table you
-create:
-
-```sql
-CREATE TABLE memory_facts (
-  id TEXT PRIMARY KEY,
-  scope TEXT NOT NULL,
-  kind TEXT NOT NULL,
-  text TEXT NOT NULL,
-  chat_id TEXT,
-  at DOUBLE PRECISION NOT NULL,
-  expires_at DOUBLE PRECISION
-);
-CREATE INDEX memory_facts_scope ON memory_facts (scope);
-```
+`Memory.layerMemory` is a store in memory, one set of facts for every chat,
+for tests and local runs.
 
 ## Long chats: compaction
 
