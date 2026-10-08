@@ -2,15 +2,14 @@
  * Ordering a campaign.
  *
  * The assistant collects the audience and budget in chat, then calls
- * `start_campaign`. That starts the `CreateCampaign` workflow, which first
- * asks for the user's decision on the order (`Decision.durable`: the
- * assistant asks with a decision block, and the workflow waits for the
- * answer), then reports each stage as a `WorkflowStep`:
+ * `start_campaign`, which needs the user's decision: the call waits, and the
+ * user sees what they approve (the campaign, office, audience, budget, and
+ * the budget left). Their yes runs it: it checks the budget again and starts
+ * the `CreateCampaign` workflow, which reports each stage as a `WorkflowStep`:
  *
- * 1. `declined`, if the user declined: the order is cancelled;
- * 2. `creative_in_progress`, then `scheduled`;
- * 3. `live`;
- * 4. `first_results`: early numbers, a few steps after going live.
+ * 1. `creative_in_progress`, then `scheduled`;
+ * 2. `live`;
+ * 3. `first_results`: early numbers, a few steps after going live.
  *
  * @since 0.1.0
  */
@@ -20,7 +19,6 @@ import * as Orders from "@acme/demo-shared/Orders"
 import * as AssistantToolCall from "effect-assistant/AssistantToolCall"
 import * as AssistantChat from "effect-assistant/AssistantChat"
 import * as ChatId from "effect-assistant/ChatId"
-import * as Decision from "effect-assistant/Decision"
 import * as RunId from "effect-assistant/RunId"
 import * as ToolFailure from "effect-assistant/ToolFailure"
 import * as Effect from "effect/Effect"
@@ -29,7 +27,6 @@ import * as Tool from "effect/ai/Tool"
 import * as Toolkit from "effect/ai/Toolkit"
 import * as Workflow from "effect/workflow/Workflow"
 import type * as WorkflowEngine from "effect/workflow/WorkflowEngine"
-import { AcmeAssistant } from "./AcmeAssistant.ts"
 import * as LiveOrders from "./LiveOrders.ts"
 import * as PrintOrders from "./PrintOrders.ts"
 import * as Steps from "./Steps.ts"
@@ -88,10 +85,6 @@ const campaignProducts: ReadonlyArray<CampaignProduct> = [
   })
 ]
 
-class CampaignFailed extends Schema.TaggedError<CampaignFailed>()("CampaignFailed", {
-  reason: Schema.String
-}) {}
-
 /**
  * The workflow that runs a campaign order.
  *
@@ -110,7 +103,6 @@ export const CreateCampaign = Workflow.make("CreateCampaign", {
     channels: Schema.Array(Orders.Channel)
   },
   success: Schema.Struct({ reference: Schema.String }),
-  error: CampaignFailed,
   idempotencyKey: ({ runId }) => runId
 })
 
@@ -153,29 +145,6 @@ const firstResults = (payload: Payload) => {
  */
 export const layerWorkflow = CreateCampaign.toLayer(
   Effect.fn(function* (payload: Payload) {
-    yield* LiveOrders.setStatus(payload.reference, "awaiting_approval")
-
-    // The assistant asks the user, with a decision block; the workflow sleeps until they answer.
-    const outcome = yield* Decision.durable(AcmeAssistant, {
-      chatId: payload.chatId,
-      name: "approval",
-      source: "workflow:CreateCampaign",
-      preview: {
-        reference: payload.reference,
-        campaign: payload.campaignName,
-        office: payload.office,
-        audience: payload.audience,
-        budget: payload.budget,
-        channels: payload.channels
-      }
-    })
-
-    if (outcome === "declined") {
-      yield* step(payload, "declined")
-
-      return yield* CampaignFailed.make({ reason: "Declined" })
-    }
-
     yield* step(payload, "creative_in_progress")
     yield* Steps.wait("Creative", 2)
     yield* step(payload, "scheduled", { channels: payload.channels.join(", ") })
@@ -213,7 +182,7 @@ const CampaignStarted = Schema.Struct({
  */
 export const StartCampaign = Tool.make("start_campaign", {
   description:
-    "Order a campaign. Needs the product id, the office paying, who it should reach, and the budget in USD. Ask the user for anything missing first. Checks the office's budget; the run then asks for the user's decision (a <decision> request) and reports each stage back as a <workflow> update.",
+    "Order a campaign. Needs the product id, the office paying, who it should reach, and the budget in USD. Ask the user for anything missing first. It waits for the user's decision, with the campaign, budget, and the office's budget left; once they approve, it checks the budget again, starts, and reports each stage back as a <workflow> update.",
   parameters: Schema.Struct({
     campaignId: Schema.String,
     office: Schema.String.annotate({ description: "The office paying for it, like Amsterdam." }),
@@ -225,7 +194,68 @@ export const StartCampaign = Tool.make("start_campaign", {
     CampaignStarted
   ]),
   failure: ToolFailure.ToolFailure,
-  dependencies: [AssistantChat.AssistantChat, AssistantToolCall.AssistantToolCall]
+  dependencies: [AssistantChat.AssistantChat, AssistantToolCall.AssistantToolCall],
+  needsApproval: true
+})
+
+type CampaignInput = typeof StartCampaign.parametersSchema.Type
+
+/**
+ * What a campaign order comes to: what the user approves, and what the order
+ * checks again when it runs. Fails for an unknown product or office, a budget
+ * under the product's minimum, or one over the office's budget.
+ */
+const check = Effect.fn(function* ({ campaignId, office, audience, budget }: CampaignInput) {
+  const product = campaignProducts.find((candidate) => candidate.campaignId === campaignId)
+
+  if (product === undefined) return yield* ToolFailure.fail(`Unknown campaignId ${campaignId}`)
+
+  if (budget < product.minimumBudget) {
+    return yield* ToolFailure.fail(`${product.name} needs at least $${product.minimumBudget}.`, {
+      kind: "under_minimum"
+    })
+  }
+
+  const location = Locations.findByName(office)
+
+  if (location === undefined) return yield* ToolFailure.fail(`No office named ${office}.`)
+
+  const officeBudget = yield* PrintOrders.officeBudget(location)
+
+  if (budget > officeBudget.remaining) {
+    return yield* ToolFailure.fail(
+      `${location.name} has $${officeBudget.remaining} left in ${Budgets.currentQuarter.name}, less than $${budget}.`,
+      { kind: "over_budget" }
+    )
+  }
+
+  return { product, location, audience, budget, remainingBudget: officeBudget.remaining - budget }
+})
+
+/**
+ * What the user sees before they approve a campaign order, on the orders
+ * placed through Acme.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const previews = Effect.gen(function* () {
+  const orders = yield* LiveOrders.LiveOrders
+
+  return {
+    start_campaign: (input: CampaignInput) =>
+      check(input).pipe(
+        Effect.map(({ product, location, audience, budget, remainingBudget }) => ({
+          campaign: product.name,
+          office: location.name,
+          audience,
+          budget,
+          channels: product.channels,
+          remainingBudget
+        })),
+        Effect.provideService(LiveOrders.LiveOrders, orders)
+      )
+  }
 })
 
 /**
@@ -249,7 +279,7 @@ export const layerTools = CampaignTools.toLayer(
 
     return CampaignTools.of({
       list_campaign_products: () => Effect.succeed(campaignProducts),
-      start_campaign: ({ campaignId, office, audience, budget }) =>
+      start_campaign: (input) =>
         Effect.gen(function* () {
           // The same run for every time this call runs: after a crash it runs again, and finds its order.
           const runId = RunId.fromKey(yield* AssistantToolCall.idempotencyKey)
@@ -259,28 +289,8 @@ export const layerTools = CampaignTools.toLayer(
 
           if (placed !== undefined) return { reference, status: placed.status, note: "Already placed by this call." }
 
-          const product = campaignProducts.find((candidate) => candidate.campaignId === campaignId)
-
-          if (product === undefined) return yield* ToolFailure.fail(`Unknown campaignId ${campaignId}`)
-
-          if (budget < product.minimumBudget) {
-            return yield* ToolFailure.fail(`${product.name} needs at least $${product.minimumBudget}.`, {
-              kind: "under_minimum"
-            })
-          }
-
-          const location = Locations.findByName(office)
-
-          if (location === undefined) return yield* ToolFailure.fail(`No office named ${office}.`)
-
-          const officeBudget = yield* PrintOrders.officeBudget(location)
-
-          if (budget > officeBudget.remaining) {
-            return yield* ToolFailure.fail(
-              `${location.name} has $${officeBudget.remaining} left in ${Budgets.currentQuarter.name}, less than $${budget}.`,
-              { kind: "over_budget" }
-            )
-          }
+          // The budget may have moved since the user approved.
+          const { product, location, audience, budget } = yield* check(input)
 
           const chat = yield* AssistantChat.AssistantChat
 

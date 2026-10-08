@@ -1,7 +1,7 @@
 /**
  * Decisions, on a scripted model: a call that waits for the user's decision,
- * the answer that runs or declines it, answers the chat refuses, decisions
- * that running work asks for, and restarts in between.
+ * the answer that runs or declines it, answers the chat refuses, and
+ * restarts in between.
  */
 import { describe, expect, it } from "@effect/vitest"
 import * as Response from "effect/ai/Response"
@@ -9,14 +9,11 @@ import * as Tool from "effect/ai/Tool"
 import * as Toolkit from "effect/ai/Toolkit"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
-import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
-import * as Workflow from "effect/workflow/Workflow"
-import * as WorkflowEngine from "effect/workflow/WorkflowEngine"
 import {
   Assistant,
   AssistantEngine,
@@ -589,170 +586,6 @@ describe("a specialist's call that needs a decision", () => {
       expect(finished(entries).map((run) => run.report)).toEqual(["It needs the user's approval."])
       expect(yield* ran).toEqual([])
     })
-  )
-})
-
-/** Asks for any decision work requested, and replies to the answer. */
-const workScript: Scripted.Script = (request) => {
-  const last = Scripted.lastInput(request)
-  const requested = /<decision id="([^"]+)"[^>]*status="requested"/.exec(last)?.[1]
-
-  if (requested !== undefined) return [askFor([requested], "Launch it?")]
-
-  if (last.includes('kind="decision"')) return Scripted.reply(last.includes("approved") ? "Launching." : "Stopped.")
-
-  return Scripted.wait()
-}
-
-describe("a decision that running work asks for", () => {
-  const Launch = Workflow.make("Launch", {
-    payload: { chatId: ChatId.ChatId },
-    success: AssistantEvent.DecisionOutcome,
-    idempotencyKey: ({ chatId }) => chatId
-  })
-
-  const Launcher = Assistant.make("launcher-test", { blocks: Blocks })
-
-  const layerLaunch = Launch.toLayer(({ chatId }) =>
-    Decision.durable(Launcher, {
-      chatId,
-      name: "launch",
-      source: "workflow:Launch",
-      preview: { campaign: "Summer", budget: 2000 }
-    })
-  )
-
-  it.live("wakes a turn, and the answer resumes the workflow with the outcome", () =>
-    Effect.gen(function* () {
-      const layer = layerLaunch.pipe(
-        Layer.provideMerge(Launcher.toLayer(simple({ instructions }))),
-        Layer.provideMerge(WorkflowEngine.layerMemory),
-        Layer.provideMerge(AssistantEngine.layerMemory),
-        Layer.provideMerge(layerStorage),
-        Layer.provide(Scripted.layer(workScript))
-      )
-
-      const entries = yield* Effect.gen(function* () {
-        const chat = yield* newChat
-        const run = yield* Effect.forkChild(Launch.execute({ chatId: chat }))
-        const first = yield* collectUntil(Launcher, chat, waitingFor, "10 seconds")
-        const [request] = events.DecisionRequested(first)
-
-        expect(Predicate.isTagged(request?.origin, "Work") && request.origin.source).toBe("workflow:Launch")
-        expect(request?.preview).toEqual({ campaign: "Summer", budget: 2000 })
-
-        yield* Launcher.submit(chat, answerWith(asked(first)!, "approved"))
-
-        expect(yield* Fiber.join(run)).toBe("approved")
-
-        return yield* collectUntil(Launcher, chat, (es) => text(es).includes("launching") && idle(es), "10 seconds")
-      }).pipe(Effect.provide(layer))
-
-      expect(failures(entries), traceEntries(entries)).toEqual([])
-      expect(events.DecisionResolved(entries).map((resolved) => resolved.outcome)).toEqual(["approved"])
-      expect(Decision.fromEntries(entries).get(events.DecisionRequested(entries)[0]!.id)).toMatchObject({
-        outcome: "approved",
-        resolved: true
-      })
-    })
-  )
-
-  it.live("deleting the chat declines the decision the workflow waits on, and the workflow goes on", () =>
-    Effect.gen(function* () {
-      const layer = layerLaunch.pipe(
-        Layer.provideMerge(Launcher.toLayer(simple({ instructions }))),
-        Layer.provideMerge(WorkflowEngine.layerMemory),
-        Layer.provideMerge(AssistantEngine.layerMemory),
-        Layer.provideMerge(layerStorage),
-        Layer.provide(Scripted.layer(workScript))
-      )
-
-      const outcome = yield* Effect.gen(function* () {
-        const chat = yield* newChat
-        const run = yield* Effect.forkChild(Launch.execute({ chatId: chat }))
-        yield* collectUntil(Launcher, chat, waitingFor, "10 seconds")
-        yield* Launcher.delete(chat)
-
-        return yield* Fiber.join(run).pipe(Effect.timeout("5 seconds"))
-      }).pipe(Effect.provide(layer))
-
-      expect(outcome).toBe("declined")
-    })
-  )
-
-  it.live("from app code: the outcome is in the log, and outcome waits for it", () =>
-    Effect.gen(function* () {
-      const outcome = yield* Effect.gen(function* () {
-        const chat = yield* newChat
-
-        const id = yield* Decision.request(Launcher, chat, {
-          key: "delete-archive",
-          source: "app:Archive",
-          preview: {}
-        })
-
-        const waiting = yield* Effect.forkChild(Decision.outcome(Launcher, chat, id))
-        const first = yield* collectUntil(Launcher, chat, waitingFor, "10 seconds")
-
-        yield* Launcher.submit(chat, answerWith(asked(first)!, "declined"))
-
-        return yield* Fiber.join(waiting)
-      }).pipe(Effect.provide(runMemory(Launcher.toLayer(simple({ instructions })), Scripted.layer(workScript))))
-
-      expect(outcome).toBe("declined")
-    })
-  )
-
-  it.live("refuses a workflow's decision when the assistant has no workflow engine to pass it on", () =>
-    Effect.gen(function* () {
-      const exit = yield* Effect.gen(function* () {
-        const chat = yield* newChat
-
-        return yield* Launcher.submit(
-          chat,
-          AssistantEvent.DecisionRequested.make({
-            id: DecisionId.fromKey("no engine"),
-            origin: AssistantEvent.WorkOrigin.make({ source: "workflow:Launch", token: "token" }),
-            preview: null
-          })
-        ).pipe(Effect.exit)
-      }).pipe(Effect.provide(runMemory(Launcher.toLayer(simple({ instructions })), Scripted.unused)))
-
-      expect(exit._tag).toBe("Failure")
-    })
-  )
-
-  it.live("refuses a parked call submitted from outside", () =>
-    Effect.gen(function* () {
-      const log = yield* ChatLog.ChatLog
-
-      const entries = yield* Effect.gen(function* () {
-        const chat = yield* newChat
-        yield* Launcher.submit(
-          chat,
-          AssistantEvent.DecisionRequested.make({
-            id: DecisionId.fromCallId("forged"),
-            origin: AssistantEvent.CallOrigin.make({
-              callId: "forged",
-              tool: "place_order",
-              params: {}
-            }),
-            preview: null
-          })
-        )
-
-        return yield* log.read(chat)
-      }).pipe(
-        Effect.provide(
-          Launcher.toLayer(simple({ instructions })).pipe(
-            Layer.provideMerge(AssistantEngine.layerMemory),
-            Layer.provide(Scripted.unused)
-          )
-        )
-      )
-
-      expect(entries).toEqual([])
-    }).pipe(Effect.provide(layerStorage))
   )
 })
 

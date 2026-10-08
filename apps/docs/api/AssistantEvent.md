@@ -168,28 +168,6 @@ type CallOrigin = typeof CallOrigin.Type
 
 <small>Since 0.1.0</small>
 
-### WorkOrigin
-
-Schema for a decision that running work asks for, like a workflow: who
-asks (`source`, like `workflow:CreateCampaign`), and, for a workflow waiting on it, the
-`DurableDeferred` token the answer completes.
-
-```ts
-const WorkOrigin = Schema.TaggedStruct("Work", { …
-```
-
-<small>Since 0.1.0</small>
-
-### WorkOrigin
-
-A decision that running work asks for.
-
-```ts
-type WorkOrigin = typeof WorkOrigin.Type
-```
-
-<small>Since 0.1.0</small>
-
 ### DecisionRequested
 
 The user is asked to decide something: approve or decline.
@@ -197,7 +175,7 @@ The user is asked to decide something: approve or decline.
 ```ts
 class DecisionRequested extends Schema.TaggedClass<DecisionRequested>()("DecisionRequested", {
   id: DecisionId,
-  origin: Schema.Union([CallOrigin, WorkOrigin]),
+  origin: CallOrigin,
   preview: Schema.Json
 })
 ```
@@ -208,7 +186,7 @@ class DecisionRequested extends Schema.TaggedClass<DecisionRequested>()("Decisio
 
 A decision is made: the user answered a decision block for it (`answer` is
 that `BlockAnswer`'s id). An approved call runs next, at the turn's next
-step; a workflow's decision is passed on to it before this is stored.
+step.
 
 ```ts
 class DecisionResolved extends Schema.TaggedClass<DecisionResolved>()("DecisionResolved", {
@@ -222,12 +200,10 @@ class DecisionResolved extends Schema.TaggedClass<DecisionResolved>()("DecisionR
 
 ### Input
 
-Schema for everything `Assistant.submit` accepts. A `DecisionRequested` is
-one only when work requests it (`origin: Work`); the chat refuses a parked
-call submitted from outside.
+Schema for everything `Assistant.submit` accepts.
 
 ```ts
-const Input = Schema.Union([UserMessage, BlockAnswer, SpecialistFinished, DecisionRequested])
+const Input = Schema.Union([UserMessage, BlockAnswer, SpecialistFinished])
 ```
 
 <small>Since 0.1.0</small>
@@ -600,8 +576,7 @@ type Entry = typeof Entry.Type
 ### isInput
 
 Returns whether an event is one of the library's inputs: a user message,
-a block answer, a finished specialist run, or a decision that work
-requests. The app's events that wake a turn are inputs too, but only
+a block answer, or a finished specialist run. The app's events that wake a turn are inputs too, but only
 their assistant knows which (see `AppEvent`).
 
 ```ts

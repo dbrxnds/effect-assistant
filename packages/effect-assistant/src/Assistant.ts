@@ -5,7 +5,6 @@ import type * as Prompt from "effect/ai/Prompt"
 import * as Effect from "effect/Effect"
 import * as Filter from "effect/Filter"
 import * as Layer from "effect/Layer"
-import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
@@ -208,9 +207,7 @@ export interface Assistant<Name extends string = string, Specs extends Specialis
    * Deletes a chat: its log, and what works in it. A turn or specialist run
    * working in it stops, subscribers' streams end, and the chat stores
    * nothing again: a later `submit`, a run's report, or a workflow's event
-   * for it is dropped, quietly. A workflow waiting on one of its decisions
-   * gets `"declined"`, since no one can answer it now. Deleting it again
-   * does nothing.
+   * for it is dropped, quietly. Deleting it again does nothing.
    */
   readonly delete: (chatId: ChatId) => Effect.Effect<void, never, AssistantEngine>
   /** Schema for the chat's entries, the assistant's own events included, in JSON. */
@@ -233,10 +230,6 @@ function entrySchema(events: ReadonlyArray<AppEvent.Any>): Schema.Top {
     })
   )
 }
-
-const isLibraryInput = (input: { readonly _tag: string }): input is AssistantEvent.Input =>
-  AssistantEvent.isInput(input) ||
-  (AssistantEvent.isLibraryEvent(input) && Predicate.isTagged(input, "DecisionRequested"))
 
 /**
  * Defines an assistant: its name, its UI blocks, its specialists, and the
@@ -315,7 +308,7 @@ export const make = <
   const stored = (
     input: AssistantEvent.Input | AppEvent.Type<Events[number]>
   ): Effect.Effect<AssistantEvent.Input | AssistantEvent.StoredAppEvent> =>
-    isLibraryInput(input) ? Effect.succeed(input) : AppEvents.encode(definition.app, input)
+    AssistantEvent.isInput(input) ? Effect.succeed(input) : AppEvents.encode(definition.app, input)
 
   const assistant: Assistant<Name, Specs[number], AppEvent.Type<Events[number]>> = {
     name,

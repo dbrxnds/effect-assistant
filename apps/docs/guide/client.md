@@ -77,8 +77,8 @@ once; `ChatView.fromEntries(entries)` makes one from a log on the server.
   block its `decisions`, each with its `preview` and `outcome`.
 - **`activity`**: `working` while a turn runs, or is about to start for
   something that arrived; `specialists`, the ones working (which, since
-  when). `ChatView.isIdle(view)` is neither. A workflow waiting on a timer or
-  a decision isn't working.
+  when). `ChatView.isIdle(view)` is neither. A workflow waiting on a timer
+  isn't working.
 - **`failed`**: the last turn failed, and no message came after. Show
   something generic; the server's log says why.
 

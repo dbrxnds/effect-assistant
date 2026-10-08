@@ -103,6 +103,6 @@ event, so every client folds them closed. `BlockKit.staleBlocks(entries,
 
 A workflow that needs something from the user doesn't build the UI. It notifies the
 assistant with an [event](./app-events) that says what it needs ("ask which delivery
-date works"), and the assistant writes the message and picks the block. A workflow that needs the
-user's approval asks for a [decision](./decisions#a-decision-that-work-asks-for),
-and waits for it.
+date works"), and the assistant writes the message and picks the block. Work that needs the
+user's approval asks before it starts: the tool that starts it needs a
+[decision](./decisions).

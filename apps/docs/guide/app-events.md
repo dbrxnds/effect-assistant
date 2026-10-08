@@ -116,9 +116,9 @@ const report = (payload: Payload, status: string) =>
 Register `AppEvent.make(CampaignStep, { wakes: true, render })` on the
 assistant. The assistant tells the user in one line that it started, and
 follows up when the steps arrive. If a step needs something from the user,
-its text says so, and the assistant asks, maybe with a [block](./blocks). If
-it needs the user's approval, the workflow asks for a
-[decision](./decisions#a-decision-that-work-asks-for) and waits for it.
+its text says so, and the assistant asks, maybe with a [block](./blocks). An
+approval belongs before the work starts: the tool that starts it needs a
+[decision](./decisions).
 
 The demo's workflows do this: `packages/demo/api/src/WorkflowStep.ts` and
 `Steps.ts`.

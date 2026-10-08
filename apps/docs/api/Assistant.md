@@ -236,9 +236,7 @@ interface Assistant<Name extends string = string, Specs extends Specialist.Any =
    * Deletes a chat: its log, and what works in it. A turn or specialist run
    * working in it stops, subscribers' streams end, and the chat stores
    * nothing again: a later `submit`, a run's report, or a workflow's event
-   * for it is dropped, quietly. A workflow waiting on one of its decisions
-   * gets `"declined"`, since no one can answer it now. Deleting it again
-   * does nothing.
+   * for it is dropped, quietly. Deleting it again does nothing.
    */
   readonly delete: (chatId: ChatId) => Effect.Effect<void, never, AssistantEngine>
   /** Schema for the chat's entries, the assistant's own events included, in JSON. */
@@ -261,10 +259,6 @@ function entrySchema(events: ReadonlyArray<AppEvent.Any>): Schema.Top {
     })
   )
 }
-
-const isLibraryInput = (input: { readonly _tag: string }): input is AssistantEvent.Input =>
-  AssistantEvent.isInput(input) ||
-  (AssistantEvent.isLibraryEvent(input) && Predicate.isTagged(input, "DecisionRequested"))
 
 /**
  * Defines an assistant: its name, its UI blocks, its specialists, and the

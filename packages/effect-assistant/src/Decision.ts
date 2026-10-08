@@ -1,24 +1,16 @@
 /**
- * The `Decision` module is how the user approves or declines what the
- * assistant can't do on its own, like placing an order or publishing a post.
- * One primitive, asked for from two places, answered one way:
+ * The `Decision` module is how the user approves or declines a tool call the
+ * assistant can't make on its own, like placing an order or publishing a
+ * post: a tool with Effect's `needsApproval` is parked when the model calls
+ * it, and the user's answer to the decision block runs it or declines it.
  */
-import * as Effect from "effect/Effect"
-import * as Filter from "effect/Filter"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import * as Stream from "effect/Stream"
-import * as Activity from "effect/workflow/Activity"
-import * as DurableDeferred from "effect/workflow/DurableDeferred"
-import type * as WorkflowEngine from "effect/workflow/WorkflowEngine"
-import type { AssistantEngine } from "./AssistantEngine.ts"
 import * as AssistantEvent from "./AssistantEvent.ts"
 import * as Block from "./Block.ts"
-import type { ChatId } from "./ChatId.ts"
 import * as DecisionId from "./DecisionId.ts"
 import type { InputId } from "./InputId.ts"
-import { toJson } from "./internal/schema.ts"
 
 /** The decision block's kind. */
 export const kind = "decision"
@@ -32,7 +24,7 @@ export const Props = Schema.Struct({
   // against the decisions waiting when the message is sent.
   decisionIds: Schema.Array(Schema.String).check(Schema.isMinLength(1)).annotate({
     description:
-      "The decisions to ask for: a waiting call's decisionId, or a <decision> request's id. Several go in one block when the user decides them together."
+      "The decisions to ask for: each waiting call's decisionId. Several go in one block when the user decides them together."
   }),
   approveLabel: Schema.optional(Schema.String).annotate({
     description: 'The approve button, like "Place order".'
@@ -164,113 +156,3 @@ export const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): Re
 
   return all
 }
-
-/** What asking needs of an assistant: its `submit`. */
-export interface Submitter {
-  readonly submit: (chatId: ChatId, input: AssistantEvent.Input) => Effect.Effect<void, never, AssistantEngine>
-}
-
-/** Options for a decision that work asks for. */
-export interface RequestOptions {
-  /** Who asks, like `workflow:CreateCampaign`. */
-  readonly source: string
-  /** What the user decides on, like the order: any value with a JSON form. */
-  readonly preview: unknown
-}
-
-/**
- * Asks the chat's user for a decision, from work that's already running:
- * stores a `DecisionRequested`, which wakes a turn, and returns its id. The
- * key makes asking again harmless: it gives the same id, and the request is
- * stored once.
- */
-// Plain functions, not `Effect.fn`: a client that renders the block doesn't bundle the workflow modules.
-export const request = (
-  assistant: Submitter,
-  chatId: ChatId,
-  options: RequestOptions & { readonly key: string }
-): Effect.Effect<DecisionId.DecisionId, never, AssistantEngine> =>
-  Effect.gen(function* () {
-    const id = DecisionId.fromKey(options.key)
-
-    yield* assistant.submit(
-      chatId,
-      AssistantEvent.DecisionRequested.make({
-        id,
-        origin: AssistantEvent.WorkOrigin.make({ source: options.source }),
-        preview: toJson(options.preview)
-      })
-    )
-
-    return id
-  })
-
-/**
- * Waits until a decision is made, and returns how: reads the chat's log,
- * then follows it.
- */
-export const outcome = (
-  assistant: {
-    readonly subscribe: (
-      chatId: ChatId
-    ) => Stream.Stream<{ readonly event: { readonly _tag: string } }, never, AssistantEngine>
-  },
-  chatId: ChatId,
-  id: DecisionId.DecisionId
-): Effect.Effect<AssistantEvent.DecisionOutcome, never, AssistantEngine> =>
-  Effect.gen(function* () {
-    const found = yield* assistant
-      .subscribe(chatId)
-      .pipe(
-        Stream.filterMap(
-          Filter.fromPredicateOption(({ event }: { readonly event: { readonly _tag: string } }) =>
-            AssistantEvent.isLibraryEvent(event) && Predicate.isTagged(event, "DecisionResolved") && event.id === id
-              ? Option.some(event.outcome)
-              : Option.none()
-          )
-        ),
-        Stream.runHead
-      )
-
-    if (Option.isNone(found)) return yield* Effect.die(`The chat closed before ${id} was decided.`)
-
-    return found.value
-  })
-
-/** The deferred a workflow's decision waits on: the answer completes it by its token. */
-const deferred = (name: string) =>
-  DurableDeferred.make(`effect-assistant/Decision/${name}`, {
-    success: AssistantEvent.DecisionOutcome
-  })
-
-/**
- * Asks the chat's user for a decision from a workflow, and waits for it: the
- * workflow suspends until the user answers, across restarts, and resumes
- * with the outcome. `name` tells a workflow's decisions apart.
- */
-export const durable = (
-  assistant: Submitter,
-  options: RequestOptions & { readonly chatId: ChatId; readonly name: string }
-): Effect.Effect<
-  AssistantEvent.DecisionOutcome,
-  never,
-  AssistantEngine | WorkflowEngine.WorkflowEngine | WorkflowEngine.WorkflowInstance
-> =>
-  Effect.gen(function* () {
-    const waitingOn = deferred(options.name)
-    const token = yield* DurableDeferred.token(waitingOn)
-
-    yield* Activity.make({
-      name: `effect-assistant/Decision/${options.name}`,
-      execute: assistant.submit(
-        options.chatId,
-        AssistantEvent.DecisionRequested.make({
-          id: DecisionId.fromKey(token),
-          origin: AssistantEvent.WorkOrigin.make({ source: options.source, token }),
-          preview: toJson(options.preview)
-        })
-      )
-    })
-
-    return yield* DurableDeferred.await(waitingOn)
-  })

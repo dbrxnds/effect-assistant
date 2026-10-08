@@ -1,11 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
-import * as AssistantChat from "effect-assistant/AssistantChat"
 import * as AssistantEngine from "effect-assistant/AssistantEngine"
-import * as AssistantEvent from "effect-assistant/AssistantEvent"
 import * as ChatId from "effect-assistant/ChatId"
 import * as ChatLog from "effect-assistant/ChatLog"
-import * as Decision from "effect-assistant/Decision"
-import * as InputId from "effect-assistant/InputId"
 import * as RunId from "effect-assistant/RunId"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -29,29 +25,10 @@ process.env.DEMO_STEP_SECONDS = "0"
 
 /**
  * Acme, registered with a handler that doesn't call the model: the tests
- * read what the workflows tell the chat, from its log. For a decision a
- * workflow asks for, it sends the message with the decision block, as the
- * model would. The research specialist gets an empty handler.
+ * read what the workflows tell the chat, from its log. The research
+ * specialist gets an empty handler.
  */
-const quietAcme = AcmeAssistant.toLayer(() =>
-  Stream.fromEffect(
-    Effect.gen(function* () {
-      const chat = yield* AssistantChat.AssistantChat
-      const states = [...Decision.fromEntries(yield* chat.entries).values()]
-      const waiting = states.flatMap((state) => (state.outcome === undefined ? [state.request.id] : []))
-
-      if (waiting.length === 0) return
-
-      yield* chat.append([
-        AssistantEvent.AssistantMessage.make({
-          id: `ask:${waiting.join(",")}`,
-          text: "Approve it?",
-          block: AssistantEvent.MessageBlock.make({ kind: Decision.kind, props: { decisionIds: waiting } })
-        })
-      ])
-    })
-  ).pipe(Stream.drain)
-).pipe(Layer.provide(Research.toLayer(() => Stream.empty)))
+const quietAcme = AcmeAssistant.toLayer(() => Stream.empty).pipe(Layer.provide(Research.toLayer(() => Stream.empty)))
 
 // The runner wants a model; nothing here calls it.
 const model = Layer.effect(
@@ -61,12 +38,6 @@ const model = Layer.effect(
     streamText: () => Stream.die("Nothing here calls the model.")
   })
 )
-
-/** The library's inputs stored in a chat so far. */
-const inputsOf = (chatId: ChatId.ChatId) =>
-  ChatLog.ChatLog.use((log) => log.read(chatId)).pipe(
-    Effect.map((entries) => entries.flatMap(({ event }) => (AssistantEvent.isInput(event) ? [event] : [])))
-  )
 
 const decodeStep = Schema.decodeUnknownOption(Schema.toCodecJson(WorkflowStep))
 
@@ -93,33 +64,6 @@ const waitFor = (chatId: ChatId.ChatId, status: string) =>
     Effect.timeout("10 seconds")
   )
 
-/** The message that asks for the user's decision, once the assistant sent it. */
-const askedFor = (chatId: ChatId.ChatId) =>
-  ChatLog.ChatLog.use((log) => log.read(chatId)).pipe(
-    Effect.map(
-      (entries) =>
-        entries.flatMap(({ event }) =>
-          Predicate.isTagged(event, "AssistantMessage") && event.block?.kind === Decision.kind ? [event] : []
-        )[0]
-    ),
-    Effect.filterOrFail(Predicate.isNotUndefined, () => "not asked yet"),
-    Effect.retry(Schedule.spaced("50 millis")),
-    Effect.timeout("10 seconds")
-  )
-
-/** The user's answer to the decision block, as the web app sends it. */
-const answer = (message: AssistantEvent.AssistantMessage, outcome: AssistantEvent.DecisionOutcome) =>
-  Effect.gen(function* () {
-    const props = yield* Schema.decodeUnknownEffect(Decision.Props)(message.block?.props)
-
-    return AssistantEvent.BlockAnswer.make({
-      id: InputId.fromKey(`${message.id}:answer`),
-      messageId: message.id,
-      kind: Decision.kind,
-      value: Decision.answerAll(props, outcome)
-    })
-  })
-
 const startCampaign = (chatId: ChatId.ChatId) =>
   Effect.gen(function* () {
     yield* Campaign.CreateCampaign.execute(
@@ -138,18 +82,11 @@ const startCampaign = (chatId: ChatId.ChatId) =>
   })
 
 describe("CreateCampaign", () => {
-  it.live("asks for the user's decision, then goes live and reports first results", () =>
+  it.live("goes live and reports first results", () =>
     Effect.gen(function* () {
       yield* Effect.gen(function* () {
         const chatId = yield* ChatId.make
         yield* startCampaign(chatId)
-
-        const asked = yield* askedFor(chatId)
-        const [request] = (yield* inputsOf(chatId)).filter((input) => Predicate.isTagged(input, "DecisionRequested"))
-
-        expect(request?.preview).toMatchObject({ campaign: "Summer Campaign", office: "Acme Amsterdam", budget: 6000 })
-
-        yield* AcmeAssistant.submit(chatId, yield* answer(asked, "approved"))
         yield* waitFor(chatId, "first_results")
 
         expect((yield* stepsOf(chatId)).map((step) => step.status)).toEqual([
@@ -158,19 +95,6 @@ describe("CreateCampaign", () => {
           "live",
           "first_results"
         ])
-      }).pipe(Effect.provide(layer))
-    })
-  )
-
-  it.live("stops when the user declines", () =>
-    Effect.gen(function* () {
-      yield* Effect.gen(function* () {
-        const chatId = yield* ChatId.make
-        yield* startCampaign(chatId)
-        yield* AcmeAssistant.submit(chatId, yield* answer(yield* askedFor(chatId), "declined"))
-        yield* waitFor(chatId, "declined")
-
-        expect((yield* stepsOf(chatId)).map((step) => step.status)).toEqual(["declined"])
       }).pipe(Effect.provide(layer))
     })
   )

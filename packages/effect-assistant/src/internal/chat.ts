@@ -21,7 +21,6 @@ import { AssistantChat } from "../AssistantChat.ts"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import type { ChatId } from "../ChatId.ts"
 import { ChatLog } from "../ChatLog.ts"
-import * as Decision from "../Decision.ts"
 import type { InputId } from "../InputId.ts"
 import * as SpecialistService from "../Specialist.ts"
 import * as Decisions from "./decisions.ts"
@@ -39,18 +38,6 @@ const idOf = (event: { readonly _tag: string }): string | undefined =>
     : Predicate.hasProperty(event, "id") && Predicate.isString(event.id)
       ? event.id
       : undefined
-
-/**
- * Whether an input is a workflow's decision: the answer completes its deferred, which takes a workflow engine.
- */
-const needsWorkflows = (input: AssistantEvent.Input | AssistantEvent.StoredAppEvent) =>
-  AssistantEvent.isLibraryEvent(input) &&
-  Predicate.isTagged(input, "DecisionRequested") &&
-  Predicate.isTagged(input.origin, "Work") &&
-  input.origin.token !== undefined
-
-const noWorkflows = (request: { readonly _tag: string }) =>
-  `A workflow's ${request._tag} needs the WorkflowEngine to pass the answer on: provide it to the assistant's layer.`
 
 /** The chat's live entries, for its subscribers; shut down with the chat. */
 const makeChannelPubSub = Effect.acquireRelease(PubSub.unbounded<AssistantEvent.Entry>(), PubSub.shutdown)
@@ -192,22 +179,8 @@ export const make = Effect.fnUntraced(function* (options: {
     append: (events) => Semaphore.withPermit(writes)(write(events))
   })
 
-  /** Passes a workflow's decision on: completes the deferred it waits on. */
-  const deliver = Effect.fnUntraced(function* ({ request, outcome }: Decisions.Decided) {
-    const { origin } = request
-
-    if (!Predicate.isTagged(origin, "Work") || origin.token === undefined) return
-
-    const token = origin.token
-
-    if (Option.isNone(registration.workflows)) return yield* Effect.die(noWorkflows(request))
-
-    yield* Effect.provideContext(Decisions.complete(token, outcome), registration.workflows.value)
-  })
-
-  /** Records what an answer decided, once any workflow waiting on it has it. */
+  /** Records what an answer decided: an approved call runs at the turn's next step. */
   const resolve = Effect.fnUntraced(function* (decided: ReadonlyArray<Decisions.Decided>, answer: InputId) {
-    yield* Effect.forEach(decided, deliver, { discard: true })
     yield* chat.append(
       decided.map(({ request, outcome }) => AssistantEvent.DecisionResolved.make({ id: request.id, outcome, answer }))
     )
@@ -220,8 +193,6 @@ export const make = Effect.fnUntraced(function* (options: {
    */
   const store = Effect.fnUntraced(function* (input: AssistantEvent.Input | AssistantEvent.StoredAppEvent) {
     if (yield* isDeleted) return yield* refusedDeleted(input)
-
-    if (needsWorkflows(input) && Option.isNone(registration.workflows)) return yield* Effect.die(noWorkflows(input))
 
     // Checked under the write lock: a retry that arrives while the first submit is storing is stored once.
     const verdict = yield* Semaphore.withPermit(writes)(
@@ -325,29 +296,12 @@ export const make = Effect.fnUntraced(function* (options: {
     Context.merge(registration.model)
   )
 
-  /**
-   * Declines what workflows still wait on: no one can answer them now, and declining runs nothing.
-   */
-  const declineWaiting = Effect.gen(function* () {
-    if (Option.isNone(registration.workflows)) return
-
-    const waiting = [...Decision.fromEntries(yield* Ref.get(entries)).values()].filter(
-      ({ request, outcome }) =>
-        outcome === undefined && Predicate.isTagged(request.origin, "Work") && request.origin.token !== undefined
-    )
-
-    yield* Effect.forEach(waiting, ({ request }) => deliver({ request, outcome: "declined" }), {
-      discard: true
-    })
-  })
-
   const remove = Effect.gen(function* () {
     // Under the write lock: an append in flight is stored, and deleted with the rest; none comes after.
     const first = yield* Semaphore.withPermit(writes)(
       Effect.gen(function* () {
         if (yield* isDeleted) return false
 
-        yield* declineWaiting
         yield* storage.delete(chatId)
         yield* Ref.set(entries, [])
 

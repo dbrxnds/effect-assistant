@@ -322,19 +322,4 @@ describe("History.fromEntries, decisions", () => {
     expect(texts(history).at(-1)).toContain(`- ${id}: declined: place_order didn't run, and won't.`)
     expect(Decisions.approvedCalls(entries(declined))).toEqual([])
   })
-
-  it("reads a decision that work asks for as an input, with its preview", () => {
-    const request = AssistantEvent.DecisionRequested.make({
-      id: DecisionId.fromKey("launch"),
-      origin: AssistantEvent.WorkOrigin.make({ source: "workflow:Launch" }),
-      preview: { budget: 2000 }
-    })
-
-    const log = entries([say("hi"), AssistantEvent.TurnCompleted.make({ throughSeq: 1 }), request])
-
-    expect(needsTurn(log)).toBe(true)
-    expect(texts(fromEntries(log)).at(-1)).toBe(
-      `<decision id="${request.id}" source="workflow:Launch" status="requested">\nWork that's running needs the user's decision. The user hasn't seen it: send them a message with a decision block for this id that says what they decide on.\n{"budget":2000}\n</decision>`
-    )
-  })
 })

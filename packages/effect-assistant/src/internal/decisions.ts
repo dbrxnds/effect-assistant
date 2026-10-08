@@ -1,6 +1,6 @@
 /**
  * Decisions in a chat: whether a loop may park a call, which answers the
- * chat takes, and what's left to run or pass on.
+ * chat takes, and which approved calls are left to run.
  */
 import * as Response from "effect/ai/Response"
 import * as Context from "effect/Context"
@@ -9,8 +9,6 @@ import type * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import * as DurableDeferred from "effect/workflow/DurableDeferred"
-import type * as WorkflowEngine from "effect/workflow/WorkflowEngine"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import * as BlockKit from "../BlockKit.ts"
 import * as Decision from "../Decision.ts"
@@ -105,25 +103,14 @@ const answerVerdict = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, answer: 
   return Verdicts.Decide({ decided, answer: answer.id })
 }
 
-/**
- * Returns what the chat does with a submitted input, given its entries. A
- * parked call comes only from the chat's own loop, so a submitted one is
- * refused.
- */
+/** Returns what the chat does with a submitted input, given its entries. */
 export const verdict = (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
   input: AssistantEvent.Input | AssistantEvent.StoredAppEvent
-): Verdict => {
-  if (!AssistantEvent.isLibraryEvent(input)) return store
-
-  if (Predicate.isTagged(input, "DecisionRequested")) {
-    return Predicate.isTagged(input.origin, "Call")
-      ? refuse("A tool call waits for a decision only from the chat's own loop.")
-      : store
-  }
-
-  return Predicate.isTagged(input, "BlockAnswer") ? answerVerdict(entries, input) : store
-}
+): Verdict =>
+  AssistantEvent.isLibraryEvent(input) && Predicate.isTagged(input, "BlockAnswer")
+    ? answerVerdict(entries, input)
+    : store
 
 /**
  * Returns the decisions answered but not resolved: a restart cut the chat
@@ -146,7 +133,7 @@ export const approvedCalls = (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>
 ): ReadonlyArray<AssistantEvent.ToolCallPart> =>
   [...Decision.fromEntries(entries).values()].flatMap(({ request, outcome, resolved, result }) =>
-    Predicate.isTagged(request.origin, "Call") && resolved && outcome === "approved" && result === undefined
+    resolved && outcome === "approved" && result === undefined
       ? [
           Response.makePart("tool-call", {
             id: request.origin.callId,
@@ -157,15 +144,3 @@ export const approvedCalls = (
         ]
       : []
   )
-
-// The token names the deferred to complete; this one only encodes the outcome, like the one the workflow waits on.
-const anyDecision = DurableDeferred.make("effect-assistant/Decision", {
-  success: AssistantEvent.DecisionOutcome
-})
-
-/** Completes a workflow's decision: the deferred its token names. */
-export const complete = (
-  token: string,
-  outcome: AssistantEvent.DecisionOutcome
-): Effect.Effect<void, never, WorkflowEngine.WorkflowEngine> =>
-  DurableDeferred.succeed(anyDecision, { token: DurableDeferred.Token.make(token), value: outcome })

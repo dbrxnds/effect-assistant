@@ -31,7 +31,7 @@ Each event is stored as an `AssistantEvent.Entry`: the chat id, a `seq`
 | `TurnStarted`, `TurnCompleted`, `TurnFailed` | [Turn](./turns) bookkeeping.                                                                                             |
 | `SpecialistStarted`, `SpecialistFinished`    | A [specialist](./specialists) run working, and done; a finished run's report wakes a turn.                               |
 | `BlocksClosed`                               | [Blocks](./blocks) closed without an answer.                                                                             |
-| `DecisionRequested`, `DecisionResolved`      | A [decision](./decisions) the user is asked to make (for a parked call, or by running work), and how they decided.       |
+| `DecisionRequested`, `DecisionResolved`      | A [decision](./decisions) the user is asked to make for a parked call, and how they decided.                             |
 | Your own events                              | [Yours](./app-events), like a workflow's progress or a summary, stored as themselves.                                    |
 
 A `ModelOutput` is one model call: its response parts (text, reasoning, and
@@ -43,9 +43,8 @@ writes), and how long it took. A `ToolResult` is a call's `outcome`
 the log to the trace.
 
 The first two are **inputs**: submitting one starts a turn, or joins the
-one that is running. So is a `SpecialistFinished`, a `DecisionRequested`
-that running work submits (not one for a parked call, which the turn
-records), and each of your events registered with `wakes: true`. A chat
+one that is running. So is a `SpecialistFinished`, and each of your events
+registered with `wakes: true`. A chat
 client may submit `UserMessage` and `BlockAnswer`
 (`AssistantEvent.UserInput`); your events come from your server, which
 submits them itself.
@@ -132,7 +131,7 @@ activity.specialists // which specialists, since when
 Server-side code that folds the log one entry at a time uses
 `AssistantActivity.apply`; pass `{ wakes }`, the tags of your events that
 wake a turn, so they count as inputs. A chat client gets the same from its
-[view](./client)'s `activity`. A workflow waiting on an approval or a timer
+[view](./client)'s `activity`. A workflow waiting on a timer
 isn't working: the assistant took its last step, and the workflow's next
 event wakes it.
 

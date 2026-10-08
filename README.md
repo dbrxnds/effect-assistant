@@ -255,25 +255,8 @@ const orders = AssistantLoop.fromToolkit(
 const ShopHandlers = Shop.toLayer((turn) => turn.loop({ instructions, toolkit: orders }))
 ```
 
-Running work can ask too. Inside an Effect workflow, `Decision.durable`
-suspends until the user answers, across restarts. Provide a
-`WorkflowEngine`, such as `ClusterWorkflowEngine.layer`.
-
-```ts
-const outcome =
-  yield *
-  Decision.durable(Shop, {
-    chatId,
-    name: "publish",
-    source: "workflow:Publish",
-    preview: post
-  })
-
-if (outcome === "declined") return
-```
-
-Outside a workflow, use `Decision.request` and then `Decision.outcome`. See
-[decisions](./apps/docs/guide/decisions.md).
+Work that needs approval asks before it starts: put `needsApproval` on the
+tool that starts the workflow. See [decisions](./apps/docs/guide/decisions.md).
 
 ### UI blocks in messages
 
