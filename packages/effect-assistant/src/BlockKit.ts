@@ -166,7 +166,7 @@ export const staleBlocks = (
  * @category utils
  * @since 0.1.0
  */
-export const closeStale = Effect.fnUntraced(function* (options: { readonly messages: number }) {
+export const closeStale = Effect.fn(function* (options: { readonly messages: number }) {
   const chat = yield* AssistantChat
   const stale = staleBlocks(yield* chat.entries, options)
 

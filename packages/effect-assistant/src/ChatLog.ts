@@ -82,20 +82,20 @@ export interface Storage {
 export const make = (storage: Storage): ChatLog["Service"] =>
   ChatLog.of({
     read: storage.read,
-    append: Effect.fnUntraced(
-      function* (chatId: ChatId, events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>) {
-        if (events.length === 0) return []
+    append: Effect.fn("ChatLog.append")(function* (
+      chatId: ChatId,
+      events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>
+    ) {
+      if (events.length === 0) return []
 
-        const seq = yield* storage.lastSeq(chatId)
-        const at = yield* Clock.currentTimeMillis
-        const entries = events.map((event, n) => AssistantEvent.Entry.make({ chatId, seq: seq + n + 1, at, event }))
+      const seq = yield* storage.lastSeq(chatId)
+      const at = yield* Clock.currentTimeMillis
+      const entries = events.map((event, n) => AssistantEvent.Entry.make({ chatId, seq: seq + n + 1, at, event }))
 
-        yield* storage.write(chatId, entries)
+      yield* storage.write(chatId, entries)
 
-        return entries
-      },
-      (effect) => Effect.withSpan(effect, "ChatLog.append", { captureStackTrace: false })
-    ),
+      return entries
+    }),
     unfinished: Effect.gen(function* () {
       const last = yield* storage.lastEntries
 

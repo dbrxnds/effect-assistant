@@ -168,23 +168,17 @@ export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.e
     })
 
     return AssistantEngine.of({
-      register: Effect.fnUntraced(
-        function* (registration: Turns.Registration) {
-          registered.set(registration.definition.name, registration)
-          // Chats this assistant was working on when the process stopped: pick them up again.
-          yield* Effect.forkScoped(resumeAll(registration))
-        },
-        (effect) => Effect.withSpan(effect, "AssistantEngine.register", { captureStackTrace: false })
-      ),
+      register: Effect.fn("AssistantEngine.register")(function* (registration: Turns.Registration) {
+        registered.set(registration.definition.name, registration)
+        // Chats this assistant was working on when the process stopped: pick them up again.
+        yield* Effect.forkScoped(resumeAll(registration))
+      }),
       submit: (assistant, chatId, input) => withChat(assistant, chatId, (chat) => chat.submitInBackground(input)),
       // The chat deletes itself, so a chat that's open stops; the entry goes, and the next open finds it deleted.
-      delete: Effect.fnUntraced(
-        function* (assistant: string, chatId: ChatId) {
-          yield* withChat(assistant, chatId, (chat) => chat.delete)
-          yield* RcMap.invalidate(chats, new ChatKey({ assistant, chatId }))
-        },
-        (effect) => Effect.withSpan(effect, "AssistantEngine.delete", { captureStackTrace: false })
-      ),
+      delete: Effect.fn("AssistantEngine.delete")(function* (assistant: string, chatId: ChatId) {
+        yield* withChat(assistant, chatId, (chat) => chat.delete)
+        yield* RcMap.invalidate(chats, new ChatKey({ assistant, chatId }))
+      }),
       // The subscriber holds the chat open while it streams.
       subscribe: (assistant, chatId, after) =>
         Stream.unwrap(
@@ -322,14 +316,15 @@ export const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Shardin
 
     return AssistantEngine.of({
       register: (registration) => register(registration).pipe(Effect.provide(context)),
-      submit: Effect.fnUntraced(
-        function* (assistant: string, chatId: ChatId, input: AssistantEvent.Input | AssistantEvent.StoredAppEvent) {
-          const client = yield* clientOf(assistant)
+      submit: Effect.fn("AssistantEngine.submit")(function* (
+        assistant: string,
+        chatId: ChatId,
+        input: AssistantEvent.Input | AssistantEvent.StoredAppEvent
+      ) {
+        const client = yield* clientOf(assistant)
 
-          yield* client.submit(chatId, input)
-        },
-        (effect) => Effect.withSpan(effect, "AssistantEngine.submit", { captureStackTrace: false })
-      ),
+        yield* client.submit(chatId, input)
+      }),
       subscribe: (assistant, chatId, after) =>
         Stream.unwrap(
           Effect.gen(function* () {
@@ -338,14 +333,11 @@ export const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Shardin
             return client.subscribe(chatId, after)
           })
         ),
-      delete: Effect.fnUntraced(
-        function* (assistant: string, chatId: ChatId) {
-          const client = yield* clientOf(assistant)
+      delete: Effect.fn("AssistantEngine.delete")(function* (assistant: string, chatId: ChatId) {
+        const client = yield* clientOf(assistant)
 
-          yield* client.delete(chatId)
-        },
-        (effect) => Effect.withSpan(effect, "AssistantEngine.delete", { captureStackTrace: false })
-      )
+        yield* client.delete(chatId)
+      })
     })
   })
 )
