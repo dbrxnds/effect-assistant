@@ -32,8 +32,6 @@ export * as ChatId from "./ChatId.ts"
 
 export * as Decision from "./Decision.ts"
 
-export * as Eval from "./Eval.ts"
-
 export * as DecisionId from "./DecisionId.ts"
 
 export * as InputId from "./InputId.ts"

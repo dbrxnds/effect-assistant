@@ -4,7 +4,7 @@
 
 Sync with the version running in production, on effect 4.0.0 (AI, cluster, and workflow modules moved out of `effect/unstable/*`).
 
-New: `Memory` (facts across chats, per personal and team scope, with `remember` / `forget` / `recall` tools), `Compaction` (a summary in place of a long chat's start), and `Eval` (pass rates over repeated trials, with a model judge).
+New: `Memory` (facts across chats, per personal and team scope, with `remember` / `forget` / `recall` tools) and `Compaction` (a summary in place of a long chat's start).
 
 Breaking changes, and how to migrate:
 
