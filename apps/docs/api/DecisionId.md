@@ -6,16 +6,17 @@
 import { DecisionId } from "effect-assistant"
 ```
 
-The `DecisionId` module defines the id of one decision the user is asked
-to make: `decision:` followed by a UUID. The model passes it to a decision
-block, and the user's answer names it.
+This module provides the id of a decision the user is asked to make, which is `decision:`
+followed by a UUID.
+
+The model passes the id to a decision block, and the user's answer refers to it.
 
 ## Constructors
 
 ### fromKey
 
-Creates the decision id for a key: the same key gives the same id, so
-requesting the decision again stores it once.
+Creates the decision id for a key. The same key always gives the same id, so a decision that is
+requested again is stored only once.
 
 ```ts
 const fromKey: (key: string) => DecisionId
@@ -25,7 +26,8 @@ const fromKey: (key: string) => DecisionId
 
 ### fromCallId
 
-The decision id of a tool call that waits for the user's decision.
+Returns the decision id for a tool call that waits for the user's decision, derived from the
+call's id.
 
 ```ts
 const fromCallId: (callId: string) => DecisionId
@@ -37,7 +39,7 @@ const fromCallId: (callId: string) => DecisionId
 
 ### DecisionId
 
-A decision id.
+Represents a decision id.
 
 ```ts
 type DecisionId = typeof DecisionId.Type
@@ -49,7 +51,7 @@ type DecisionId = typeof DecisionId.Type
 
 ### DecisionId
 
-Schema for decision ids: `` `decision:${uuid}` ``, branded.
+Schema for decision ids of the form `` `decision:${uuid}` ``, branded.
 
 ```ts
 const DecisionId = Schema.TemplateLiteral(["decision:", Uuid.Uuid]).pipe( …

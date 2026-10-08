@@ -1,8 +1,10 @@
 /**
- * The `AssistantEvent` module defines everything that can happen in a chat. A chat
- * is an append-only log of these events, and the log is the source of truth:
- * a chat client gets what its user sees of it (`ChatView`), and the model's
- * history is rebuilt from it before every model call.
+ * Defines the events that can happen in a chat.
+ *
+ * A chat is an append-only log of these events, and the log is the source of truth. A chat client
+ * receives the part of the log its user sees (`ChatView`), and the model's history is rebuilt
+ * from the log before every model call. Besides the library's events ({@link AssistantEvent}), a
+ * log holds the application's own events ({@link StoredAppEvent}).
  *
  * @since 0.1.0
  */
@@ -15,8 +17,9 @@ import { InputId, make as makeInputId } from "./InputId.ts"
 import { RunId } from "./RunId.ts"
 
 /**
- * A file the user attached to a message, by reference: the file itself is
- * stored elsewhere, so the log never holds its bytes.
+ * Schema for a file the user attached to a message, kept by reference.
+ *
+ * The file itself is stored elsewhere, so the log never holds its bytes.
  *
  * @category schemas
  * @since 0.1.0
@@ -30,7 +33,9 @@ export const Attachment = Schema.Struct({
 })
 
 /**
- * The most files one message carries: each is a line in every prompt after it.
+ * The maximum number of files one message can carry.
+ *
+ * Each attached file is a line in every prompt after the message.
  *
  * @category utils
  * @since 0.1.0
@@ -38,7 +43,7 @@ export const Attachment = Schema.Struct({
 export const MAX_ATTACHMENTS = 10
 
 /**
- * A file the user attached to a message.
+ * Represents a file the user attached to a message.
  *
  * @category models
  * @since 0.1.0
@@ -46,7 +51,7 @@ export const MAX_ATTACHMENTS = 10
 export type Attachment = typeof Attachment.Type
 
 /**
- * A byte count for people and the model: `2.1 MB`.
+ * Formats a byte count for people and the model, such as `2.1 MB`.
  *
  * @category utils
  * @since 0.1.0
@@ -61,7 +66,9 @@ export const formatSize = (bytes: number): string =>
         : `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
 
 /**
- * The line the model reads for an attachment. It names the file and never holds its content.
+ * Returns the line the model reads for an attachment.
+ *
+ * The line names the file and never holds its content.
  *
  * @category utils
  * @since 0.1.0
@@ -70,7 +77,7 @@ export const attachmentLine = (attachment: Attachment): string =>
   `[attached: ${attachment.name}, ${attachment.mediaType}, ${formatSize(attachment.size)}, id ${attachment.fileId}]`
 
 /**
- * The text of a message followed by a line per attached file.
+ * Returns a message's text followed by a line for each attached file.
  *
  * @category utils
  * @since 0.1.0
@@ -81,8 +88,10 @@ export const textWithAttachments = (text: string, attachments: ReadonlyArray<Att
     : [text, ...attachments.map(attachmentLine)].filter((part) => part.length > 0).join("\n")
 
 /**
- * Text the user typed, and the files they attached. `id` defaults to a new
- * one; pass the client's own to make a retried send store the message once.
+ * Represents text the user typed, and the files they attached.
+ *
+ * `id` defaults to a new one. Pass the client's own id so that a retried send stores the message
+ * once.
  *
  * @category schemas
  * @since 0.1.0
@@ -94,9 +103,10 @@ export class UserMessage extends Schema.TaggedClass<UserMessage>()("UserMessage"
 }) {}
 
 /**
- * The user used a block: which message it was on, and the value in the
- * block's answer schema (its JSON form). A chat UI shows it inside the block
- * rather than as a message.
+ * Represents the user's answer to a block.
+ *
+ * It holds the id of the message the block was on, and the value in the block's answer schema
+ * (in its JSON form). A chat UI shows it inside the block rather than as a message.
  *
  * @category schemas
  * @since 0.1.0
@@ -109,9 +119,10 @@ export class BlockAnswer extends Schema.TaggedClass<BlockAnswer>()("BlockAnswer"
 }) {}
 
 /**
- * A specialist run finished working on a brief. Unless the assistant stopped
- * it, it's an input: a turn reads its report and decides what to tell the
- * user. Its id is fixed per run and brief, so it's stored once.
+ * Represents a specialist run that finished working on a brief.
+ *
+ * Unless the assistant stopped the run, it is an input, and a turn reads its report and decides
+ * what to tell the user. Its id is fixed per run and brief, so it is stored once.
  *
  * @category schemas
  * @since 0.1.0
@@ -129,7 +140,7 @@ export class SpecialistFinished extends Schema.TaggedClass<SpecialistFinished>()
 }) {}
 
 /**
- * Schema for how the user decided: `"approved"` or `"declined"`.
+ * Schema for how the user decided, either `"approved"` or `"declined"`.
  *
  * @category schemas
  * @since 0.1.0
@@ -137,7 +148,7 @@ export class SpecialistFinished extends Schema.TaggedClass<SpecialistFinished>()
 export const DecisionOutcome = Schema.Literals(["approved", "declined"])
 
 /**
- * How the user decided.
+ * Represents how the user decided.
  *
  * @category models
  * @since 0.1.0
@@ -145,8 +156,9 @@ export const DecisionOutcome = Schema.Literals(["approved", "declined"])
 export type DecisionOutcome = typeof DecisionOutcome.Type
 
 /**
- * Schema for a decision a tool call waits for: the call, as the model wrote
- * it. Approving it runs exactly this call.
+ * Schema for the origin of a decision that a tool call waits for.
+ *
+ * It holds the call as the model wrote it. Approving the decision runs exactly this call.
  *
  * @category schemas
  * @since 0.1.0
@@ -158,7 +170,7 @@ export const CallOrigin = Schema.TaggedStruct("Call", {
 })
 
 /**
- * A decision a tool call waits for.
+ * Represents the origin of a decision that a tool call waits for.
  *
  * @category models
  * @since 0.1.0
@@ -166,7 +178,7 @@ export const CallOrigin = Schema.TaggedStruct("Call", {
 export type CallOrigin = typeof CallOrigin.Type
 
 /**
- * The user is asked to decide something: approve or decline.
+ * Represents a request for the user to decide something, by approving or declining it.
  *
  * @category schemas
  * @since 0.1.0
@@ -177,9 +189,9 @@ export class DecisionRequested extends Schema.TaggedClass<DecisionRequested>()("
 }) {}
 
 /**
- * A decision is made: the user answered a decision block for it (`answer` is
- * that `BlockAnswer`'s id). An approved call runs next, at the turn's next
- * step.
+ * Represents a decision the user made by answering a decision block for it.
+ *
+ * `answer` is the id of that `BlockAnswer`. An approved call runs at the turn's next step.
  *
  * @category schemas
  * @since 0.1.0
@@ -191,7 +203,7 @@ export class DecisionResolved extends Schema.TaggedClass<DecisionResolved>()("De
 }) {}
 
 /**
- * Schema for everything `Assistant.submit` accepts.
+ * Schema for every input `Assistant.submit` accepts.
  *
  * @category schemas
  * @since 0.1.0
@@ -199,7 +211,7 @@ export class DecisionResolved extends Schema.TaggedClass<DecisionResolved>()("De
 export const Input = Schema.Union([UserMessage, BlockAnswer, SpecialistFinished])
 
 /**
- * An input to an assistant.
+ * Represents an input to an assistant.
  *
  * @category models
  * @since 0.1.0
@@ -207,9 +219,10 @@ export const Input = Schema.Union([UserMessage, BlockAnswer, SpecialistFinished]
 export type Input = typeof Input.Type
 
 /**
- * Schema for the inputs from the chat's user: messages and block answers. A
- * turn owes each one a reply. It's also what a chat client usually may
- * submit; the app's events come from the server.
+ * Schema for the inputs from the chat's user, which are messages and block answers.
+ *
+ * A turn owes each one a reply. It is also what a chat client usually may submit, since the app's
+ * events come from the server.
  *
  * @category schemas
  * @since 0.1.0
@@ -217,7 +230,7 @@ export type Input = typeof Input.Type
 export const UserInput = Schema.Union([UserMessage, BlockAnswer])
 
 /**
- * An input from the chat's user.
+ * Represents an input from the chat's user.
  *
  * @category models
  * @since 0.1.0
@@ -225,8 +238,8 @@ export const UserInput = Schema.Union([UserMessage, BlockAnswer])
 export type UserInput = typeof UserInput.Type
 
 /**
- * The UI shown with a message: a block kind from the assistant's `BlockKit`, and
- * its props.
+ * Represents the UI shown with a message, as a block kind from the assistant's `BlockKit` and its
+ * props.
  *
  * @category schemas
  * @since 0.1.0
@@ -237,7 +250,7 @@ export class MessageBlock extends Schema.Class<MessageBlock>("effect-assistant/M
 }) {}
 
 /**
- * A message the assistant sent the user with `send_user_message`, optionally with a
+ * Represents a message the assistant sent the user with `send_user_message`, optionally with a
  * block.
  *
  * @category schemas
@@ -247,14 +260,15 @@ export class AssistantMessage extends Schema.TaggedClass<AssistantMessage>()("As
   id: Schema.String,
   text: Schema.String,
   block: Schema.optional(MessageBlock),
-  /** Earlier messages whose block the user answered by typing instead; their blocks close. */
+  /** Earlier messages whose block the user answered by typing instead. Their blocks close. */
   closes: Schema.optional(Schema.Array(Schema.String))
 }) {}
 
 /**
- * Schema for a tool call the model made: `effect/ai`'s tool call
- * part (`Response.ToolCallPart`) for any tool, with its params in JSON, as the
- * model wrote them.
+ * Schema for a tool call the model made.
+ *
+ * It is `effect/ai`'s tool call part (`Response.ToolCallPart`) for any tool, with its params in
+ * JSON, as the model wrote them.
  *
  * @category schemas
  * @since 0.1.0
@@ -265,7 +279,7 @@ export const ToolCallPart = Schema.Struct({
 }).annotate({ identifier: "ToolCallPart" })
 
 /**
- * A tool call the model made.
+ * Represents a tool call the model made.
  *
  * @category models
  * @since 0.1.0
@@ -273,9 +287,10 @@ export const ToolCallPart = Schema.Struct({
 export type ToolCallPart = typeof ToolCallPart.Type
 
 /**
- * Schema for what the log keeps of a model call: `effect/ai`'s
- * response parts for text, reasoning (with the provider's metadata, like a
- * thinking block's signature), and tool calls.
+ * Schema for what the log keeps of a model call.
+ *
+ * It uses `effect/ai`'s response parts for text, reasoning (with the provider's metadata, such as
+ * a thinking block's signature), and tool calls.
  *
  * @category schemas
  * @since 0.1.0
@@ -283,7 +298,7 @@ export type ToolCallPart = typeof ToolCallPart.Type
 export const ModelPart = Schema.Union([Response.TextPart, Response.ReasoningPart, ToolCallPart])
 
 /**
- * A part of a model call's output.
+ * Represents a part of a model call's output.
  *
  * @category models
  * @since 0.1.0
@@ -291,8 +306,9 @@ export const ModelPart = Schema.Union([Response.TextPart, Response.ReasoningPart
 export type ModelPart = typeof ModelPart.Type
 
 /**
- * What one model call wrote: text, reasoning, and tool calls, as response
- * parts. `Prompt.fromResponseParts` turns them into history.
+ * Represents what one model call wrote, as response parts for text, reasoning, and tool calls.
+ *
+ * `Prompt.fromResponseParts` turns the parts into history.
  *
  * @category schemas
  * @since 0.1.0
@@ -305,20 +321,21 @@ export class ModelOutput extends Schema.TaggedClass<ModelOutput>()("ModelOutput"
    * outputs had read.
    */
   seenThroughSeq: Schema.optional(Schema.Int),
-  /** The model that wrote it: the provider's id for it, or the name the context gave it. */
+  /** The model that wrote it, as the provider's id for it or the name the context gave it. */
   model: Schema.optional(Schema.String),
   /** The provider's id for the response, when it gives one. */
   responseId: Schema.optional(Schema.String),
-  /** The call's tokens: input (with the cache's reads and writes) and output. */
+  /** The call's token usage, with input (including the cache's reads and writes) and output. */
   usage: Schema.optional(Response.Usage),
   /** How long the call took, in milliseconds. */
   durationMillis: Schema.optional(Schema.Finite)
 }) {}
 
 /**
- * A tool call is about to run. It's stored before the tool runs, so after a
- * crash the log says which calls may have done something: they run again,
- * with the same call id (see `AssistantToolCall`).
+ * Represents a tool call that is about to run.
+ *
+ * It is stored before the tool runs, so after a crash the log says which calls may have done
+ * something. Those calls run again with the same call id (see `AssistantToolCall`).
  *
  * @category schemas
  * @since 0.1.0
@@ -329,8 +346,8 @@ export class ToolStarted extends Schema.TaggedClass<ToolStarted>()("ToolStarted"
 }) {}
 
 /**
- * Schema for how a tool call went: `"success"`, or `"failure"`, which the
- * model reads as an error.
+ * Schema for how a tool call went, either `"success"` or `"failure"`, which the model reads as an
+ * error.
  *
  * @category schemas
  * @since 0.1.0
@@ -338,7 +355,7 @@ export class ToolStarted extends Schema.TaggedClass<ToolStarted>()("ToolStarted"
 export const ToolOutcome = Schema.Literals(["success", "failure"])
 
 /**
- * How a tool call went.
+ * Represents how a tool call went.
  *
  * @category models
  * @since 0.1.0
@@ -346,9 +363,11 @@ export const ToolOutcome = Schema.Literals(["success", "failure"])
 export type ToolOutcome = typeof ToolOutcome.Type
 
 /**
- * The result of one tool call, as the model reads it: the tool's success or
- * failure in its encoded (JSON) form, and which one it is. A failure says its
- * kind when it has one: a `ToolFailure`'s `kind`, or its tag.
+ * Represents the result of one tool call, as the model reads it.
+ *
+ * It holds the tool's success or failure in its encoded (JSON) form, and which of the two it is. A
+ * failure includes its kind when it has one, which is a `ToolFailure`'s `kind` or the failure's
+ * tag.
  *
  * @category schemas
  * @since 0.1.0
@@ -362,7 +381,7 @@ export class ToolResult extends Schema.TaggedClass<ToolResult>()("ToolResult", {
 }) {}
 
 /**
- * A turn started.
+ * Represents the start of a turn.
  *
  * @category schemas
  * @since 0.1.0
@@ -377,8 +396,9 @@ export class TurnStarted extends Schema.TaggedClass<TurnStarted>()("TurnStarted"
 }) {}
 
 /**
- * A turn finished. `throughSeq` is the last entry it read; inputs after it
- * still need a turn.
+ * Represents a turn that finished.
+ *
+ * `throughSeq` is the last entry the turn read. Inputs after it still need a turn.
  *
  * @category schemas
  * @since 0.1.0
@@ -388,8 +408,10 @@ export class TurnCompleted extends Schema.TaggedClass<TurnCompleted>()("TurnComp
 }) {}
 
 /**
- * A turn failed. `throughSeq` covers everything stored when it failed, so a
- * failing input isn't retried forever.
+ * Represents a turn that failed.
+ *
+ * `throughSeq` covers everything stored when the turn failed, so a failing input isn't retried
+ * forever.
  *
  * @category schemas
  * @since 0.1.0
@@ -400,9 +422,11 @@ export class TurnFailed extends Schema.TaggedClass<TurnFailed>()("TurnFailed", {
 }) {}
 
 /**
- * A specialist run started working: spawned, or continued by a follow-up
- * message. The model doesn't see it: the call that started the run says
- * so, and its report arrives as a {@link SpecialistFinished}.
+ * Represents a specialist run that started working, either spawned or continued by a follow-up
+ * message.
+ *
+ * The model doesn't see it, since the call that started the run says so, and the run's report
+ * arrives as a {@link SpecialistFinished}.
  *
  * @category schemas
  * @since 0.1.0
@@ -415,8 +439,10 @@ export class SpecialistStarted extends Schema.TaggedClass<SpecialistStarted>()("
 }) {}
 
 /**
- * The chat was deleted: it stores nothing after this, what worked in it
- * stopped, and its subscribers' streams end here. Its log stays.
+ * Represents the deletion of a chat.
+ *
+ * The chat stores nothing after it, the work running in the chat stopped, and its subscribers'
+ * streams end here. Its log stays.
  *
  * @category schemas
  * @since 0.1.0
@@ -424,8 +450,10 @@ export class SpecialistStarted extends Schema.TaggedClass<SpecialistStarted>()("
 export class ChatDeleted extends Schema.TaggedClass<ChatDeleted>()("ChatDeleted", {}) {}
 
 /**
- * Blocks closed without an answer, like the ones `turn.loop`'s
- * `BlockKit.closeStale` closes once the user moved on. The model doesn't see it.
+ * Represents blocks that closed without an answer, like the ones `BlockKit.closeStale` closes
+ * from a turn once the user moved on.
+ *
+ * The model doesn't see it.
  *
  * @category schemas
  * @since 0.1.0
@@ -459,7 +487,7 @@ export const AssistantEvent = Schema.Union([
 ])
 
 /**
- * An event the library defines.
+ * Represents an event the library defines.
  *
  * @category models
  * @since 0.1.0
@@ -471,10 +499,11 @@ const libraryTags: ReadonlySet<string> = new Set(
 )
 
 /**
- * Schema for the tag of one of the app's own events: any tag but the
- * library's, branded, so narrowing an entry's event to one of the library's
- * events (`Predicate.isTagged(event, "UserMessage")`) never leaves an app
- * event in.
+ * Schema for the tag of one of the application's own events.
+ *
+ * It accepts any tag but the library's, and it is branded, so narrowing an entry's event to one
+ * of the library's events (`Predicate.isTagged(event, "UserMessage")`) never leaves an app event
+ * in.
  *
  * @category schemas
  * @since 0.1.0
@@ -482,9 +511,11 @@ const libraryTags: ReadonlySet<string> = new Set(
 export const AppTag = Schema.String.pipe(Schema.brand("effect-assistant/AppTag"))
 
 /**
- * Schema for one of the app's own events, as it's stored: its `_tag` and its
- * fields in JSON. An assistant made with `events: [AppEvent.make(Summary)]`
- * decodes it to a `Summary` in `AssistantChat`'s `entries` and in its `subscribe`.
+ * Schema for one of the application's own events as it is stored, with its `_tag` and its fields
+ * in JSON.
+ *
+ * An assistant made with `events: [AppEvent.make(Summary)]` decodes it to a `Summary` in
+ * `AssistantChat`'s `entries` and in its `subscribe`.
  *
  * @category schemas
  * @since 0.1.0
@@ -494,7 +525,7 @@ export const StoredAppEvent = Schema.StructWithRest(Schema.Struct({ _tag: AppTag
 ]).check(Schema.makeFilter((event) => !libraryTags.has(event._tag) || `${event._tag} is one of the library's events`))
 
 /**
- * One of the app's own events, as it's stored.
+ * Represents one of the application's own events, as it is stored.
  *
  * @category models
  * @since 0.1.0
@@ -510,9 +541,10 @@ export type StoredAppEvent = typeof StoredAppEvent.Type
 export const isLibraryEvent = (event: { readonly _tag: string }): event is AssistantEvent => libraryTags.has(event._tag)
 
 /**
- * A chat's entry with any event in it: the library's, or the app's own
- * (decoded or not). What the folds over a chat take, so a client's typed
- * entries fit too.
+ * Represents a chat's entry with any event in it, either the library's or the application's own
+ * (decoded or not).
+ *
+ * The folds over a chat take this type, so a client's typed entries fit too.
  *
  * @category models
  * @since 0.1.0
@@ -525,8 +557,10 @@ export interface AnyEntry {
 }
 
 /**
- * Schema for a stored event with its position in the chat. `seq` starts at 1
- * and has no gaps; `at` is the time it was stored, in epoch milliseconds.
+ * Schema for a stored event with its position in the chat.
+ *
+ * `seq` starts at 1 and has no gaps. `at` is the time the event was stored, in epoch
+ * milliseconds.
  *
  * @category schemas
  * @since 0.1.0
@@ -539,7 +573,7 @@ export const Entry = Schema.Struct({
 })
 
 /**
- * A stored event with its position in the chat.
+ * Represents a stored event with its position in the chat.
  *
  * @category models
  * @since 0.1.0
@@ -547,9 +581,11 @@ export const Entry = Schema.Struct({
 export type Entry = typeof Entry.Type
 
 /**
- * Returns whether an event is one of the library's inputs: a user message,
- * a block answer, or a finished specialist run. The app's events that wake a turn are inputs too, but only
- * their assistant knows which (see `AppEvent`).
+ * Returns whether an event is one of the library's inputs, which are a user message, a block
+ * answer, or a finished specialist run.
+ *
+ * The application's events that wake a turn are inputs too, but only their assistant knows which
+ * (see `AppEvent`).
  *
  * @category guards
  * @since 0.1.0
@@ -560,7 +596,7 @@ export const isInput = (event: { readonly _tag: string }): event is Input =>
   Predicate.isTagged(event, "SpecialistFinished")
 
 /**
- * Returns whether an input starts a turn: every one but a run the assistant
+ * Returns whether an input starts a turn, which every input does except a run the assistant
  * stopped itself.
  *
  * @category guards

@@ -6,15 +6,50 @@
 import { ToolFailure } from "effect-assistant"
 ```
 
-The `ToolFailure` module is the failure a tool gives the model: a message
-it reads and adapts to, like "No office named Paris", instead of a turn that
-fails.
+Defines the failure a tool returns to the model.
+
+A `ToolFailure` carries a message the model reads and adapts to, such as "No office named
+Paris", instead of failing the turn. Tools declare it as their `failure` schema and fail with
+`fail`.
 
 ## Constructors
 
 ### fail
 
 Fails a tool's handler with a message for the model.
+
+**Details**
+
+The tool must declare `failure: ToolFailure.ToolFailure`. The model reads the failure as the
+call's result, with its `kind` when one is given.
+
+**Example** (Failing a tool call the model can correct)
+
+```ts
+import { ToolFailure } from "effect-assistant"
+import * as Tool from "effect/ai/Tool"
+import * as Toolkit from "effect/ai/Toolkit"
+import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
+
+const budgets = new Map([["Oslo", 1200]])
+
+const BudgetTools = Toolkit.make(
+  Tool.make("office_budget", {
+    description: "The budget left for an office.",
+    parameters: Schema.Struct({ office: Schema.String }),
+    success: Schema.Number,
+    failure: ToolFailure.ToolFailure
+  })
+)
+
+const BudgetToolsLive = BudgetTools.toLayer({
+  office_budget: ({ office }) =>
+    Effect.fromNullishOr(budgets.get(office)).pipe(
+      Effect.catch(() => ToolFailure.fail(`No office named ${office}.`, { kind: "not_found" }))
+    )
+})
+```
 
 ```ts
 const fail: (
@@ -29,8 +64,10 @@ const fail: (
 
 ### ToolFailure
 
-A tool's failure, written for the model: what went wrong, and optionally a
-kind it can tell apart (`"not_found"`, `"over_budget"`).
+Represents a tool's failure, written for the model.
+
+It holds a message that says what went wrong and, optionally, a `kind` the model can tell apart,
+such as `"not_found"` or `"over_budget"`.
 
 ```ts
 class ToolFailure extends Schema.TaggedError<ToolFailure>()("ToolFailure", {

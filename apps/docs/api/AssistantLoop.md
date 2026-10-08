@@ -6,14 +6,15 @@
 import { AssistantLoop } from "effect-assistant"
 ```
 
-The `AssistantLoop` module is the agent loop: call the model, run its tool
-calls, repeat. `turn.loop` and `run.loop` are what most handlers need; this
-is for a loop of your own: `run` runs it until the model is done, and
-`step` is one step, as a body for `loop`.
+Runs the agent loop, which calls the model, runs its tool calls, and repeats.
 
-Tools are a native toolkit (`effect/ai/Toolkit`), with its handlers from the
-handler's layer. In a turn, the assistant's own tools (`send_user_message`,
-`wait`, the specialist tools) come with them.
+Most handlers use `turn.loop` or `run.loop`. This module is for a loop of your own: `run`
+runs the loop until the model is done, and `step` is one step, as a body for
+`loop`.
+
+Tools are a native toolkit (`effect/ai/Toolkit`) whose handlers come from the handler's layer.
+In a turn, the assistant's own tools (`send_user_message`, `wait`, and the specialist tools)
+are added to them.
 
 ## Constructors
 
@@ -29,7 +30,7 @@ const value = Loop.value …
 
 ### next
 
-Ends a loop body's step and goes on with this state.
+Ends a loop body's step and continues the loop with the given state.
 
 ```ts
 const next = Loop.next …
@@ -49,8 +50,10 @@ const stop = Loop.stop …
 
 ### loop
 
-Runs a loop body from a state: emits its values, and runs it again with the
-state it goes `next` with, until it `stop`s.
+Runs a loop body from an initial state.
+
+It emits the body's values, and runs the body again with the state it passes to `next`, until
+the body calls `stop`.
 
 ```ts
 const loop = Loop.loop …
@@ -60,12 +63,14 @@ const loop = Loop.loop …
 
 ### step
 
-One step of the agent loop, as a body for `loop`: it calls the model
-with the current history and emits its `ModelOutput`, then runs the
-output's tool calls and emits a `ToolStarted` and a `ToolResult` for each,
-or a `DecisionRequested` for one that waits for the user's decision.
-`then` decides what comes next: `AssistantLoop.next(state)` or
-`AssistantLoop.stop()`.
+Runs one step of the agent loop, as a body for `loop`.
+
+**Details**
+
+The step calls the model with the current history and emits its `ModelOutput`. It then runs
+the output's tool calls and emits a `ToolStarted` and a `ToolResult` for each, or a
+`DecisionRequested` for a call that waits for the user's decision. `then` receives the step's
+result and decides what comes next, with `AssistantLoop.next(state)` or `AssistantLoop.stop()`.
 
 ```ts
 const step: <T extends Record<string, Tool.Any> = NoTools, S = never, E2 = never, R2 = never>(
@@ -78,9 +83,31 @@ const step: <T extends Record<string, Tool.Any> = NoTools, S = never, E2 = never
 
 ### run
 
-Runs the agent loop as a stream: `step` after step, until the model
-is done and nothing new arrived while it worked, or after `maxSteps` model
-calls.
+Runs the agent loop as a stream.
+
+**Details**
+
+It runs `step` after step until the model is done and nothing new arrived while it
+worked, or until it has made `maxSteps` model calls.
+
+**Example** (A turn's loop with a step limit)
+
+```ts
+import { AssistantLoop } from "effect-assistant"
+import * as Layer from "effect/Layer"
+import * as Stream from "effect/Stream"
+
+const instructions = "You help a small marketing team."
+
+const MyAssistantLive = MyAssistant.toLayer((turn) =>
+  AssistantLoop.run({
+    instructions: turn.instructions(instructions),
+    toolkit: MyTools, // the assistant's own tools are added to them
+    history: turn.history(),
+    maxSteps: 12
+  }).pipe(Stream.concat(turn.replyIfOwed({ instructions })))
+).pipe(Layer.provide(MyToolsLive))
+```
 
 ```ts
 const run: <T extends Record<string, Tool.Any> = NoTools>(
@@ -94,9 +121,11 @@ const run: <T extends Record<string, Tool.Any> = NoTools>(
 
 ### Event
 
-What the loop produces: each model call's output, then for each of its tool
-calls a `ToolStarted` before it runs and its result, or, for a call that
-waits for the user's decision, its `DecisionRequested`.
+Represents what the loop emits.
+
+For each model call, the loop emits the call's output. Then, for each of its tool calls, it
+emits a `ToolStarted` before the call runs and the call's result, or a `DecisionRequested` for
+a call that waits for the user's decision.
 
 ```ts
 type Event = Loop.Event
@@ -106,7 +135,9 @@ type Event = Loop.Event
 
 ### ChatHistory
 
-A chat's history as the model reads it: its messages, and the last `seq` of the chat they cover.
+Represents a chat's history as the model reads it.
+
+It holds the messages, and the last `seq` of the chat they cover.
 
 ```ts
 type ChatHistory = Loop.ChatHistory
@@ -116,7 +147,7 @@ type ChatHistory = Loop.ChatHistory
 
 ### StepResult
 
-How a step went, for deciding what comes next.
+Represents how a step went, for deciding what comes next.
 
 ```ts
 type StepResult = Loop.StepResult
@@ -126,7 +157,7 @@ type StepResult = Loop.StepResult
 
 ### Step
 
-What a loop body emits: a value, or what to do next.
+Represents what a loop body emits, which is either a value or what to do next.
 
 ```ts
 type Step<A, S> = Loop.Step<A, S>
@@ -136,36 +167,38 @@ type Step<A, S> = Loop.Step<A, S>
 
 ### StepOptions
 
-Options for `step`.
+Represents the options for `step`.
 
 ```ts
 interface StepOptions<T extends Record<string, Tool.Any> = NoTools> {
   /** The full system prompt, like `turn.instructions(text)`, optionally with span attributes. */
   readonly instructions: string | Instructions.Resolved
-  /** The tools the model can call, next to the assistant's own in a turn. Its handlers come from the layer. */
+  /**
+   * The tools the model can call, in addition to the assistant's own tools in a turn. Their
+   * handlers come from the layer.
+   */
   readonly toolkit?: Toolkit.Toolkit<T> | undefined
   /**
-   * The current history, read at the start of the step: messages, or a
-   * chat's history (`turn.history()`), whose `throughSeq` the step's
-   * `ModelOutput` records as how far the model had read.
+   * The current history, read at the start of the step. It is either messages, or a chat's
+   * history (`turn.history()`), whose `throughSeq` the step's `ModelOutput` records as how far
+   * the model had read.
    */
   readonly history: Effect.Effect<ReadonlyArray<Prompt.Message> | ChatHistory>
   /**
-   * Default `"auto"`: a step without a tool call ends the loop. Forcing a
-   * call (`"required"`, or a tool by name) is refused by newer models, and
-   * with extended thinking.
+   * Defaults to `"auto"`, where a step without a tool call ends the loop. Forcing a call
+   * (`"required"`, or a tool by name) is refused by newer models, and with extended thinking.
    */
   readonly toolChoice?: LanguageModel.ToolChoice<string> | undefined
 }
 
 /**
- * Options for {@link run}.
+ * Represents the options for {@link run}.
  *
  * @category models
  * @since 0.1.0
  */
 export interface Options<T extends Record<string, Tool.Any> = NoTools> extends StepOptions<T> {
-  /** Model calls allowed. Default 16. */
+  /** The model calls allowed. Defaults to 16. */
   readonly maxSteps?: number | undefined
 }
 
@@ -177,12 +210,14 @@ const toolsOf = <T extends Record<string, Tool.Any>>(toolkit: Toolkit.Toolkit<T>
   })
 
 /**
- * One step of the agent loop, as a body for {@link loop}: it calls the model
- * with the current history and emits its `ModelOutput`, then runs the
- * output's tool calls and emits a `ToolStarted` and a `ToolResult` for each,
- * or a `DecisionRequested` for one that waits for the user's decision.
- * `then` decides what comes next: `AssistantLoop.next(state)` or
- * `AssistantLoop.stop()`.
+ * Runs one step of the agent loop, as a body for {@link loop}.
+ *
+ * **Details**
+ *
+ * The step calls the model with the current history and emits its `ModelOutput`. It then runs
+ * the output's tool calls and emits a `ToolStarted` and a `ToolResult` for each, or a
+ * `DecisionRequested` for a call that waits for the user's decision. `then` receives the step's
+ * result and decides what comes next, with `AssistantLoop.next(state)` or `AssistantLoop.stop()`.
  *
  * @category constructors
  * @since 0.1.0
@@ -194,9 +229,31 @@ export const step = <T extends Record<string, Tool.Any> = NoTools, S = never, E2
   Stream.unwrap(Effect.map(toolsOf(options.toolkit), (toolkit) => Loop.step({ ...options, toolkit }, then)))
 
 /**
- * Runs the agent loop as a stream: {@link step} after step, until the model
- * is done and nothing new arrived while it worked, or after `maxSteps` model
- * calls.
+ * Runs the agent loop as a stream.
+ *
+ * **Details**
+ *
+ * It runs {@link step} after step until the model is done and nothing new arrived while it
+ * worked, or until it has made `maxSteps` model calls.
+ *
+ * **Example** (A turn's loop with a step limit)
+ *
+ * ```ts
+ * import { AssistantLoop } from "effect-assistant"
+ * import * as Layer from "effect/Layer"
+ * import * as Stream from "effect/Stream"
+ *
+ * const instructions = "You help a small marketing team."
+ *
+ * const MyAssistantLive = MyAssistant.toLayer((turn) =>
+ *   AssistantLoop.run({
+ *     instructions: turn.instructions(instructions),
+ *     toolkit: MyTools, // the assistant's own tools are added to them
+ *     history: turn.history(),
+ *     maxSteps: 12
+ *   }).pipe(Stream.concat(turn.replyIfOwed({ instructions })))
+ * ).pipe(Layer.provide(MyToolsLive))
+ * ```
  *
  * @category constructors
  * @since 0.1.0
@@ -211,11 +268,11 @@ export const run = <T extends Record<string, Tool.Any> = NoTools>(
 
 ### Options
 
-Options for `run`.
+Represents the options for `run`.
 
 ```ts
 interface Options<T extends Record<string, Tool.Any> = NoTools> extends StepOptions<T> {
-  /** Model calls allowed. Default 16. */
+  /** The model calls allowed. Defaults to 16. */
   readonly maxSteps?: number | undefined
 }
 ```
@@ -226,7 +283,8 @@ interface Options<T extends Record<string, Tool.Any> = NoTools> extends StepOpti
 
 ### ToolkitServices
 
-What a toolkit's tools need when they run: their handlers, and what those use.
+Extracts the services a toolkit's tools need when they run, which are their handlers and the
+services those handlers use.
 
 ```ts
 type ToolkitServices<T extends Record<string, Tool.Any>> = Tool.HandlersFor<T> | Toolkits.ToolServices<T>

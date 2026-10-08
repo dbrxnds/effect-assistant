@@ -6,14 +6,17 @@
 import { Instructions } from "effect-assistant"
 ```
 
-The `Instructions` module defines what an assistant, specialist, or skill is
-told to do: text, optionally with span attributes (a `Resolved`).
+Defines the instructions that tell an assistant, specialist, or skill what to do.
+
+Instructions are text, or an Effect that produces text, optionally with span attributes
+(a `Resolved`). `resolve` turns them into a `Resolved`, and `protocol` is the
+text a turn's loop needs the model to know.
 
 ## Models
 
 ### SpanAttributes
 
-Span attributes added to every model call made with a prompt.
+Represents the span attributes added to every model call made with a prompt.
 
 ```ts
 type SpanAttributes = Readonly<Record<string, string | number | boolean>>
@@ -23,7 +26,7 @@ type SpanAttributes = Readonly<Record<string, string | number | boolean>>
 
 ### Resolved
 
-Instructions with the span attributes to record them under.
+Represents instructions resolved to text, with the span attributes to record them under.
 
 ```ts
 interface Resolved {
@@ -36,7 +39,8 @@ interface Resolved {
 
 ### Instructions
 
-Text, or an Effect that produces it (optionally with span attributes).
+Represents instructions as text, or as an Effect that produces the text (optionally with span
+attributes).
 
 ```ts
 type Instructions<R = never> = string | Effect.Effect<string | Resolved, never, R>
@@ -48,13 +52,17 @@ type Instructions<R = never> = string | Effect.Effect<string | Resolved, never, 
 
 ### protocol
 
-What the model has to know for a turn's loop to work: every step is a tool
-call, `wait` (or a last message with `wait: true`) ends the turn, and
-messages can arrive mid-turn. The rest (the user sees only
-`send_user_message`, what a `<specialist>` or an app's event is) is in the
-tools' descriptions and in the history itself.
-`turn.instructions(text)` puts it before the text; a custom loop on
-`AssistantLoop.run` can use it too.
+The text the model has to know for a turn's loop to work.
+
+**Details**
+
+It tells the model that every step is a tool call, that `wait` (or a last message with
+`wait: true`) ends the turn, that the user sees only what it sends with `send_user_message`, and
+that messages can arrive mid-turn. The rest, such as what a `<specialist>` block or an app's
+event is, is in the tools' descriptions and in the history itself.
+
+`turn.instructions(text)` puts it before the text, and a custom loop on `AssistantLoop.run` can
+use it too.
 
 ```ts
 const protocol = `Every step is a tool call. When you have nothing more to do right now, end your turn: set wait to true on your last send_user_message, or call wait if you have nothing to say. …
@@ -64,7 +72,7 @@ const protocol = `Every step is a tool call. When you have nothing more to do ri
 
 ### resolve
 
-Resolves instructions to text and span attributes.
+Resolves instructions to their text and span attributes.
 
 ```ts
 const resolve = Effect.fnUntraced( …

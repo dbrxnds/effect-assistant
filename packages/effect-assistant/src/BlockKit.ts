@@ -1,6 +1,10 @@
 /**
- * The `BlockKit` module groups the blocks an assistant may put in its messages, and
- * renders them on the client.
+ * Groups the blocks an assistant may put in its messages, and renders them on the client.
+ *
+ * A kit is created with {@link make} and passed to `Assistant.make`. {@link blockStates} computes
+ * the state of every message's block from a chat's log, {@link closeStale} closes the blocks the
+ * user moved on from, and {@link toClient} creates a client-side renderer with one function per
+ * block kind.
  *
  * @since 0.1.0
  */
@@ -16,7 +20,7 @@ import * as Decision from "./Decision.ts"
 import * as InputId from "./InputId.ts"
 
 /**
- * A catalog of blocks.
+ * Represents a catalog of blocks, with a lookup by kind.
  *
  * @category models
  * @since 0.1.0
@@ -46,14 +50,14 @@ type PropsOf<B> = B extends { readonly props: Schema.Top } ? B["props"]["Type"] 
 type AnswerOf<B> = B extends { readonly answer: infer A } ? (A extends Schema.Top ? A["Type"] : never) : never
 
 /**
- * Where a message's block stands.
+ * Represents the state of a message's block.
  *
  * @category models
  * @since 0.1.0
  */
 export interface BlockState {
   readonly open: boolean
-  /** Its answer, if the user used it. */
+  /** The user's answer, if they used the block. */
   readonly answer: AssistantEvent.BlockAnswer | undefined
 }
 
@@ -109,9 +113,13 @@ export const blockStates = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): Re
 }
 
 /**
- * Returns the blocks still open after the user typed this many messages
- * without using them: the ones {@link closeStale} closes. Decision blocks
- * never go stale: work waits on them, and closing one would leave it waiting.
+ * Returns the ids of the messages whose blocks are still open after the user typed the given
+ * number of messages without using them.
+ *
+ * **Details**
+ *
+ * These are the blocks {@link closeStale} closes. Decision blocks never go stale, since work waits
+ * on them and closing one would leave it waiting.
  *
  * @category utils
  * @since 0.1.0
@@ -145,9 +153,15 @@ export const staleBlocks = (
 }
 
 /**
- * Closes the blocks the user moved on from: still open after this many typed
- * messages. Run it from a turn, before or after its loop; it records a
- * `BlocksClosed` event, so every client folds them closed.
+ * Closes the blocks the user moved on from, which are still open after the given number of typed
+ * messages.
+ *
+ * **Details**
+ *
+ * Run it from a turn, before or after its loop. It records a `BlocksClosed` event, so every
+ * client folds the blocks closed.
+ *
+ * @see {@link staleBlocks} for the blocks it closes
  *
  * @category utils
  * @since 0.1.0
@@ -160,7 +174,7 @@ export const closeStale = Effect.fnUntraced(function* (options: { readonly messa
 })
 
 /**
- * What a renderer gets for one block.
+ * Represents what a renderer receives for one block.
  *
  * @category models
  * @since 0.1.0
@@ -168,13 +182,16 @@ export const closeStale = Effect.fnUntraced(function* (options: { readonly messa
 export interface RenderArgs<B> {
   readonly text: string
   readonly props: PropsOf<B>
-  /** False once it's answered, with the block or in words: show it read-only then. */
+  /**
+   * Whether the block is open. It is `false` once the block is answered, with the block or in
+   * words; show it read-only then.
+   */
   readonly open: boolean
   /** The user's answer, if they used the block. */
   readonly answer: AnswerOf<B> | undefined
   /**
-   * For the decision block: the call each decision is for (its tool and params), and how it was decided. Empty
-   * otherwise.
+   * For the decision block, the call each decision is for (its tool and params) and how it was
+   * decided. Empty for other blocks.
    */
   readonly decisions: ReadonlyArray<ChatView.Decision>
   /** Sends an answer. Only call it while `open`. */
@@ -182,7 +199,7 @@ export interface RenderArgs<B> {
 }
 
 /**
- * A renderer for every kind in a kit.
+ * Represents a renderer for every kind in a kit.
  *
  * @category models
  * @since 0.1.0
@@ -192,7 +209,7 @@ export type Renderers<Kit extends BlockKit, Out> = {
 }
 
 /**
- * Options for rendering one message's block.
+ * Represents the options for rendering one message's block.
  *
  * @category models
  * @since 0.1.0
@@ -206,6 +223,41 @@ export interface RenderOptions {
  * Creates a client-side renderer for the blocks on a chat view's messages
  * (`ChatView.AssistantMessage`).
  *
+ * **Details**
+ *
+ * The renderers are type-checked, so every kind in the kit needs one, and each receives typed
+ * `props` and `answer`. A renderer's `respond` builds a `BlockAnswer` input, with the answer
+ * encoded by the block's answer schema, and passes it to the `respond` option to submit.
+ *
+ * The returned function returns `undefined` for a message without a block, or with a block it
+ * can't decode or has no renderer for.
+ *
+ * **Example** (Rendering blocks with React)
+ *
+ * ```tsx
+ * import { BlockKit, Decision } from "effect-assistant"
+ * import type { ReactNode } from "react"
+ *
+ * const Blocks = BlockKit.make([PickOne, Decision.block])
+ *
+ * const renderBlock = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
+ *   pick_one: ({ props, open, respond }) =>
+ *     props.options.map((option) => (
+ *       <button key={option} disabled={!open} onClick={() => respond({ picked: option })}>
+ *         {option}
+ *       </button>
+ *     )),
+ *   decision: ({ props, open, respond }) => (
+ *     <button disabled={!open} onClick={() => respond(Decision.answerAll(props, "approved"))}>
+ *       {props.approveLabel ?? "Approve"}
+ *     </button>
+ *   )
+ * })
+ *
+ * // For each AssistantMessage in the chat's view:
+ * renderBlock(message, { respond: (answer) => submit(answer) })
+ * ```
+ *
  * @category constructors
  * @since 0.1.0
  */
@@ -213,7 +265,8 @@ export function toClient<Kit extends BlockKit, Out>(
   kit: Kit,
   renderers: Renderers<Kit, Out>
 ): (message: ChatView.AssistantMessage, options: RenderOptions) => Out | undefined
-// The overload above checks that every kind has a renderer; here each one takes any block's arguments.
+// The overload above checks that every kind has a renderer; here each one takes any block's
+// arguments.
 export function toClient<Out>(
   kit: BlockKit,
   renderers: Readonly<Record<string, (args: RenderArgs<Block.Any>) => Out>>

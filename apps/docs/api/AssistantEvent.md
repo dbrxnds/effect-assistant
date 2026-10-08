@@ -6,16 +6,18 @@
 import { AssistantEvent } from "effect-assistant"
 ```
 
-The `AssistantEvent` module defines everything that can happen in a chat. A chat
-is an append-only log of these events, and the log is the source of truth:
-a chat client gets what its user sees of it (`ChatView`), and the model's
-history is rebuilt from it before every model call.
+Defines the events that can happen in a chat.
+
+A chat is an append-only log of these events, and the log is the source of truth. A chat client
+receives the part of the log its user sees (`ChatView`), and the model's history is rebuilt
+from the log before every model call. Besides the library's events (`AssistantEvent`), a
+log holds the application's own events (`StoredAppEvent`).
 
 ## Models
 
 ### Attachment
 
-A file the user attached to a message.
+Represents a file the user attached to a message.
 
 ```ts
 type Attachment = typeof Attachment.Type
@@ -25,7 +27,7 @@ type Attachment = typeof Attachment.Type
 
 ### DecisionOutcome
 
-How the user decided.
+Represents how the user decided.
 
 ```ts
 type DecisionOutcome = typeof DecisionOutcome.Type
@@ -35,7 +37,7 @@ type DecisionOutcome = typeof DecisionOutcome.Type
 
 ### CallOrigin
 
-A decision a tool call waits for.
+Represents the origin of a decision that a tool call waits for.
 
 ```ts
 type CallOrigin = typeof CallOrigin.Type
@@ -45,7 +47,7 @@ type CallOrigin = typeof CallOrigin.Type
 
 ### Input
 
-An input to an assistant.
+Represents an input to an assistant.
 
 ```ts
 type Input = typeof Input.Type
@@ -55,7 +57,7 @@ type Input = typeof Input.Type
 
 ### UserInput
 
-An input from the chat's user.
+Represents an input from the chat's user.
 
 ```ts
 type UserInput = typeof UserInput.Type
@@ -65,7 +67,7 @@ type UserInput = typeof UserInput.Type
 
 ### ToolCallPart
 
-A tool call the model made.
+Represents a tool call the model made.
 
 ```ts
 type ToolCallPart = typeof ToolCallPart.Type
@@ -75,7 +77,7 @@ type ToolCallPart = typeof ToolCallPart.Type
 
 ### ModelPart
 
-A part of a model call's output.
+Represents a part of a model call's output.
 
 ```ts
 type ModelPart = typeof ModelPart.Type
@@ -85,7 +87,7 @@ type ModelPart = typeof ModelPart.Type
 
 ### ToolOutcome
 
-How a tool call went.
+Represents how a tool call went.
 
 ```ts
 type ToolOutcome = typeof ToolOutcome.Type
@@ -95,7 +97,7 @@ type ToolOutcome = typeof ToolOutcome.Type
 
 ### AssistantEvent
 
-An event the library defines.
+Represents an event the library defines.
 
 ```ts
 type AssistantEvent = typeof AssistantEvent.Type
@@ -105,7 +107,7 @@ type AssistantEvent = typeof AssistantEvent.Type
 
 ### StoredAppEvent
 
-One of the app's own events, as it's stored.
+Represents one of the application's own events, as it is stored.
 
 ```ts
 type StoredAppEvent = typeof StoredAppEvent.Type
@@ -115,9 +117,10 @@ type StoredAppEvent = typeof StoredAppEvent.Type
 
 ### AnyEntry
 
-A chat's entry with any event in it: the library's, or the app's own
-(decoded or not). What the folds over a chat take, so a client's typed
-entries fit too.
+Represents a chat's entry with any event in it, either the library's or the application's own
+(decoded or not).
+
+The folds over a chat take this type, so a client's typed entries fit too.
 
 ```ts
 interface AnyEntry {
@@ -132,7 +135,7 @@ interface AnyEntry {
 
 ### Entry
 
-A stored event with its position in the chat.
+Represents a stored event with its position in the chat.
 
 ```ts
 type Entry = typeof Entry.Type
@@ -144,8 +147,9 @@ type Entry = typeof Entry.Type
 
 ### Attachment
 
-A file the user attached to a message, by reference: the file itself is
-stored elsewhere, so the log never holds its bytes.
+Schema for a file the user attached to a message, kept by reference.
+
+The file itself is stored elsewhere, so the log never holds its bytes.
 
 ```ts
 const Attachment = Schema.Struct({ …
@@ -155,8 +159,10 @@ const Attachment = Schema.Struct({ …
 
 ### UserMessage
 
-Text the user typed, and the files they attached. `id` defaults to a new
-one; pass the client's own to make a retried send store the message once.
+Represents text the user typed, and the files they attached.
+
+`id` defaults to a new one. Pass the client's own id so that a retried send stores the message
+once.
 
 ```ts
 class UserMessage extends Schema.TaggedClass<UserMessage>()("UserMessage", {
@@ -170,9 +176,10 @@ class UserMessage extends Schema.TaggedClass<UserMessage>()("UserMessage", {
 
 ### BlockAnswer
 
-The user used a block: which message it was on, and the value in the
-block's answer schema (its JSON form). A chat UI shows it inside the block
-rather than as a message.
+Represents the user's answer to a block.
+
+It holds the id of the message the block was on, and the value in the block's answer schema
+(in its JSON form). A chat UI shows it inside the block rather than as a message.
 
 ```ts
 class BlockAnswer extends Schema.TaggedClass<BlockAnswer>()("BlockAnswer", {
@@ -187,9 +194,10 @@ class BlockAnswer extends Schema.TaggedClass<BlockAnswer>()("BlockAnswer", {
 
 ### SpecialistFinished
 
-A specialist run finished working on a brief. Unless the assistant stopped
-it, it's an input: a turn reads its report and decides what to tell the
-user. Its id is fixed per run and brief, so it's stored once.
+Represents a specialist run that finished working on a brief.
+
+Unless the assistant stopped the run, it is an input, and a turn reads its report and decides
+what to tell the user. Its id is fixed per run and brief, so it is stored once.
 
 ```ts
 class SpecialistFinished extends Schema.TaggedClass<SpecialistFinished>()("SpecialistFinished", {
@@ -209,7 +217,7 @@ class SpecialistFinished extends Schema.TaggedClass<SpecialistFinished>()("Speci
 
 ### DecisionOutcome
 
-Schema for how the user decided: `"approved"` or `"declined"`.
+Schema for how the user decided, either `"approved"` or `"declined"`.
 
 ```ts
 const DecisionOutcome = Schema.Literals(["approved", "declined"])
@@ -219,8 +227,9 @@ const DecisionOutcome = Schema.Literals(["approved", "declined"])
 
 ### CallOrigin
 
-Schema for a decision a tool call waits for: the call, as the model wrote
-it. Approving it runs exactly this call.
+Schema for the origin of a decision that a tool call waits for.
+
+It holds the call as the model wrote it. Approving the decision runs exactly this call.
 
 ```ts
 const CallOrigin = Schema.TaggedStruct("Call", { …
@@ -230,7 +239,7 @@ const CallOrigin = Schema.TaggedStruct("Call", { …
 
 ### DecisionRequested
 
-The user is asked to decide something: approve or decline.
+Represents a request for the user to decide something, by approving or declining it.
 
 ```ts
 class DecisionRequested extends Schema.TaggedClass<DecisionRequested>()("DecisionRequested", {
@@ -243,9 +252,9 @@ class DecisionRequested extends Schema.TaggedClass<DecisionRequested>()("Decisio
 
 ### DecisionResolved
 
-A decision is made: the user answered a decision block for it (`answer` is
-that `BlockAnswer`'s id). An approved call runs next, at the turn's next
-step.
+Represents a decision the user made by answering a decision block for it.
+
+`answer` is the id of that `BlockAnswer`. An approved call runs at the turn's next step.
 
 ```ts
 class DecisionResolved extends Schema.TaggedClass<DecisionResolved>()("DecisionResolved", {
@@ -259,7 +268,7 @@ class DecisionResolved extends Schema.TaggedClass<DecisionResolved>()("DecisionR
 
 ### Input
 
-Schema for everything `Assistant.submit` accepts.
+Schema for every input `Assistant.submit` accepts.
 
 ```ts
 const Input = Schema.Union([UserMessage, BlockAnswer, SpecialistFinished])
@@ -269,9 +278,10 @@ const Input = Schema.Union([UserMessage, BlockAnswer, SpecialistFinished])
 
 ### UserInput
 
-Schema for the inputs from the chat's user: messages and block answers. A
-turn owes each one a reply. It's also what a chat client usually may
-submit; the app's events come from the server.
+Schema for the inputs from the chat's user, which are messages and block answers.
+
+A turn owes each one a reply. It is also what a chat client usually may submit, since the app's
+events come from the server.
 
 ```ts
 const UserInput = Schema.Union([UserMessage, BlockAnswer])
@@ -281,8 +291,8 @@ const UserInput = Schema.Union([UserMessage, BlockAnswer])
 
 ### MessageBlock
 
-The UI shown with a message: a block kind from the assistant's `BlockKit`, and
-its props.
+Represents the UI shown with a message, as a block kind from the assistant's `BlockKit` and its
+props.
 
 ```ts
 class MessageBlock extends Schema.Class<MessageBlock>("effect-assistant/MessageBlock")({
@@ -295,7 +305,7 @@ class MessageBlock extends Schema.Class<MessageBlock>("effect-assistant/MessageB
 
 ### AssistantMessage
 
-A message the assistant sent the user with `send_user_message`, optionally with a
+Represents a message the assistant sent the user with `send_user_message`, optionally with a
 block.
 
 ```ts
@@ -303,7 +313,7 @@ class AssistantMessage extends Schema.TaggedClass<AssistantMessage>()("Assistant
   id: Schema.String,
   text: Schema.String,
   block: Schema.optional(MessageBlock),
-  /** Earlier messages whose block the user answered by typing instead; their blocks close. */
+  /** Earlier messages whose block the user answered by typing instead. Their blocks close. */
   closes: Schema.optional(Schema.Array(Schema.String))
 })
 ```
@@ -312,9 +322,10 @@ class AssistantMessage extends Schema.TaggedClass<AssistantMessage>()("Assistant
 
 ### ToolCallPart
 
-Schema for a tool call the model made: `effect/ai`'s tool call
-part (`Response.ToolCallPart`) for any tool, with its params in JSON, as the
-model wrote them.
+Schema for a tool call the model made.
+
+It is `effect/ai`'s tool call part (`Response.ToolCallPart`) for any tool, with its params in
+JSON, as the model wrote them.
 
 ```ts
 const ToolCallPart = Schema.Struct({ …
@@ -324,9 +335,10 @@ const ToolCallPart = Schema.Struct({ …
 
 ### ModelPart
 
-Schema for what the log keeps of a model call: `effect/ai`'s
-response parts for text, reasoning (with the provider's metadata, like a
-thinking block's signature), and tool calls.
+Schema for what the log keeps of a model call.
+
+It uses `effect/ai`'s response parts for text, reasoning (with the provider's metadata, such as
+a thinking block's signature), and tool calls.
 
 ```ts
 const ModelPart = Schema.Union([Response.TextPart, Response.ReasoningPart, ToolCallPart])
@@ -336,8 +348,9 @@ const ModelPart = Schema.Union([Response.TextPart, Response.ReasoningPart, ToolC
 
 ### ModelOutput
 
-What one model call wrote: text, reasoning, and tool calls, as response
-parts. `Prompt.fromResponseParts` turns them into history.
+Represents what one model call wrote, as response parts for text, reasoning, and tool calls.
+
+`Prompt.fromResponseParts` turns the parts into history.
 
 ```ts
 class ModelOutput extends Schema.TaggedClass<ModelOutput>()("ModelOutput", {
@@ -348,11 +361,11 @@ class ModelOutput extends Schema.TaggedClass<ModelOutput>()("ModelOutput", {
    * outputs had read.
    */
   seenThroughSeq: Schema.optional(Schema.Int),
-  /** The model that wrote it: the provider's id for it, or the name the context gave it. */
+  /** The model that wrote it, as the provider's id for it or the name the context gave it. */
   model: Schema.optional(Schema.String),
   /** The provider's id for the response, when it gives one. */
   responseId: Schema.optional(Schema.String),
-  /** The call's tokens: input (with the cache's reads and writes) and output. */
+  /** The call's token usage, with input (including the cache's reads and writes) and output. */
   usage: Schema.optional(Response.Usage),
   /** How long the call took, in milliseconds. */
   durationMillis: Schema.optional(Schema.Finite)
@@ -363,9 +376,10 @@ class ModelOutput extends Schema.TaggedClass<ModelOutput>()("ModelOutput", {
 
 ### ToolStarted
 
-A tool call is about to run. It's stored before the tool runs, so after a
-crash the log says which calls may have done something: they run again,
-with the same call id (see `AssistantToolCall`).
+Represents a tool call that is about to run.
+
+It is stored before the tool runs, so after a crash the log says which calls may have done
+something. Those calls run again with the same call id (see `AssistantToolCall`).
 
 ```ts
 class ToolStarted extends Schema.TaggedClass<ToolStarted>()("ToolStarted", {
@@ -378,8 +392,8 @@ class ToolStarted extends Schema.TaggedClass<ToolStarted>()("ToolStarted", {
 
 ### ToolOutcome
 
-Schema for how a tool call went: `"success"`, or `"failure"`, which the
-model reads as an error.
+Schema for how a tool call went, either `"success"` or `"failure"`, which the model reads as an
+error.
 
 ```ts
 const ToolOutcome = Schema.Literals(["success", "failure"])
@@ -389,9 +403,11 @@ const ToolOutcome = Schema.Literals(["success", "failure"])
 
 ### ToolResult
 
-The result of one tool call, as the model reads it: the tool's success or
-failure in its encoded (JSON) form, and which one it is. A failure says its
-kind when it has one: a `ToolFailure`'s `kind`, or its tag.
+Represents the result of one tool call, as the model reads it.
+
+It holds the tool's success or failure in its encoded (JSON) form, and which of the two it is. A
+failure includes its kind when it has one, which is a `ToolFailure`'s `kind` or the failure's
+tag.
 
 ```ts
 class ToolResult extends Schema.TaggedClass<ToolResult>()("ToolResult", {
@@ -407,7 +423,7 @@ class ToolResult extends Schema.TaggedClass<ToolResult>()("ToolResult", {
 
 ### TurnStarted
 
-A turn started.
+Represents the start of a turn.
 
 ```ts
 class TurnStarted extends Schema.TaggedClass<TurnStarted>()("TurnStarted", {
@@ -424,8 +440,9 @@ class TurnStarted extends Schema.TaggedClass<TurnStarted>()("TurnStarted", {
 
 ### TurnCompleted
 
-A turn finished. `throughSeq` is the last entry it read; inputs after it
-still need a turn.
+Represents a turn that finished.
+
+`throughSeq` is the last entry the turn read. Inputs after it still need a turn.
 
 ```ts
 class TurnCompleted extends Schema.TaggedClass<TurnCompleted>()("TurnCompleted", {
@@ -437,8 +454,10 @@ class TurnCompleted extends Schema.TaggedClass<TurnCompleted>()("TurnCompleted",
 
 ### TurnFailed
 
-A turn failed. `throughSeq` covers everything stored when it failed, so a
-failing input isn't retried forever.
+Represents a turn that failed.
+
+`throughSeq` covers everything stored when the turn failed, so a failing input isn't retried
+forever.
 
 ```ts
 class TurnFailed extends Schema.TaggedClass<TurnFailed>()("TurnFailed", {
@@ -451,9 +470,11 @@ class TurnFailed extends Schema.TaggedClass<TurnFailed>()("TurnFailed", {
 
 ### SpecialistStarted
 
-A specialist run started working: spawned, or continued by a follow-up
-message. The model doesn't see it: the call that started the run says
-so, and its report arrives as a `SpecialistFinished`.
+Represents a specialist run that started working, either spawned or continued by a follow-up
+message.
+
+The model doesn't see it, since the call that started the run says so, and the run's report
+arrives as a `SpecialistFinished`.
 
 ```ts
 class SpecialistStarted extends Schema.TaggedClass<SpecialistStarted>()("SpecialistStarted", {
@@ -468,8 +489,10 @@ class SpecialistStarted extends Schema.TaggedClass<SpecialistStarted>()("Special
 
 ### ChatDeleted
 
-The chat was deleted: it stores nothing after this, what worked in it
-stopped, and its subscribers' streams end here. Its log stays.
+Represents the deletion of a chat.
+
+The chat stores nothing after it, the work running in the chat stopped, and its subscribers'
+streams end here. Its log stays.
 
 ```ts
 class ChatDeleted extends Schema.TaggedClass<ChatDeleted>()("ChatDeleted",
@@ -479,8 +502,10 @@ class ChatDeleted extends Schema.TaggedClass<ChatDeleted>()("ChatDeleted",
 
 ### BlocksClosed
 
-Blocks closed without an answer, like the ones `turn.loop`'s
-`BlockKit.closeStale` closes once the user moved on. The model doesn't see it.
+Represents blocks that closed without an answer, like the ones `BlockKit.closeStale` closes
+from a turn once the user moved on.
+
+The model doesn't see it.
 
 ```ts
 class BlocksClosed extends Schema.TaggedClass<BlocksClosed>()("BlocksClosed", {
@@ -502,10 +527,11 @@ const AssistantEvent = Schema.Union([ …
 
 ### AppTag
 
-Schema for the tag of one of the app's own events: any tag but the
-library's, branded, so narrowing an entry's event to one of the library's
-events (`Predicate.isTagged(event, "UserMessage")`) never leaves an app
-event in.
+Schema for the tag of one of the application's own events.
+
+It accepts any tag but the library's, and it is branded, so narrowing an entry's event to one
+of the library's events (`Predicate.isTagged(event, "UserMessage")`) never leaves an app event
+in.
 
 ```ts
 const AppTag = Schema.String.pipe(Schema.brand("effect-assistant/AppTag"))
@@ -515,9 +541,11 @@ const AppTag = Schema.String.pipe(Schema.brand("effect-assistant/AppTag"))
 
 ### StoredAppEvent
 
-Schema for one of the app's own events, as it's stored: its `_tag` and its
-fields in JSON. An assistant made with `events: [AppEvent.make(Summary)]`
-decodes it to a `Summary` in `AssistantChat`'s `entries` and in its `subscribe`.
+Schema for one of the application's own events as it is stored, with its `_tag` and its fields
+in JSON.
+
+An assistant made with `events: [AppEvent.make(Summary)]` decodes it to a `Summary` in
+`AssistantChat`'s `entries` and in its `subscribe`.
 
 ```ts
 const StoredAppEvent = Schema.StructWithRest(Schema.Struct({ _tag: AppTag }), [ …
@@ -527,8 +555,10 @@ const StoredAppEvent = Schema.StructWithRest(Schema.Struct({ _tag: AppTag }), [ 
 
 ### Entry
 
-Schema for a stored event with its position in the chat. `seq` starts at 1
-and has no gaps; `at` is the time it was stored, in epoch milliseconds.
+Schema for a stored event with its position in the chat.
+
+`seq` starts at 1 and has no gaps. `at` is the time the event was stored, in epoch
+milliseconds.
 
 ```ts
 const Entry = Schema.Struct({ …
@@ -550,9 +580,11 @@ const isLibraryEvent: (event: { readonly _tag: string }) => event is AssistantEv
 
 ### isInput
 
-Returns whether an event is one of the library's inputs: a user message,
-a block answer, or a finished specialist run. The app's events that wake a turn are inputs too, but only
-their assistant knows which (see `AppEvent`).
+Returns whether an event is one of the library's inputs, which are a user message, a block
+answer, or a finished specialist run.
+
+The application's events that wake a turn are inputs too, but only their assistant knows which
+(see `AppEvent`).
 
 ```ts
 const isInput: (event: { readonly _tag: string }) => event is Input
@@ -562,7 +594,7 @@ const isInput: (event: { readonly _tag: string }) => event is Input
 
 ### isWaking
 
-Returns whether an input starts a turn: every one but a run the assistant
+Returns whether an input starts a turn, which every input does except a run the assistant
 stopped itself.
 
 ```ts
@@ -595,7 +627,9 @@ const isTurnEnd: (event: { readonly _tag: string }) => event is TurnCompleted | 
 
 ### MAX_ATTACHMENTS
 
-The most files one message carries: each is a line in every prompt after it.
+The maximum number of files one message can carry.
+
+Each attached file is a line in every prompt after the message.
 
 ```ts
 const MAX_ATTACHMENTS = 10 …
@@ -605,7 +639,7 @@ const MAX_ATTACHMENTS = 10 …
 
 ### formatSize
 
-A byte count for people and the model: `2.1 MB`.
+Formats a byte count for people and the model, such as `2.1 MB`.
 
 ```ts
 const formatSize: (bytes: number) => string
@@ -615,7 +649,9 @@ const formatSize: (bytes: number) => string
 
 ### attachmentLine
 
-The line the model reads for an attachment. It names the file and never holds its content.
+Returns the line the model reads for an attachment.
+
+The line names the file and never holds its content.
 
 ```ts
 const attachmentLine: (attachment: Attachment) => string
@@ -625,7 +661,7 @@ const attachmentLine: (attachment: Attachment) => string
 
 ### textWithAttachments
 
-The text of a message followed by a line per attached file.
+Returns a message's text followed by a line for each attached file.
 
 ```ts
 const textWithAttachments: (text: string, attachments: ReadonlyArray<Attachment> | undefined) => string

@@ -6,19 +6,23 @@
 import { Compaction } from "effect-assistant"
 ```
 
-The `Compaction` module holds what a long chat needs so the model can read
-a summary instead of everything before it. When to compact, which model
-writes the summary, and what the summary says are the app's: its handler
-reads the chat's entries, has a model write the summary, stores it as one
-of its own events, and its loop reads the chat with `since`.
+This module provides what a long chat needs so that the model can read a summary in place of
+everything before it.
+
+The app decides when to compact, which model writes the summary, and what the summary says.
+Its handler reads the chat's entries, has a model write a summary, and stores the summary as one
+of the assistant's own events (see `Summary`). Its loop then reads the chat through
+`since`. `inputTokens` helps decide when the prompt has grown large enough to
+compact. The log keeps every entry, so the user still sees the whole chat.
 
 ## Models
 
 ### Summary
 
-What a summary event has: its text, and the last `seq` it covers. Entries
-after `throughSeq` stay as they are, so an input that arrived while the
-summary was written isn't lost.
+Represents the fields a summary event must have: its text and the last `seq` it covers.
+
+Entries after `throughSeq` are kept as they are, so an input that arrived while the summary was
+being written isn't lost.
 
 ```ts
 interface Summary {
@@ -34,8 +38,8 @@ interface Summary {
 
 ### inputTokens
 
-Returns the input tokens of the chat's last model call: how big the prompt
-has grown. 0 before the first call.
+Returns the number of input tokens used by the chat's last model call, which shows how large
+the prompt has grown. Returns 0 before the first call.
 
 ```ts
 const inputTokens: (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => number
@@ -45,9 +49,9 @@ const inputTokens: (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => number
 
 ### openItems
 
-Returns what was still open at `throughSeq` and still is: decisions waiting
-for the user, blocks the user hasn't answered, and specialists working. As
-text for the model, or none when nothing is.
+Returns the items that were open at `throughSeq` and are still open: decisions waiting for the
+user, blocks the user hasn't answered, and specialists that are working. The result is text for
+the model, or `None` when nothing is open.
 
 ```ts
 const openItems: (
@@ -60,8 +64,8 @@ const openItems: (
 
 ### attachedFiles
 
-The files the user attached up to `throughSeq`, as lines for the model, or
-none. A summary may drop a file's id, and tools need it.
+Returns the files the user attached up to `throughSeq`, as lines of text for the model, or
+`None` when there are none. A summary may leave out a file's id, which tools need.
 
 ```ts
 const attachedFiles: (
@@ -74,8 +78,54 @@ const attachedFiles: (
 
 ### since
 
-A history view that starts at the last summary: the summary, what is still
-open, then the entries after it. Without a summary, every entry.
+Creates a history view that starts at the last summary.
+
+**Details**
+
+`isSummary` identifies the app's summary events. The model reads the last summary, the files
+attached earlier (`attachedFiles`), and the items that are still open
+(`openItems`), followed by the entries after the summary. When the chat has no summary,
+the view returns every entry.
+
+**Example** (Compacting a long chat after each turn)
+
+```ts
+import { AppEvent, Assistant, type AssistantEvent, Compaction } from "effect-assistant"
+import * as LanguageModel from "effect/ai/LanguageModel"
+import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
+
+class Summary extends Schema.TaggedClass<Summary>()("Summary", {
+  text: Schema.String,
+  throughSeq: Schema.Int
+}) {}
+
+declare const transcript: (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => string
+
+export const MyAssistant = Assistant.make("my-assistant", { events: [AppEvent.make(Summary)] })
+
+const MyAssistantLive = MyAssistant.toLayer((turn) => {
+  const compact = Effect.gen(function* () {
+    const chat = yield* MyAssistant.Chat
+    const entries = yield* chat.entries
+
+    if (Compaction.inputTokens(entries) < 100_000) return
+
+    const { text } = yield* LanguageModel.generateText({
+      prompt: `Summarize this chat:\n\n${transcript(entries)}`
+    })
+
+    yield* chat.append(Summary.make({ text, throughSeq: entries.at(-1)?.seq ?? 0 }))
+  })
+
+  // After the reply, so the user doesn't wait for the summary.
+  return Stream.concat(
+    turn.loop({ instructions: "Be brief.", history: Compaction.since(Schema.is(Summary)) }),
+    Stream.drain(Stream.fromEffect(compact))
+  )
+})
+```
 
 ```ts
 const since: (isSummary: (event: unknown) => event is Summary) => …

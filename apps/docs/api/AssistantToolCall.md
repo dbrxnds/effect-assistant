@@ -6,21 +6,24 @@
 import { AssistantToolCall } from "effect-assistant"
 ```
 
-The `AssistantToolCall` module gives a tool the call it runs for: its id,
-and a key for anything it does outside the chat.
+Gives a tool the call it runs for.
+
+The `AssistantToolCall` service holds the call's id and the tool's name, and
+`idempotencyKey` derives a key for anything the call does outside the chat.
 
 ## Services
 
 ### AssistantToolCall
 
-Service for the tool call a tool runs for. The agent loop provides it to
-every call.
+Service that describes the tool call a tool runs for.
+
+The agent loop provides it to every call.
 
 ```ts
 class AssistantToolCall extends Context.Service<
   AssistantToolCall,
   {
-    /** The call's id, as the model wrote it. The same when the call runs again after a crash. */
+    /** The call's id, as the model wrote it. It stays the same when a crash runs the call again. */
     readonly callId: string
     /** The tool's name. */
     readonly tool: string
@@ -34,8 +37,9 @@ class AssistantToolCall extends Context.Service<
 
 ### idempotencyKey
 
-A key for what this call does outside the chat: the same every time the
-call runs, and different for every other call.
+Gets an idempotency key for what the current tool call does outside the chat.
+
+The key is the same every time the call runs, and different for every other call.
 
 ```ts
 const idempotencyKey: Effect.Effect<string, never, AssistantToolCall>

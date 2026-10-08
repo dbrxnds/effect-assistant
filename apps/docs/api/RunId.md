@@ -6,15 +6,14 @@
 import { RunId } from "effect-assistant"
 ```
 
-The `RunId` module defines the id of one background run, such as a
-specialist run or a workflow started from a tool: `run:` followed by a
-UUID.
+This module provides the id of a background run, such as a specialist run or a workflow started
+from a tool. A run id is `run:` followed by a UUID.
 
 ## Constructors
 
 ### make
 
-Creates a new random run id, with Effect's `Random`.
+Creates a new random run id using Effect's `Random`.
 
 ```ts
 const make: Effect.Effect<RunId>
@@ -24,9 +23,12 @@ const make: Effect.Effect<RunId>
 
 ### fromKey
 
-Creates the run id for a key, the same every time: for a run a tool call
-starts, from its `AssistantToolCall.idempotencyKey`, so running the call
-again finds the same run.
+Creates the run id for a key. The same key always gives the same id.
+
+**When to use**
+
+Use it for a run that a tool call starts, with the call's `AssistantToolCall.idempotencyKey` as
+the key, so running the call again finds the same run.
 
 ```ts
 const fromKey: (key: string) => RunId
@@ -38,7 +40,7 @@ const fromKey: (key: string) => RunId
 
 ### RunId
 
-A run id.
+Represents a run id.
 
 ```ts
 type RunId = typeof RunId.Type
@@ -50,7 +52,7 @@ type RunId = typeof RunId.Type
 
 ### RunId
 
-Schema for run ids: `` `run:${uuid}` ``, branded.
+Schema for run ids of the form `` `run:${uuid}` ``, branded.
 
 ```ts
 const RunId = Schema.TemplateLiteral(["run:", Uuid.Uuid]).pipe(Schema.brand("effect-assistant/RunId"))

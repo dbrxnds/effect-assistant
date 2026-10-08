@@ -1,8 +1,8 @@
 /**
- * The `ToolDiscovery` module turns a catalog toolkit into two tools, so the
- * prompt doesn't carry every definition: `search_tools` finds tools by what the
- * model needs to do (name, description, input schema), and `execute_tool`
- * validates an input and runs one.
+ * Turns a catalog toolkit into two tools, so the prompt doesn't carry every tool definition.
+ *
+ * `search_tools` finds tools by what the model needs to do and returns their names, descriptions,
+ * and input schemas. `execute_tool` validates an input and runs one of them.
  *
  * @since 0.1.0
  */
@@ -69,12 +69,14 @@ const ExecuteTool = Tool.make("execute_tool", {
     input: Schema.Record(Schema.String, Schema.Json)
   }),
   success: Schema.Json,
-  // The tool's failure is this call's, so the loop sees it failed (a `wait: true` message doesn't end the turn).
+  // The tool's failure is this call's, so the loop sees it failed (a `wait: true` message doesn't
+  // end the turn).
   failure: Schema.Json,
   dependencies: [AssistantToolCall]
 })
 
-// A tool's requirements are a covariant phantom type, so one that needs nothing is one that needs any.
+// A tool's requirements are a covariant phantom type, so one that needs nothing is one that needs
+// any.
 const requiring =
   <R>() =>
   <N extends string, C extends (Tool.Any extends Tool.Tool<string, infer K, unknown> ? K : never), R0>(
@@ -83,10 +85,35 @@ const requiring =
     tool
 
 /**
- * `search_tools` and `execute_tool` over a catalog toolkit, as a native
- * toolkit and its handlers' layer. Merge the toolkit into the loop's, and
- * provide the layer, which needs the catalog's handlers. A catalog tool's
- * services are `execute_tool`'s: the turn provides them, as for any tool.
+ * Creates the `search_tools` and `execute_tool` tools over a catalog toolkit.
+ *
+ * **Details**
+ *
+ * It returns a native `toolkit` and its handlers' `layer`. Merge the toolkit into the loop's, and
+ * provide the layer, which needs the catalog's handlers. A catalog tool's services are
+ * `execute_tool`'s, so the turn provides them as it does for any tool.
+ *
+ * `execute_tool` doesn't run a tool that needs the user's decision; keep such tools in the loop's
+ * toolkit directly.
+ *
+ * **Example** (Finding rarely used tools when needed)
+ *
+ * ```ts
+ * import { ToolDiscovery } from "effect-assistant"
+ * import * as Toolkit from "effect/ai/Toolkit"
+ * import * as Layer from "effect/Layer"
+ *
+ * // OfficeTools is a big toolkit, found when needed. CommonTools stays in the prompt.
+ * const OfficeDiscovery = ToolDiscovery.make(OfficeTools)
+ * const OfficeDiscoveryLive = OfficeDiscovery.layer.pipe(Layer.provide(OfficeToolsLive))
+ *
+ * const MyAssistantLive = MyAssistant.toLayer((turn) =>
+ *   turn.loop({
+ *     instructions,
+ *     toolkit: Toolkit.merge(CommonTools, OfficeDiscovery.toolkit)
+ *   })
+ * ).pipe(Layer.provide([CommonToolsLive, OfficeDiscoveryLive]))
+ * ```
  *
  * @category constructors
  * @since 0.1.0
@@ -119,7 +146,8 @@ export const make = <T extends Record<string, Tool.Any>>(catalog: Toolkit.Toolki
             providerExecuted: false
           })
 
-          // A call that needs the user's decision parks only as a call the model made itself, where it can ask for it.
+          // A call that needs the user's decision parks only as a call the model made itself,
+          // where it can ask for it.
           if (yield* Toolkits.needsDecision(resolved, call, [])) {
             return yield* Effect.fail(
               Toolkits.failed(

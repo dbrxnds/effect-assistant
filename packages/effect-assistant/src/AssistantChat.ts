@@ -1,7 +1,11 @@
 /**
- * The `AssistantChat` module gives code that runs in a chat that chat: its
- * id, its entries, and a way to add to it. A turn's handler, its tools, and
- * its specialists' runs get it with `yield* AssistantChat`.
+ * This module provides the `AssistantChat` service, which gives code that runs inside a chat
+ * access to that chat: its id, its entries, and a way to append to it.
+ *
+ * A turn's handler, its tools, and its specialists' runs get the chat with `yield* AssistantChat`.
+ * The service doesn't carry an assistant's event types, so code that doesn't know the assistant,
+ * such as a shared tool, can use it. Code that knows the assistant can use `MyAssistant.Chat`,
+ * which is the same chat typed with the assistant's events.
  *
  * @since 0.1.0
  */
@@ -11,7 +15,7 @@ import type * as AssistantEvent from "./AssistantEvent.ts"
 import type { ChatId } from "./ChatId.ts"
 
 /**
- * Service for the chat that code runs in.
+ * Service that represents the chat the current code runs in.
  *
  * @category services
  * @since 0.1.0
@@ -21,15 +25,15 @@ export class AssistantChat extends Context.Service<
   {
     readonly chatId: ChatId
     /**
-     * The chat's entries so far, in order: the library's events, and the
-     * assistant's own, decoded (read them with `Schema.is(MyEvent)` or
-     * `instanceof`). An app event that no longer decodes is left out.
+     * The chat's entries so far, in order. They include the library's events and the assistant's
+     * own events, decoded; check for these with `Schema.is(MyEvent)` or `instanceof`. An app event
+     * that no longer decodes is left out.
      */
     readonly entries: Effect.Effect<ReadonlyArray<AssistantEvent.AnyEntry>>
     /**
-     * Appends events after the chat's last entry and sends them to its
-     * subscribers: the library's, or the assistant's own (registered with its
-     * `events`), like a summary. One that wakes a turn gets the next turn.
+     * Appends events after the chat's last entry and sends them to the chat's subscribers. The
+     * events can be the library's or the assistant's own (registered with its `events` option),
+     * such as a summary. An event that wakes a turn is handled by the next turn.
      */
     readonly append: (...events: ReadonlyArray<{ readonly _tag: string }>) => Effect.Effect<void>
   }

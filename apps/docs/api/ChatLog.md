@@ -6,14 +6,19 @@
 import { ChatLog } from "effect-assistant"
 ```
 
-The `ChatLog` module stores each chat as an append-only list of
+This module provides the `ChatLog` service, which stores each chat as an append-only list of
 `AssistantEvent`s.
+
+A log is built on a `Storage`. `layerMemory` keeps every chat in memory, for tests
+and local runs, and `layerSql` stores chats in a SQL table so they survive restarts. To
+use another store, implement a `Storage` and pass it to `make`.
 
 ## Constructors
 
 ### make
 
-Creates a `ChatLog` from a `Storage`.
+Creates a `ChatLog` from a `Storage`. `append` numbers new entries after the chat's last
+`seq` and stamps them with the current time.
 
 ```ts
 const make: (storage: Storage) => ChatLog["Service"]
@@ -25,7 +30,7 @@ const make: (storage: Storage) => ChatLog["Service"]
 
 ### layerMemory
 
-Layer that keeps every chat in memory.
+Layer that keeps every chat in memory. The log is lost when the process stops.
 
 ```ts
 const layerMemory: Layer.Layer<ChatLog>
@@ -35,8 +40,37 @@ const layerMemory: Layer.Layer<ChatLog>
 
 ### layerSql
 
-Layer that stores chats in a SQL table, `chat_log` (`chat_id`, `seq`, `at`,
-`event`; primary key `chat_id, seq`), which must exist.
+Layer that stores chats in a SQL table named `chat_log`.
+
+**Details**
+
+The table must already exist. It has the columns `chat_id`, `seq`, `at`, and `event`, with the
+primary key `(chat_id, seq)`. The layer requires a `SqlClient`.
+
+**Example** (Storing chats in Postgres)
+
+```ts
+import * as PgClient from "@effect/sql-pg/PgClient"
+import { ChatLog } from "effect-assistant"
+import * as Config from "effect/Config"
+import * as Layer from "effect/Layer"
+
+const ChatLogLive = ChatLog.layerSql.pipe(
+  Layer.provide(PgClient.layerConfig({ url: Config.Redacted("DATABASE_URL") }))
+)
+```
+
+The table, in Postgres:
+
+```sql
+CREATE TABLE chat_log (
+  chat_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  at DOUBLE PRECISION NOT NULL,
+  event TEXT NOT NULL,
+  PRIMARY KEY (chat_id, seq)
+);
+```
 
 ```ts
 const layerSql: Layer.Layer<ChatLog, never, SqlClient.SqlClient>
@@ -48,7 +82,7 @@ const layerSql: Layer.Layer<ChatLog, never, SqlClient.SqlClient>
 
 ### ChatLog
 
-Service that stores each chat's events.
+Service that stores each chat's events as an ordered list of entries.
 
 ```ts
 class ChatLog extends Context.Service<
@@ -59,10 +93,11 @@ class ChatLog extends Context.Service<
       chatId: ChatId,
       events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>
     ) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
-    /** Reads a chat's stored entries, in order: all of them, or those after a `seq`. */
+    /** Reads a chat's stored entries in order, either all of them or only those after a `seq`. */
     readonly read: (chatId: ChatId, options?: ReadOptions) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
     /**
-     * Chats whose last entry doesn't end a turn or the chat: the ones that may still owe a turn, after a restart.
+     * Returns the chats whose last entry ends neither a turn nor the chat. After a restart, these
+     * are the chats that may still owe a turn.
      */
     readonly unfinished: Effect.Effect<ReadonlyArray<ChatId>>
   }
@@ -75,11 +110,11 @@ class ChatLog extends Context.Service<
 
 ### ReadOptions
 
-Which of a chat's entries to read.
+Represents the options that select which of a chat's entries to read.
 
 ```ts
 interface ReadOptions {
-  /** Only the entries after this `seq`. */
+  /** Reads only the entries after this `seq`. */
   readonly after?: number | undefined
 }
 ```
@@ -88,162 +123,20 @@ interface ReadOptions {
 
 ### Storage
 
-The storage a `ChatLog` is built on: read a chat, find its last `seq`,
-write new entries, and find every chat's last entry. Entries are never
-removed: a deleted chat keeps its log, ending in `ChatDeleted`.
+Represents the storage that a `ChatLog` is built on.
+
+A storage reads a chat's entries, finds a chat's last `seq`, writes new entries, and finds every
+chat's last entry. Entries are never removed, so a deleted chat keeps its log, which ends in
+`ChatDeleted`.
 
 ```ts
 interface Storage {
   readonly read: (chatId: ChatId, options?: ReadOptions) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
   readonly lastSeq: (chatId: ChatId) => Effect.Effect<number>
   readonly write: (chatId: ChatId, entries: ReadonlyArray<AssistantEvent.Entry>) => Effect.Effect<void>
-  /** Every chat's last entry. */
+  /** Returns the last entry of every chat. */
   readonly lastEntries: Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
 }
-
-/**
- * Creates a `ChatLog` from a {@link Storage}.
- *
- * @category constructors
- * @since 0.1.0
- */
-export const make = (storage: Storage): ChatLog["Service"] =>
-  ChatLog.of({
-    read: storage.read,
-    append: Effect.fnUntraced(
-      function* (chatId: ChatId, events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>) {
-        if (events.length === 0) return []
-
-        const seq = yield* storage.lastSeq(chatId)
-        const at = yield* Clock.currentTimeMillis
-        const entries = events.map((event, n) => AssistantEvent.Entry.make({ chatId, seq: seq + n + 1, at, event }))
-
-        yield* storage.write(chatId, entries)
-
-        return entries
-      },
-      (effect) => Effect.withSpan(effect, "ChatLog.append", { captureStackTrace: false })
-    ),
-    unfinished: Effect.gen(function* () {
-      const last = yield* storage.lastEntries
-
-      // A deleted chat owes nothing.
-      return last.flatMap((entry) =>
-        AssistantEvent.isTurnEnd(entry.event) || Predicate.isTagged(entry.event, "ChatDeleted") ? [] : [entry.chatId]
-      )
-    })
-  })
-
-/**
- * Layer that keeps every chat in memory.
- *
- * @category layers
- * @since 0.1.0
- */
-export const layerMemory: Layer.Layer<ChatLog> = Layer.effect(
-  ChatLog,
-  Effect.gen(function* () {
-    const chats = yield* Ref.make(new Map<ChatId, ReadonlyArray<AssistantEvent.Entry>>())
-
-    return make({
-      read: Effect.fnUntraced(function* (chatId: ChatId, options?: ReadOptions) {
-        const all = yield* Ref.get(chats)
-
-        return (all.get(chatId) ?? []).filter((entry) => entry.seq > (options?.after ?? 0))
-      }),
-      lastSeq: Effect.fnUntraced(function* (chatId: ChatId) {
-        const all = yield* Ref.get(chats)
-
-        return all.get(chatId)?.at(-1)?.seq ?? 0
-      }),
-      write: (chatId, entries) =>
-        Ref.update(chats, (all) => new Map(all).set(chatId, [...(all.get(chatId) ?? []), ...entries])),
-      lastEntries: Effect.gen(function* () {
-        const all = yield* Ref.get(chats)
-
-        return [...all.values()].flatMap((entries) => entries.slice(-1))
-      })
-    })
-  })
-)
-
-const EventJson = Schema.fromJsonString(Schema.Union([AssistantEvent.AssistantEvent, AssistantEvent.StoredAppEvent]))
-
-// Postgres returns BIGINT and DOUBLE PRECISION columns as strings; other databases as numbers.
-const SqlNumber = Schema.Union([Schema.Finite, Schema.FiniteFromString])
-
-const Row = Schema.Struct({ chat_id: ChatId, seq: SqlNumber, at: SqlNumber, event: EventJson })
-
-const decodeLastSeq = Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ seq: Schema.NullOr(SqlNumber) })))
-
-/**
- * Layer that stores chats in a SQL table, `chat_log` (`chat_id`, `seq`, `at`,
- * `event`; primary key `chat_id, seq`), which must exist.
- *
- * @category layers
- * @since 0.1.0
- */
-export const layerSql: Layer.Layer<ChatLog, never, SqlClient.SqlClient> = Layer.effect(
-  ChatLog,
-  Effect.gen(function* () {
-    const sql = (yield* SqlClient.SqlClient).withoutTransforms()
-
-    const toEntries = Effect.fnUntraced(function* (rows: ReadonlyArray<unknown>) {
-      const decoded = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(rows)
-
-      return decoded.map((row) =>
-        AssistantEvent.Entry.make({
-          chatId: row.chat_id,
-          seq: row.seq,
-          at: row.at,
-          event: row.event
-        })
-      )
-    })
-
-    const encodeEvent = Schema.encodeEffect(EventJson)
-
-    return make({
-      read: Effect.fnUntraced(function* (chatId: ChatId, options?: ReadOptions) {
-        const rows = yield* sql`
-          SELECT chat_id, seq, at, event FROM chat_log WHERE chat_id = ${chatId} AND seq > ${options?.after ?? 0} ORDER BY seq
-        `
-
-        return yield* toEntries(rows)
-      }, Effect.orDie),
-      lastSeq: Effect.fnUntraced(function* (chatId: ChatId) {
-        const result = yield* sql`
-          SELECT MAX(seq) AS seq FROM chat_log WHERE chat_id = ${chatId}
-        `
-
-        const rows = yield* decodeLastSeq(result)
-
-        return rows[0]?.seq ?? 0
-      }, Effect.orDie),
-      write: Effect.fnUntraced(function* (chatId: ChatId, entries: ReadonlyArray<AssistantEvent.Entry>) {
-        const rows = yield* Effect.forEach(
-          entries,
-          Effect.fnUntraced(function* (entry: AssistantEvent.Entry) {
-            const event = yield* encodeEvent(entry.event)
-
-            return { chat_id: chatId, seq: entry.seq, at: entry.at, event }
-          })
-        )
-
-        yield* sql`INSERT INTO chat_log ${sql.insert(rows)}`
-      }, Effect.orDie),
-      lastEntries: Effect.gen(function* () {
-        const rows = yield* sql`
-          SELECT e.chat_id, e.seq, e.at, e.event FROM chat_log e
-          JOIN (SELECT chat_id, MAX(seq) AS seq FROM chat_log GROUP BY chat_id) last
-            ON last.chat_id = e.chat_id AND last.seq = e.seq
-        `
-
-        return yield* toEntries(rows)
-      }).pipe(Effect.orDie)
-    })
-  })
-)
 ```
 
 <small>Since 0.1.0</small>

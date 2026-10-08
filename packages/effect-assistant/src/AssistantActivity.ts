@@ -1,6 +1,11 @@
 /**
- * The `AssistantActivity` module says what is working in a chat right now,
- * read from its log: the assistant's turn, and specialist runs.
+ * This module provides functions that determine what is working in a chat right now, read from
+ * the chat's log.
+ *
+ * An {@link Activity} records whether the assistant is running a turn or is about to start one,
+ * and which specialist runs are working. Fold a chat's entries into it with {@link apply}, or
+ * build it from a list of entries with {@link fromEntries}, then check it with
+ * {@link isWorking}.
  *
  * @since 0.1.0
  */
@@ -10,7 +15,7 @@ import * as AssistantEvent from "./AssistantEvent.ts"
 import type { RunId } from "./RunId.ts"
 
 /**
- * A specialist run that is working.
+ * Represents a specialist run that is working.
  *
  * @category models
  * @since 0.1.0
@@ -18,31 +23,34 @@ import type { RunId } from "./RunId.ts"
 export interface SpecialistRun {
   readonly runId: RunId
   readonly specialist: string
-  /** The goal it's working on. */
+  /** The goal the run is working on. */
   readonly goal: string
-  /** When it started, in epoch milliseconds. */
+  /** When the run started, in epoch milliseconds. */
   readonly since: number
 }
 
 /**
- * What is working in a chat.
+ * Represents what is working in a chat.
  *
  * @category models
  * @since 0.1.0
  */
 export interface Activity {
-  /** When the running turn started, in epoch milliseconds; `undefined` when no turn runs. */
+  /** When the running turn started, in epoch milliseconds, or `undefined` when no turn runs. */
   readonly turnSince: number | undefined
-  /** Whether an input arrived that no finished turn has read: a turn is about to start. */
+  /**
+   * Whether an input arrived that no finished turn has read. When this is true, a turn is about
+   * to start.
+   */
   readonly queued: boolean
-  /** The newest input's seq. */
+  /** The `seq` of the newest input. */
   readonly lastInputSeq: number
   /** Specialist runs that are working, by run id. */
   readonly specialists: ReadonlyMap<RunId, SpecialistRun>
 }
 
 /**
- * Nothing working: a chat with an empty log.
+ * The activity of a chat with an empty log, where nothing is working.
  *
  * @category constructors
  * @since 0.1.0
@@ -64,19 +72,22 @@ const withoutRun = (activity: Activity, runId: RunId): Activity => {
 }
 
 /**
- * Options for folding activity.
+ * Represents the options for folding a chat's entries into its activity.
  *
  * @category models
  * @since 0.1.0
  */
 export interface Options {
-  /** The tags of the app's events that wake a turn (see `AppEvent`): inputs too. Default: none. */
+  /**
+   * The tags of the app's events that wake a turn (see `AppEvent`). These events count as inputs
+   * too. Defaults to none.
+   */
   readonly wakes?: ReadonlySet<string> | undefined
 }
 
 /**
- * Returns the activity after one more entry. Fold a chat's entries in order,
- * or use {@link fromEntries}.
+ * Returns the activity after one more entry. Fold a chat's entries in order, or use
+ * {@link fromEntries}.
  *
  * @category combinators
  * @since 0.1.0
@@ -119,7 +130,8 @@ export const apply = (activity: Activity, entry: AssistantEvent.AnyEntry, option
 }
 
 /**
- * Returns what is working after these entries.
+ * Returns what is working in a chat after the given entries, folded in order from
+ * {@link empty}.
  *
  * @category constructors
  * @since 0.1.0
@@ -128,8 +140,8 @@ export const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, opt
   entries.reduce((activity, entry) => apply(activity, entry, options), empty)
 
 /**
- * Returns whether anything is working: a turn (or one about to start), or a
- * specialist run.
+ * Returns whether anything is working: a turn that is running or about to start, or a specialist
+ * run.
  *
  * @category guards
  * @since 0.1.0
