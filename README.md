@@ -497,35 +497,13 @@ events when the chat starts, and put it in the history with a `history`
 view. See [assistants and handlers](./apps/docs/guide/assistant.md) and
 [instructions](./apps/docs/guide/instructions.md).
 
-### Testing, evals, and tracing
+### Testing and tracing
 
 - **Tests.** The engine only needs a `LanguageModel` layer. This
   package's own tests run on a scripted model
   (`packages/effect-assistant/test/utils/scripted.ts`) that answers each
   request with the tool calls you script, so no API key is needed. See
   [testing](./apps/docs/guide/testing.md).
-- **Evals.** A model doesn't answer the same way twice. `Eval` runs each
-  case several times and reports pass rates, not a single verdict:
-
-  ```ts
-  import { Eval } from "effect-assistant"
-
-  const orders = Eval.make({
-    name: "orders",
-    cases: [{ id: "reorder", input: "Reorder the flyers from last month" }],
-    task: (message: string) => play(message), // runs your assistant on the message
-    scorers: [
-      Eval.scorer("placed", ({ output }: Eval.Run<string, { readonly ordered: boolean }>) =>
-        Effect.succeed([Eval.pass("placed", output.ordered)])
-      )
-    ]
-  })
-
-  yield * Console.log(Eval.format(yield * Eval.run(orders, { trials: 3 })))
-  ```
-
-  `Eval.judge` adds a model-graded scorer.
-
 - **Tracing.** Turns, model calls, and tool calls are OpenTelemetry GenAI
   spans. Provide a tracer, for example Langfuse over OTLP, and they show up
   with token usage. `TurnStarted` stores the turn's trace id. See

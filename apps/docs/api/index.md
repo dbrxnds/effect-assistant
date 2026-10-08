@@ -30,7 +30,6 @@ import * as Assistant from "effect-assistant/Assistant"
 - [Compaction](./Compaction)
 - [Decision](./Decision)
 - [DecisionId](./DecisionId)
-- [Eval](./Eval)
 - [InputId](./InputId)
 - [Instructions](./Instructions)
 - [Memory](./Memory)
