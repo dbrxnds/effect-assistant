@@ -24,6 +24,7 @@
     "./internal/*": null
   },
   "publishConfig": {
+    "types": "./dist/index.d.ts",
     "exports": {
       "./package.json": "./package.json",
       ".": {
