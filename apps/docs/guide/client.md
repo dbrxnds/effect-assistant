@@ -71,8 +71,7 @@ const since = (chatId: ChatId.ChatId, after: number) =>
 ```
 
 `after` goes to `ChatView.updates`, not to `subscribe`. A message's view
-depends on what came before it (a block answered later, a decision made
-later), so the fold reads the whole log from the start and only skips
+depends on what came before it (a block answered or closed later), so the fold reads the whole log from the start and only skips
 emitting the updates up to `after`. A `subscribe(chatId, { after })` would
 give it half a log, and the view would be wrong.
 
@@ -84,9 +83,7 @@ once; `ChatView.fromEntries(entries)` makes one from a log on the server.
 - **`messages`**: `UserMessage`s and `AssistantMessage`s, in order, each
   with `at` (epoch milliseconds). An assistant's message has its `block`,
   if it has one: its `kind` and `props`, its `status` (`"open"`,
-  `"answered"`, or `"closed"`), the user's `answer`, and for a decision
-  block its `decisions`, each with its call (`tool` and `params`) and
-  `outcome`.
+  `"answered"`, or `"closed"`), and the user's `answer`.
 - **`activity`**: `working` while a turn runs, or is about to start for
   something that arrived; `specialists`, the ones working (which, since
   when). `ChatView.isIdle(view)` is neither. A workflow waiting on a timer
@@ -103,8 +100,8 @@ the view, and the messages the tab sent that the server hasn't echoed yet.
 
 [`BlockKit.toClient`](/api/BlockKit#toclient) renders the block on an
 assistant's message in the view: each renderer gets its typed `props`,
-whether it's `open`, the user's `answer`, and, for the decision block, its
-`decisions`. See [UI blocks](./blocks#on-the-client).
+whether it's `open`, and the user's `answer`. See
+[UI blocks](./blocks#on-the-client).
 
 ## The log is the server's
 

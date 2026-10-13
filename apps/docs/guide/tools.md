@@ -158,9 +158,11 @@ workflow step, which runs once per key however often the tool call does.
 That's how durable-execution tools handle it too: a step runs at least once,
 and the side effect is idempotent.
 
-A tool whose effect the user must approve first sets `needsApproval`: the
-call waits for the user's [decision](./decisions), and runs once they
-approve.
+A tool is what the assistant may do by itself. What the user must agree to
+first isn't a tool: the assistant shows it in a block, and the user does it
+with the block's button, through your API. The library doesn't run tools with
+Effect's `needsApproval`: a loop with one fails. See
+[involving the user](./user-involvement).
 
 A call whose handler stopped while it ran (not a crash) gets a failed result
 saying it may have run (reason `MayHaveRun`); one that never started, that it
@@ -230,6 +232,6 @@ A tool run through `execute_tool` gets a call id made from that call's, so
 it's the same when a crash runs the call again.
 
 Keep the tools an assistant uses often in the toolkit directly; discovery
-costs an extra step. `execute_tool` doesn't run a tool that needs the user's
-[decision](./decisions): keep those in the toolkit directly too. For discovery over the tools a user may use, build it in
+costs an extra step. A catalog with a `needsApproval` tool fails the layer
+when it's built, as it would fail a loop. For discovery over the tools a user may use, build it in
 the handler, over [that user's tools](./chats#tools-per-user).

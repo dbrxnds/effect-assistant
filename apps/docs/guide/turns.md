@@ -73,8 +73,9 @@ const NeedsDate = AppEvent.make(DeliveryQuestion, {
 })
 ```
 
-The assistant writes the message, and can attach a [block](./blocks). An
-approval is a [decision](./decisions), on the tool call that starts the work.
+The assistant writes the message, and can attach a [block](./blocks). Work
+the user must agree to starts from a block's button, through your API (see
+[involving the user](./user-involvement)).
 
 ## A reply to every message
 

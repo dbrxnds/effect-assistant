@@ -68,7 +68,7 @@ Represents a tool's failure, written for the model.
 
 It holds a message that says what went wrong and, optionally, a `reason` the model can tell
 apart, such as `"NotFound"` or `"OverBudget"`. The library's own reasons are PascalCase, like
-`"NeedsDecision"`.
+`"ToolNotFoundError"`.
 
 ```ts
 class ToolFailure extends Schema.Error<ToolFailure>("effect-assistant/ToolFailure/ToolFailure")({

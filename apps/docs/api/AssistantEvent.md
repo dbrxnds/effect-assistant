@@ -25,26 +25,6 @@ type Attachment = typeof Attachment.Type
 
 <small>Since 0.1.0</small>
 
-### DecisionOutcome
-
-Represents how the user decided.
-
-```ts
-type DecisionOutcome = typeof DecisionOutcome.Type
-```
-
-<small>Since 0.1.0</small>
-
-### CallOrigin
-
-Represents the origin of a decision that a tool call waits for.
-
-```ts
-type CallOrigin = typeof CallOrigin.Type
-```
-
-<small>Since 0.1.0</small>
-
 ### Input
 
 Represents an input to an assistant.
@@ -210,57 +190,6 @@ class SpecialistFinished extends Schema.TaggedClass<SpecialistFinished>()("Speci
   status: Schema.Literals(["answered", "failed", "stopped", "cut_off"]),
   report: Schema.optional(Schema.String),
   error: Schema.optional(Schema.String)
-})
-```
-
-<small>Since 0.1.0</small>
-
-### DecisionOutcome
-
-Schema for how the user decided, either `"approved"` or `"declined"`.
-
-```ts
-const DecisionOutcome = Schema.Literals(["approved", "declined"])
-```
-
-<small>Since 0.1.0</small>
-
-### CallOrigin
-
-Schema for the origin of a decision that a tool call waits for.
-
-It holds the call as the model wrote it. Approving the decision runs exactly this call.
-
-```ts
-const CallOrigin = Schema.TaggedStruct("Call", { …
-```
-
-<small>Since 0.1.0</small>
-
-### DecisionRequested
-
-Represents a request for the user to decide something, by approving or declining it.
-
-```ts
-class DecisionRequested extends Schema.TaggedClass<DecisionRequested>()("DecisionRequested", {
-  id: DecisionId,
-  origin: CallOrigin
-})
-```
-
-<small>Since 0.1.0</small>
-
-### DecisionResolved
-
-Represents a decision the user made by answering a decision block for it.
-
-`answer` is the id of that `BlockAnswer`. An approved call runs at the turn's next step.
-
-```ts
-class DecisionResolved extends Schema.TaggedClass<DecisionResolved>()("DecisionResolved", {
-  id: DecisionId,
-  outcome: DecisionOutcome,
-  answer: InputId
 })
 ```
 

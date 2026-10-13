@@ -29,8 +29,6 @@ import * as Assistant from "effect-assistant/Assistant"
 - [Chats](./Chats)
 - [Compaction](./Compaction)
 - [CurrentChat](./CurrentChat)
-- [Decision](./Decision)
-- [DecisionId](./DecisionId)
 - [InputId](./InputId)
 - [Instructions](./Instructions)
 - [Memory](./Memory)
