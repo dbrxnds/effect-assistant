@@ -5,7 +5,7 @@
 ### Minor Changes
 
 - ad6281d: Skills are a toolkit, and a tool call can wait for the user's approval.
-  
+
   - **`Skill.toolkit(skills)`** is a toolkit with one tool, `load_skill`, whose description is the catalog: each skill's name and when to use it. Merge it into a loop's toolkit like any other, `Toolkit.merge(MyTools, AssistantSkills)`, and provide `AssistantSkills.layer`, the handler that resolves the skills' instructions; it requires the services they need, like any tool handler. A name that isn't in the list is a failure the model reads, with the names there are. The handler resolves only its own list, so to offer each user the skills their role allows, build the toolkit in the turn from their list and provide its layer to the loop's stream (`Stream.provide(skills.layer)`).
   - **Tools made with Effect's `needsApproval` wait for the user.** A turn's call to one doesn't run: the turn records it (`AssistantEvent.ApprovalRequested`), gives the model a placeholder result for it, and ends; the step's other calls run as usual. A `needsApproval` function decides per call, from its params.
     - The user's decision is an input, `AssistantEvent.ApprovalDecision`, built with `ToolApproval.approve(item)` or `ToolApproval.reject(item, { reason })` and submitted like a message. Its id is fixed per call, so a double click is stored once, and one for a call that isn't waiting any more isn't stored. It wakes a turn.
@@ -13,9 +13,9 @@
     - `ToolApproval.closeStale({ messages: 10 })`, run from a handler like `BlockKit.closeStale`, expires calls the user moved on from (`AssistantEvent.ApprovalsExpired`): the model reads that they weren't approved. `ToolApproval.fromEntries` folds where each call stands, and `Compaction.openItems` lists the ones still waiting.
     - On the timeline, every call that waits is a `Timeline.ApprovalItem`, `{ _tag: "ToolApproval", id, tool, status, reason, outcome, at }`, updated in place as it's decided and run. It's only the yes or no: the assistant's message, sent with the call, says what it asks the user to approve, so the item carries no params and the client needs nothing of the tool. It's always on the timeline, with no option on `Timeline.Change` or `Timeline.changes`.
     - Only a turn can ask the user: a specialist's run that calls such a tool gets a failure it reads, and `ToolDiscovery` still refuses one in its catalog.
-  
+
   Breaking changes, and how to migrate:
-  
+
   - **`turn.loop` and a specialist's `run.loop` take no `skills`**, and the prompt has no skills catalog. `turn.loop({ instructions, toolkit: MyTools, skills: [a, b] })` becomes `turn.loop({ instructions, toolkit: Toolkit.merge(MyTools, Skills) })` with `const Skills = Skill.toolkit([a, b])`, and `Layer.provide(Skills.layer)` where the tools' layers are provided. A skill's instructions resolve with the services given to that layer, no longer with the loop's: provide them to the layer, or to the loop's stream for a toolkit built per turn. `Assistant.LoopOptions` and `Specialist.LoopOptions` lose their `RS` type parameter (`LoopOptions<T, Events>` and `LoopOptions<T>`), and `Skill.withCatalog` is gone.
   - **`Skill.make` takes no `tools`**, and skills are no longer left out for a loop that lacks their tools: a skill says how to do a kind of task, and the model works with the tools it has. To offer a skill only to some users, build their list per turn (see above).
   - **A loop with a `needsApproval` tool no longer fails**: its calls wait for the user. Work you put behind a block whose button calls your own API (with an app event to tell the chat) can be a `needsApproval` tool the model calls with the details: the user approves the call, and it runs as the tool's handler, keyed with `AssistantToolCall.idempotencyKey`. Blocks with an `answer` schema still collect input, answered with the client's `respond`.
