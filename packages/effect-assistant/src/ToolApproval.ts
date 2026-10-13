@@ -5,7 +5,7 @@
  * call waits ({@link AssistantEvent.ApprovalRequested}), the turn ends, and the chat's timeline
  * shows it to the user. Their decision, built with {@link approve} or {@link reject} and submitted
  * like a message, wakes a turn: an approved call runs then, with its params and id, and a rejected
- * one doesn't. A call the user moved on from expires ({@link expireStale}). On the timeline, every
+ * one doesn't. A call the user moved on from expires ({@link closeStale}, like `BlockKit.closeStale`). On the timeline, every
  * call is an item with its tool's name and where it stands: only the yes or no, since the
  * assistant's message says what it asks.
  *
@@ -183,7 +183,7 @@ export const reject = (
  *
  * **Details**
  *
- * These are the calls {@link expireStale} expires.
+ * These are the calls {@link closeStale} closes.
  *
  * @category utils
  * @since 0.4.0
@@ -211,8 +211,8 @@ export const staleApprovals = (
 }
 
 /**
- * Expires the calls the user moved on from, which still wait for approval after the given number
- * of typed messages.
+ * Closes the calls the user moved on from, which still wait for approval after the given number
+ * of typed messages: they expire, and won't run.
  *
  * **Details**
  *
@@ -220,12 +220,28 @@ export const staleApprovals = (
  * `ApprovalsExpired` event: the timeline shows the calls as expired, the model reads that they
  * weren't approved, and a decision that arrives later isn't stored.
  *
- * @see {@link staleApprovals} for the calls it expires
+ * **Example** (Closing calls the user moved on from, and stale blocks, every turn)
+ *
+ * ```ts
+ * import { BlockKit, ToolApproval } from "effect-assistant"
+ * import * as Effect from "effect/Effect"
+ *
+ * const MyAssistantLive = MyAssistant.toLayer(
+ *   Effect.fn(function* (turn) {
+ *     yield* BlockKit.closeStale({ messages: 10 })
+ *     yield* ToolApproval.closeStale({ messages: 10 })
+ *
+ *     return turn.loop({ instructions, toolkit: MyTools })
+ *   })
+ * )
+ * ```
+ *
+ * @see {@link staleApprovals} for the calls it closes
  *
  * @category utils
  * @since 0.4.0
  */
-export const expireStale = Effect.fn(function* (options: { readonly messages: number }) {
+export const closeStale = Effect.fn(function* (options: { readonly messages: number }) {
   const chat = yield* CurrentChat
   const stale = staleApprovals(yield* chat.entries, options)
 

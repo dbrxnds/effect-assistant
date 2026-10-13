@@ -68,7 +68,7 @@ it in a turn. The call waits for the user's approval
 - A rejected call doesn't run: the model reads that the user rejected it,
   with their reason.
 - A call the user moves on from expires with
-  `ToolApproval.expireStale({ messages })`, run from the handler like
+  `ToolApproval.closeStale({ messages })`, run from the handler like
   `BlockKit.closeStale`: the model reads that it wasn't approved, and a
   decision that arrives later isn't stored. So isn't one for a call that's
   already decided.
@@ -108,8 +108,8 @@ const OrderToolsLive = OrderTools.toLayer({
 
 const MyAssistantLive = MyAssistant.toLayer((turn) =>
   Stream.unwrap(
-    // Calls the user moved on from (two messages later) expire.
-    ToolApproval.expireStale({ messages: 2 }).pipe(Effect.as(turn.loop({ instructions, toolkit: OrderTools })))
+    // Calls the user moved on from (ten messages later) expire.
+    ToolApproval.closeStale({ messages: 10 }).pipe(Effect.as(turn.loop({ instructions, toolkit: OrderTools })))
   )
 ).pipe(Layer.provide(OrderToolsLive))
 ```

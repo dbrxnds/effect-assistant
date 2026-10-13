@@ -70,7 +70,7 @@ export const layer = AcmeAssistant.toLayer(
 
       // A block or an order the user moved on from (three messages later) stops taking answers.
       yield* BlockKit.closeStale({ messages: 3 })
-      yield* ToolApproval.expireStale({ messages: 3 })
+      yield* ToolApproval.closeStale({ messages: 3 })
 
       return turn.loop({
         instructions: { ...prompt, text: `${prompt.text}\n\nToday is ${new Date().toDateString()}.` },

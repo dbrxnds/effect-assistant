@@ -12,7 +12,7 @@ A tool made with Effect's `needsApproval` doesn't run when the model calls it in
 call waits (`AssistantEvent.ApprovalRequested`), the turn ends, and the chat's timeline
 shows it to the user. Their decision, built with `approve` or `reject` and submitted
 like a message, wakes a turn: an approved call runs then, with its params and id, and a rejected
-one doesn't. A call the user moved on from expires (`expireStale`). On the timeline, every
+one doesn't. A call the user moved on from expires (`closeStale`, like `BlockKit.closeStale`). On the timeline, every
 call is an item with its tool's name and where it stands: only the yes or no, since the
 assistant's message says what it asks.
 
@@ -138,7 +138,7 @@ of messages without deciding them.
 
 **Details**
 
-These are the calls `expireStale` expires.
+These are the calls `closeStale` closes.
 
 ```ts
 const staleApprovals: (
@@ -149,10 +149,10 @@ const staleApprovals: (
 
 <small>Since 0.4.0</small>
 
-### expireStale
+### closeStale
 
-Expires the calls the user moved on from, which still wait for approval after the given number
-of typed messages.
+Closes the calls the user moved on from, which still wait for approval after the given number
+of typed messages: they expire, and won't run.
 
 **Details**
 
@@ -160,8 +160,24 @@ Run it from a turn, before or after its loop, like `BlockKit.closeStale`. It rec
 `ApprovalsExpired` event: the timeline shows the calls as expired, the model reads that they
 weren't approved, and a decision that arrives later isn't stored.
 
+**Example** (Closing calls the user moved on from, and stale blocks, every turn)
+
 ```ts
-const expireStale = Effect.fn(function* (options: { readonly messages: number }) { …
+import { BlockKit, ToolApproval } from "effect-assistant"
+import * as Effect from "effect/Effect"
+
+const MyAssistantLive = MyAssistant.toLayer(
+  Effect.fn(function* (turn) {
+    yield* BlockKit.closeStale({ messages: 10 })
+    yield* ToolApproval.closeStale({ messages: 10 })
+
+    return turn.loop({ instructions, toolkit: MyTools })
+  })
+)
+```
+
+```ts
+const closeStale = Effect.fn(function* (options: { readonly messages: number }) { …
 ```
 
 <small>Since 0.4.0</small>

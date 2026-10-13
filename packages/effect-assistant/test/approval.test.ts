@@ -225,7 +225,7 @@ describe("a tool with needsApproval, in a turn", () => {
   it.live("expires a call the user moved on from: the model reads it, and a later approval is ignored", () =>
     Effect.gen(function* () {
       const { runs, layer } = yield* ordering((turn) =>
-        Stream.unwrap(ToolApproval.expireStale({ messages: 1 }).pipe(Effect.as(looping(turn))))
+        Stream.unwrap(ToolApproval.closeStale({ messages: 1 }).pipe(Effect.as(looping(turn))))
       )
 
       const entries = yield* Effect.gen(function* () {

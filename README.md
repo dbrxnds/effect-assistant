@@ -236,7 +236,7 @@ const PlaceOrder = Tool.make("place_order", {
 submit(ToolApproval.approve(item)) // or ToolApproval.reject(item, { reason })
 ```
 
-A call the user moves on from expires with `ToolApproval.expireStale({ messages })`, and the model reads that it
+A call the user moves on from expires with `ToolApproval.closeStale({ messages: 10 })`, and the model reads that it
 wasn't approved. A question for the user is a block with an `answer` schema. See
 [involving the user](./apps/docs/guide/user-involvement.md).
 

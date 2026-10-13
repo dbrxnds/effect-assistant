@@ -439,7 +439,7 @@ export class ApprovalRequested extends Schema.TaggedClass<ApprovalRequested>()("
 
 /**
  * Represents tool calls that waited for the user's approval and won't run: the user moved on, like
- * the ones `ToolApproval.expireStale` expires. The model reads that they weren't approved.
+ * the ones `ToolApproval.closeStale` expires. The model reads that they weren't approved.
  *
  * @category schemas
  * @since 0.4.0

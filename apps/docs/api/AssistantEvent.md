@@ -507,7 +507,7 @@ class ApprovalRequested extends Schema.TaggedClass<ApprovalRequested>()("Approva
 ### ApprovalsExpired
 
 Represents tool calls that waited for the user's approval and won't run: the user moved on, like
-the ones `ToolApproval.expireStale` expires. The model reads that they weren't approved.
+the ones `ToolApproval.closeStale` expires. The model reads that they weren't approved.
 
 ```ts
 class ApprovalsExpired extends Schema.TaggedClass<ApprovalsExpired>()("ApprovalsExpired", {
