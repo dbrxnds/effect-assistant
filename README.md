@@ -216,37 +216,28 @@ const deleteChat = (chatId: ChatId.ChatId) =>
 ### Ask before acting
 
 Some things the assistant shouldn't do on its own, like placing an order. The assistant prepares it and shows
-it in a block without an answer; the block's button calls your API with exactly what it shows. Your API places
-the order and tells the chat with one of your events, which wakes the assistant to follow up.
+it in a block; the block's button calls your API with exactly what it shows. Your API places the order and
+answers the block with `Block.answer`: the block shows as answered, and a turn wakes for the assistant to follow
+up.
 
 ```ts
-const OrderDraft = Block.make("order_draft", {
+const OrderCheckout = Block.make("order_checkout", {
   description: "An order ready to place, with a Place order button. Only the user places it.",
-  props: Schema.Struct({ sku: Schema.String, quantity: Schema.Int, total: Schema.Finite })
+  props: Schema.Struct({ sku: Schema.String, quantity: Schema.Int, total: Schema.Finite }),
+  answer: Schema.Struct({ orderId: Schema.String }) // your API answers it
 })
 
-class OrderPlaced extends Schema.TaggedClass<OrderPlaced>()("OrderPlaced", {
-  id: InputId.InputId,
-  reference: Schema.String
-}) {}
+export const Shop = Assistant.make("shop", { blocks: BlockKit.make([OrderCheckout]) })
 
-export const Shop = Assistant.make("shop", {
-  blocks: BlockKit.make([OrderDraft]),
-  events: [OrderPlaced] // submitted by your API: it wakes a turn
-})
-
-// Your API, behind the block's button: once per block, then tell the chat.
-const placeOrder = (chatId: ChatId.ChatId, messageId: string, order: typeof OrderDraft.props.Type) =>
+// Your API, behind the block's button: once per block, then answer the block.
+const placeOrder = (chatId: ChatId.ChatId, messageId: string, order: typeof OrderCheckout.props.Type) =>
   Effect.gen(function* () {
-    const reference = yield* placeOnce(`${chatId}:${messageId}`, order)
-    yield* Shop.use((shop) =>
-      shop.submit(chatId, OrderPlaced.make({ id: InputId.fromKey(`placed:${reference}`), reference }))
-    )
+    const orderId = yield* placeOnce(`${chatId}:${messageId}`, order)
+    yield* Shop.use((shop) => shop.submit(chatId, Block.answer(OrderCheckout, { messageId, value: { orderId } })))
   })
 ```
 
-The submitted `OrderPlaced` wakes a turn; the model reads it as your history view maps it (see
-[your own events](#your-own-events)).
+The answer's id is the one a client's `respond` uses, so the block takes one answer however often it's clicked.
 
 What the assistant may do by itself is a tool with final values; a question for the user is a block with an
 `answer` schema. The library doesn't run tools with Effect's `needsApproval`: a loop with one fails. See
@@ -303,24 +294,25 @@ turn. It decides what to tell the user, and can message or stop a run while it w
 
 ### Skills and big tool catalogs
 
-Both keep the prompt small. A skill is a playbook: the model sees its name and one line, and loads the steps
-with `load_skill` when a task matches. A skill made with `tools` is offered only to a loop whose toolkit has every
-one of them. `ToolDiscovery` turns a big toolkit into two tools, `search_tools` and
+Both keep the prompt small. A skill is a playbook: `Skill.toolkit(skills)` is the `load_skill` tool, whose
+description lists each skill's name and one line, and the model loads the steps when a task matches. Merge it into
+the loop's toolkit and provide its `layer`. `ToolDiscovery` turns a big toolkit into two tools, `search_tools` and
 `execute_tool`, so the model finds a tool when it needs one instead of reading every definition.
 
 ```ts
 const reorder = Skill.make("reorder", {
   description: "Reordering something the user ordered before.",
-  instructions: "1. Find their last order of it. 2. Confirm quantity and address. 3. Place it with place_order.",
-  tools: [PlaceOrder] // left out of a loop without place_order
+  instructions: "1. Find their last order of it. 2. Confirm quantity and address. 3. Place it with place_order."
 })
+
+const Skills = Skill.toolkit([reorder]) // load_skill, with its catalog
 
 const Discovery = ToolDiscovery.make(AllOtherTools) // search_tools and execute_tool over a big toolkit
 const DiscoveryLive = ToolDiscovery.layer(AllOtherTools).pipe(Layer.provide(AllOtherToolsLive))
 
 const MyAssistantLive = MyAssistant.toLayer((turn) =>
-  turn.loop({ instructions, toolkit: Toolkit.merge(WeatherTools, Discovery), skills: [reorder] })
-).pipe(Layer.provide([WeatherToolsLive, DiscoveryLive]))
+  turn.loop({ instructions, toolkit: Toolkit.merge(WeatherTools, Discovery, Skills) })
+).pipe(Layer.provide([WeatherToolsLive, DiscoveryLive, Skills.layer]))
 ```
 
 ### Your own events

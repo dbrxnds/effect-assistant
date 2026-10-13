@@ -64,7 +64,7 @@ describe("a tool with needsApproval", () => {
       }).pipe(Effect.provide(runMemory(Ordering.toLayer(withTools({ instructions, toolkit })), Scripted.unused)))
 
       expect(failures(entries)[0]).toContain(refusal)
-      expect(failures(entries)[0]).toContain("app event")
+      expect(failures(entries)[0]).toContain("Block.answer")
       expect(yield* runs).toBe(0)
     })
   )

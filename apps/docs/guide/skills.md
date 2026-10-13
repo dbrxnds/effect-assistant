@@ -1,15 +1,19 @@
 # Skills
 
 A [`Skill`](/api/Skill) is a playbook: step-by-step instructions for a kind of
-task. Long playbooks would crowd the prompt, so a handler gives its loop
-skills as a **catalog**: each skill's name and description ("use when…") are in the
-prompt, and a `load_skill` tool returns a skill's instructions when a task
-matches. They then stay in the history for the rest of the work.
+task. Long playbooks would crowd the prompt, so skills are a tool:
+[`Skill.toolkit(skills)`](/api/Skill#toolkit) is a toolkit with one tool,
+`load_skill`. Its description is the **catalog**, each skill's name and
+description ("use when…"), and the model calls it to read a skill's
+instructions when a task matches. They then stay in the history for the rest
+of the work.
 
 **Example** (A playbook for ordering campaigns)
 
 ```ts
 import { Skill } from "effect-assistant"
+import * as Layer from "effect/Layer"
+import * as Toolkit from "effect/ai/Toolkit"
 
 const orderingCampaigns = Skill.make("Ordering a campaign", {
   description: "Use when the user wants to order or start a campaign.",
@@ -18,49 +22,53 @@ const orderingCampaigns = Skill.make("Ordering a campaign", {
 3. When you have both, call start_campaign.`
 })
 
-const MyAssistantHandlers = MyAssistant.toLayer((turn) => turn.loop({ instructions, skills: [orderingCampaigns] }))
-```
-
-Write the description as a trigger ("Use when…"): it's all the model sees
-until it loads the skill.
-
-## Skills that need tools
-
-A playbook that calls tools is no use to a loop without them. Give the skill
-its `tools`, and a loop whose toolkit lacks any of them leaves it out: it's
-not in the catalog, and `load_skill` doesn't know it. A handler that gives
-each user the tools their role allows can pass every skill, and each loop
-offers the ones it can follow.
-
-**Example** (A playbook only for loops that can start a campaign)
-
-```ts
-const orderingCampaigns = Skill.make("Ordering a campaign", {
-  description: "Use when the user wants to order or start a campaign.",
-  instructions: `1. Pick the product with list_campaign_products.
-2. When you know who it should reach and the budget, call start_campaign.`,
-  tools: [ListCampaignProducts, StartCampaign]
-})
+const AssistantSkills = Skill.toolkit([orderingCampaigns, sharingAssets])
 
 const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
-  turn.loop({
-    instructions,
-    // A viewer's toolkit has no start_campaign, so their loop leaves the skill out.
-    toolkit: canOrder ? CampaignTools : ReadOnlyTools,
-    skills: [orderingCampaigns]
-  })
+  turn.loop({ instructions, toolkit: Toolkit.merge(CampaignTools, AssistantSkills) })
+).pipe(Layer.provide([CampaignToolsLive, AssistantSkills.layer]))
+```
+
+It's a toolkit like any other: merge it into the loop's own with
+`Toolkit.merge`, and provide its `layer`, which has `load_skill`'s handler.
+Write each description as a trigger ("Use when…"): it's all the model sees
+until it loads the skill. A name that isn't in the list is a failure the
+model reads, with the names there are.
+
+A skill says how to do a kind of task, not what the model may do: what it
+can do is its toolkit. A playbook whose tools a loop doesn't have still
+loads; the model works with the tools it has.
+
+## Skills per user
+
+The handler resolves only the skills of its own list. To offer each user the
+skills their role allows, build the toolkit in the turn from that user's
+list, and provide its layer to the loop's stream. Building one does no work.
+
+**Example** (Skills by role)
+
+```ts
+import * as Effect from "effect/Effect"
+import * as Stream from "effect/Stream"
+
+const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
+  Stream.unwrap(
+    Effect.map(roleOf(turn.chatId), (role) => {
+      const skills = Skill.toolkit(allSkills.filter((skill) => allowed(role, skill)))
+
+      return turn
+        .loop({ instructions, toolkit: Toolkit.merge(CampaignTools, skills) })
+        .pipe(Stream.provide(skills.layer))
+    })
+  )
 )
 ```
 
-Tools match by name, and the assistant's own (`send_user_message`, `wait`,
-and the specialists') count. A tool that only
-[`ToolDiscovery`](./tools) finds isn't in the toolkit, so it doesn't count.
-A skill without `tools` is always offered.
-
 Skill instructions can be [managed prompts](./instructions): an Effect is
-resolved each time the skill is loaded, with the services the handler
-provides to its loop (like a user it [looked up](./chats)), so a skill can be
-tailored to the user. A specialist's `run.loop` takes `skills` the same way.
+resolved each time the skill is loaded. The services it needs are what the
+toolkit's `layer` requires: provide them with the layer, or, for a toolkit
+built per turn, to the loop's stream, like a user the handler
+[looked up](./chats). A specialist's `run.loop` takes the same toolkit.
 
 ## Skills, tools, or specialists?
 

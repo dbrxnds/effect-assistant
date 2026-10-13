@@ -23,6 +23,8 @@ export interface Request {
   readonly history: ReadonlyArray<Prompt.Message>
   /** The tools the call offers, by name. */
   readonly tools: ReadonlyArray<string>
+  /** The tools' descriptions, as the model reads them. */
+  readonly descriptions: ReadonlyMap<string, string>
   readonly toolChoice: LanguageModel.ToolChoice<string>
 }
 
@@ -129,6 +131,7 @@ export const make = Effect.fn(function* (script: Script) {
       system,
       history: first !== undefined && first.role === "system" ? rest : options.prompt.content,
       tools: options.tools.map((tool) => tool.name),
+      descriptions: new Map(options.tools.map((tool) => [tool.name, tool.description ?? ""])),
       toolChoice: options.toolChoice
     }
 

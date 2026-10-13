@@ -22,12 +22,9 @@ import * as Loop from "./loop.ts"
 import { CurrentChat } from "../CurrentChat.ts"
 import * as InputId from "../InputId.ts"
 import * as RunId from "../RunId.ts"
-import * as Skill from "../Skill.ts"
-import * as Skills from "./skills.ts"
 import * as Specialist from "../Specialist.ts"
 import * as ToolFailure from "../ToolFailure.ts"
 import { toolMessage, userText } from "./history.ts"
-import { mapText } from "./instructions.ts"
 import * as Telemetry from "./telemetry.ts"
 import * as Toolkits from "./toolkit.ts"
 import type { Writer } from "./writer.ts"
@@ -84,12 +81,9 @@ export const runBrief = Effect.fnUntraced(
       brief: options.brief,
       history: current,
       loop: (loop) => {
-        const own = Toolkits.fromToolkitOrEmpty(loop.toolkit)
-        const skills = Skills.available(loop.skills ?? [], own.definitions)
-
         return Loop.run({
-          instructions: mapText(loop.instructions, (text) => Skill.withCatalog(text, skills)),
-          toolkit: Toolkits.merge(Skills.toTools(skills), own),
+          instructions: loop.instructions,
+          toolkit: Toolkits.fromToolkitOrEmpty(loop.toolkit),
           history: current,
           maxSteps: loop.maxSteps ?? 8
         })

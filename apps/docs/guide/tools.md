@@ -42,8 +42,8 @@ const MyAssistantHandlers = MyAssistant.toLayer((turn) => turn.loop({ instructio
 A tool is a name, a description the model reads, schemas for its parameters
 and its result (`success`, `Schema.Void` if you leave it out), and a handler.
 Names must be unique in a turn, including the assistant's own tools
-(`send_user_message`, `wait`, `load_skill`, and the specialist tools): a
-clash fails the turn.
+(`send_user_message`, `wait`, and the specialist tools) and a
+[skills](./skills) toolkit's `load_skill`: a clash fails the turn.
 
 The assistant's layer needs every tool's handler: leave out
 `ProductToolsLive` and it's a type error naming the tool

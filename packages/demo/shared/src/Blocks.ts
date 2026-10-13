@@ -52,7 +52,9 @@ export const OrderDraft = Block.make("order_draft", {
     quantity: Schema.Int,
     total: Schema.Finite.annotate({ description: "In USD, from quote_order." }),
     remainingBudget: Schema.Finite.annotate({ description: "The office's budget left after it, from quote_order." })
-  })
+  }),
+  // The API answers it once the order is placed: the order's reference.
+  answer: Schema.Struct({ reference: Schema.String })
 })
 
 /**
@@ -72,13 +74,15 @@ export const CampaignDraft = Block.make("campaign_draft", {
     office: Schema.String.annotate({ description: "The office paying for it." }),
     audience: Schema.String,
     budget: Schema.Finite.annotate({ description: "In USD." })
-  })
+  }),
+  // The API answers it once the campaign is started: its reference.
+  answer: Schema.Struct({ reference: Schema.String })
 })
 
 /**
  * Every block Acme can use. A choice or a short answer goes back to Acme as
  * the block's answer; an order or a campaign is placed by the user from its
- * block, through Acme's API.
+ * block, through Acme's API, which answers the block with the reference.
  *
  * @category blocks
  * @since 0.1.0

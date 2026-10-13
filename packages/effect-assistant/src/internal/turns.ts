@@ -19,8 +19,6 @@ import * as Loop from "./loop.ts"
 import type * as BlockKit from "../BlockKit.ts"
 import type { CurrentChat } from "../CurrentChat.ts"
 import * as Instructions from "../Instructions.ts"
-import * as Skill from "../Skill.ts"
-import * as Skills from "./skills.ts"
 import type * as Specialist from "../Specialist.ts"
 import * as AppEvents from "./events.ts"
 import * as History from "./history.ts"
@@ -280,13 +278,12 @@ const makeTurnApi = (
       })
     )
 
-  const prepare = <T extends Record<string, Tool.Any>, RS>(options: Assistant.LoopOptions<T, RS, any>) => {
+  const prepare = <T extends Record<string, Tool.Any>>(options: Assistant.LoopOptions<T, any>) => {
     const own = Toolkits.fromToolkitOrEmpty(options.toolkit)
-    const skills = Skills.available(options.skills ?? [], [...builtins.definitions, ...own.definitions])
 
     return {
-      system: mapText(instructions(options.instructions), (text) => Skill.withCatalog(text, skills)),
-      toolkit: Toolkits.merge(Toolkits.merge(builtins, Skills.toTools(skills)), own),
+      system: instructions(options.instructions),
+      toolkit: Toolkits.merge(builtins, own),
       view: options.history ?? identity
     }
   }

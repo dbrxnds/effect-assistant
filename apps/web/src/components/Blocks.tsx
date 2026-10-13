@@ -66,10 +66,13 @@ function PlaceBlock(props: {
   readonly shows: object
   readonly label: string
   readonly open: boolean
+  /** The reference the API answered the block with, once it's placed. */
+  readonly answered: string | undefined
   readonly place: () => Promise<Placed>
 }) {
   const [busy, setBusy] = useState(false)
-  const [placed, setPlaced] = useState<string | undefined>(undefined)
+  const [clicked, setPlaced] = useState<string | undefined>(undefined)
+  const placed = props.answered ?? clicked
   const [refused, setRefused] = useState<string | undefined>(undefined)
 
   const onClick = async () => {
@@ -106,6 +109,7 @@ function OrderBlock(props: {
   readonly order: typeof OrderDraft.props.Type
   readonly messageId: string
   readonly open: boolean
+  readonly answered: string | undefined
 }) {
   const { chatId } = useContext(BlockContext)
   const placeOrder = useAtomSet(AcmeRpc.placeOrder, { mode: "promiseExit" })
@@ -117,6 +121,7 @@ function OrderBlock(props: {
       shows={props.order}
       label="Place order"
       open={props.open}
+      answered={props.answered}
       place={() => placeOrder({ payload: { chatId, messageId: props.messageId, order: props.order } })}
     />
   )
@@ -126,6 +131,7 @@ function CampaignBlock(props: {
   readonly campaign: typeof CampaignDraft.props.Type
   readonly messageId: string
   readonly open: boolean
+  readonly answered: string | undefined
 }) {
   const { chatId } = useContext(BlockContext)
   const startCampaign = useAtomSet(AcmeRpc.startCampaign, { mode: "promiseExit" })
@@ -137,6 +143,7 @@ function CampaignBlock(props: {
       shows={props.campaign}
       label="Start campaign"
       open={props.open}
+      answered={props.answered}
       place={() => startCampaign({ payload: { chatId, messageId: props.messageId, campaign: props.campaign } })}
     />
   )
@@ -213,8 +220,12 @@ const render = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
   choose_one: ({ props, open, answer, respond }) => (
     <ChooseOne options={props.options} open={open} picked={answer?.choice} onPick={(choice) => respond({ choice })} />
   ),
-  order_draft: ({ messageId, props, open }) => <OrderBlock order={props} messageId={messageId} open={open} />,
-  campaign_draft: ({ messageId, props, open }) => <CampaignBlock campaign={props} messageId={messageId} open={open} />,
+  order_draft: ({ messageId, props, open, answer }) => (
+    <OrderBlock order={props} messageId={messageId} open={open} answered={answer?.reference} />
+  ),
+  campaign_draft: ({ messageId, props, open, answer }) => (
+    <CampaignBlock campaign={props} messageId={messageId} open={open} answered={answer?.reference} />
+  ),
   text_input: ({ props, open, answer, respond }) => (
     <TextInput
       placeholder={props.placeholder}

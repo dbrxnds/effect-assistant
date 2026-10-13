@@ -1,11 +1,12 @@
 /**
- * What the demo orders share: telling the chat the user placed one (an
- * `OrderPlaced`), reporting a workflow's step to the chat (a `WorkflowStep`),
- * and waiting between steps at demo pace.
+ * What the demo orders share: telling the chat the user placed one (the
+ * answer to its block), reporting a workflow's step to the chat (a
+ * `WorkflowStep`), and waiting between steps at demo pace.
  *
  * @since 0.1.0
  */
 import type * as ChatId from "effect-assistant/ChatId"
+import * as Block from "effect-assistant/Block"
 import * as InputId from "effect-assistant/InputId"
 import type * as RunId from "effect-assistant/RunId"
 import * as Config from "effect/Config"
@@ -13,9 +14,9 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Activity from "effect/workflow/Activity"
 import * as DurableClock from "effect/workflow/DurableClock"
+import { CampaignDraft, OrderDraft } from "@acme/demo-shared/Blocks"
 import { AcmeAssistant } from "./AcmeAssistant.ts"
 import type { LiveOrder } from "./LiveOrders.ts"
-import { OrderPlaced } from "./OrderPlaced.ts"
 import { WorkflowStep } from "./WorkflowStep.ts"
 
 /**
@@ -96,8 +97,8 @@ export const reference = (runId: RunId.RunId): string =>
 
 /**
  * Tells the chat the user placed an order from the block on `messageId`, as
- * an `OrderPlaced`, which wakes Acme to follow up. Its id is the order's, so
- * a second click tells the chat once.
+ * the block's answer with the reference, which wakes Acme to follow up. A
+ * block takes one answer, so a second click tells the chat once.
  *
  * @category combinators
  * @since 0.1.0
@@ -106,14 +107,8 @@ export const placed = (chatId: ChatId.ChatId, messageId: string, order: LiveOrde
   AcmeAssistant.use((acme) =>
     acme.submit(
       chatId,
-      OrderPlaced.make({
-        id: InputId.fromKey(`placed:${order.reference}`),
-        kind: order.kind,
-        messageId,
-        reference: order.reference,
-        office: order.office,
-        description: order.description,
-        total: order.total
-      })
+      order.kind === "product"
+        ? Block.answer(OrderDraft, { messageId, value: { reference: order.reference } })
+        : Block.answer(CampaignDraft, { messageId, value: { reference: order.reference } })
     )
   )

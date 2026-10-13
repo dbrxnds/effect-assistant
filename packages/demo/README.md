@@ -12,25 +12,23 @@ ask for reports.
   - `Orders`: a year of campaign and product orders;
   - `Budgets`: quarterly budgets per office;
   - `Performance`: campaign results.
-- `api/src/Acme.ts`: the assistant's instructions, skills, tools, and model (`ACME_MODEL`).
+- `api/src/Acme.ts`: the assistant's instructions, tools, skills (as a `Skill.toolkit`), and model (`ACME_MODEL`).
 - `api/src/Prompts.ts`: the prompts, from Langfuse (label `production`), with defaults in code.
   `pnpm --filter @acme/demo-api prompts:push` uploads the defaults.
 - `api/src/Tools.ts`: order history and status, offices, budgets, and the `research` specialist.
 - `shared/src/Blocks.ts`: the UI blocks, including `order_draft` and `campaign_draft`: an order
-  or campaign the assistant prepared, which only the user places, with the block's button.
+  or campaign the assistant prepared, which only the user places, with the block's button. Once it's
+  placed, the API answers the block with the reference (`Block.answer`), which wakes Acme to follow up.
 - `api/src/Campaign.ts`: the campaign products, `start` (what the campaign block's button runs
   through the `StartCampaign` RPC), and the `CreateCampaign` workflow.
 - `api/src/PrintOrders.ts`: `quote_order`, which the assistant uses to tell the user the total,
   `place` (what the order block's button runs through the `PlaceOrder` RPC), and the `PrintOrder`
   workflow.
-- `api/src/OrderPlaced.ts`: what the API tells the chat when the user places an order or starts a
-  campaign, one of Acme's own events: the API submits it, so it wakes a turn, and Acme follows up with
-  the reference.
 - `api/src/WorkflowStep.ts`: a workflow's step, one of Acme's own events: the workflow submits it, so
   it wakes a turn, and the model reads it as a `<workflow>` update (Acme's history view in
-  `api/src/Acme.ts` maps both events to notes).
-- `api/src/Steps.ts`: what the workflows share: reporting a step to the chat, and durable waits at
-  demo pace.
+  `api/src/Acme.ts` maps it to a note).
+- `api/src/Steps.ts`: what the orders share: answering the block an order was placed from, reporting a
+  step to the chat, and durable waits at demo pace.
 - `api/src/LiveOrders.ts`: orders placed through Acme, kept up to date by the workflows.
 - `api/src/Chats.ts`: the thread list. Deleting a thread deletes its chat (the assistant's `delete`).
 - `api/src/Server.ts`: `/health`, `/rpc`, and the web app. `Subscribe` streams the chat's timeline

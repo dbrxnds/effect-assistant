@@ -80,15 +80,12 @@ export const withHandlers = <T extends Record<string, Tool.Any>>(
 ): WithHandlers<T> => ({ toolkit, handlers })
 
 /** A handler that runs `turn.loop` with these options. */
-export const simple =
-  <RS = never>(options: Assistant.LoopOptions<Record<never, never>, RS>) =>
-  (turn: Assistant.Turn) =>
-    turn.loop(options)
+export const simple = (options: Assistant.LoopOptions) => (turn: Assistant.Turn) => turn.loop(options)
 
 /** A handler that runs `turn.loop` with a toolkit, its handlers provided. */
 export const withTools =
-  <T extends Record<string, Tool.Any>, RS = never>(
-    options: Omit<Assistant.LoopOptions<T, RS>, "toolkit"> & { readonly toolkit: WithHandlers<T> }
+  <T extends Record<string, Tool.Any>>(
+    options: Omit<Assistant.LoopOptions<T>, "toolkit"> & { readonly toolkit: WithHandlers<T> }
   ) =>
   (turn: Assistant.Turn) => {
     const { toolkit, ...rest } = options

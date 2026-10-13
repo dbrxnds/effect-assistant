@@ -68,7 +68,7 @@ export const needingApproval = (definitions: ReadonlyArray<Tool.Any>): ReadonlyA
 
 /** @internal */
 export const needsApprovalMessage = (names: ReadonlyArray<string>): string =>
-  `${names.join(", ")} ${names.length === 1 ? "sets" : "set"} needsApproval, and effect-assistant doesn't run tools that wait for approval. Remove needsApproval: let the model call the tool with final values, or show a block whose button calls your app's API, which does the work and submits an app event that wakes the chat.`
+  `${names.join(", ")} ${names.length === 1 ? "sets" : "set"} needsApproval, and effect-assistant doesn't run tools that wait for approval. Remove needsApproval: let the model call the tool with final values, or show a block whose button calls your app's API, which does the work and answers the block with Block.answer.`
 
 // The toolkit decodes the params with the tool's schema before its handler sees them, and a call whose params don't
 // fit fails with a validation error the model reads: the model's JSON is what `handle` takes.
@@ -127,21 +127,6 @@ export const fromToolkit = <T extends Record<string, Tool.Any>>(
   definitions: Object.values(toolkit.tools),
   run: Effect.fnUntraced(function* (call) {
     return yield* runNative(yield* toolkit, call)
-  })
-})
-
-// The handlers use services of the loop they run in, so they're made for each call, with its context.
-/** @internal */
-export const withContext = <T extends Record<string, Tool.Any>, R>(
-  toolkit: Toolkit.Toolkit<T>,
-  handlers: (context: Context.Context<R>) => Toolkit.HandlersFrom<T>
-): Tools<R | ToolServices<T>> => ({
-  definitions: Object.values(toolkit.tools),
-  run: Effect.fnUntraced(function* (call) {
-    const context = yield* Effect.context<R>()
-    const resolved = yield* Effect.provideContext(toolkit, yield* toolkit.toHandlers(handlers(context)))
-
-    return yield* runNative(resolved, call)
   })
 })
 

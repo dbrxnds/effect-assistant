@@ -17,7 +17,6 @@ import * as Toolkit from "effect/ai/Toolkit"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import { AcmeAssistant } from "./AcmeAssistant.ts"
 import * as Campaign from "./Campaign.ts"
-import * as OrderPlaced from "./OrderPlaced.ts"
 import * as PrintOrders from "./PrintOrders.ts"
 import * as Prompts from "./Prompts.ts"
 import * as Tools from "./Tools.ts"
@@ -33,22 +32,21 @@ const orderingProducts = Skill.make("Ordering products", {
   instructions: Prompts.instructions("acme-skill-products")
 })
 
-/** Acme's tools: campaigns, product orders, and lookups. */
-const AcmeTools = Toolkit.merge(Campaign.CampaignTools, PrintOrders.PrintTools, Tools.LookupTools)
+/** Acme's playbooks, as the `load_skill` tool. Their instructions come from `Prompts` when loaded. */
+const AcmeSkills = Skill.toolkit([orderingCampaigns, orderingProducts])
+
+/** Acme's tools: campaigns, product orders, lookups, and its skills. */
+const AcmeTools = Toolkit.merge(Campaign.CampaignTools, PrintOrders.PrintTools, Tools.LookupTools, AcmeSkills)
 
 /** Their handlers, and the lookups' for the research specialist too. */
-const layerTools = Layer.mergeAll(Campaign.layerTools, PrintOrders.layerTools, Tools.layerLookups)
+const layerTools = Layer.mergeAll(Campaign.layerTools, PrintOrders.layerTools, Tools.layerLookups, AcmeSkills.layer)
 
 const note = (text: string) => Prompt.userMessage({ content: [Prompt.textPart({ text })] })
 
-/** What the model reads: the chat, with each order placed and workflow step as a note the user hasn't seen. */
-const history: Assistant.HistoryView<OrderPlaced.OrderPlaced | WorkflowStep.WorkflowStep> = (entries) =>
+/** What the model reads: the chat, with each workflow step as a note the user hasn't seen. */
+const history: Assistant.HistoryView<WorkflowStep.WorkflowStep> = (entries) =>
   entries.map((entry) =>
-    entry.event instanceof OrderPlaced.OrderPlaced
-      ? note(OrderPlaced.render(entry.event))
-      : entry.event instanceof WorkflowStep.WorkflowStep
-        ? note(WorkflowStep.render(entry.event))
-        : entry
+    entry.event instanceof WorkflowStep.WorkflowStep ? note(WorkflowStep.render(entry.event)) : entry
   )
 
 /** The model Acme and its specialists use: `ACME_MODEL`, default `claude-sonnet-5`. */
@@ -75,7 +73,6 @@ export const layer = AcmeAssistant.toLayer(
       return turn.loop({
         instructions: { ...prompt, text: `${prompt.text}\n\nToday is ${new Date().toDateString()}.` },
         toolkit: AcmeTools,
-        skills: [orderingCampaigns, orderingProducts],
         history
       })
     })

@@ -23,7 +23,6 @@ import type { ChatId } from "./ChatId.ts"
 import type { CurrentChat } from "./CurrentChat.ts"
 import type * as Instructions from "./Instructions.ts"
 import type { RunId } from "./RunId.ts"
-import type { Skill } from "./Skill.ts"
 
 const TypeId = "~effect-assistant/Specialist"
 
@@ -123,15 +122,13 @@ export type RunServices = CurrentChat | Runner | LanguageModel.LanguageModel
  * @category models
  * @since 0.1.0
  */
-export interface LoopOptions<T extends Record<string, Tool.Any> = Record<never, never>, RS = never> {
+export interface LoopOptions<T extends Record<string, Tool.Any> = Record<never, never>> {
   readonly instructions: string | Instructions.Resolved
-  /** The loop's tools, as a native toolkit whose handlers come from the layer. */
-  readonly toolkit?: Toolkit.Toolkit<T> | undefined
   /**
-   * Playbooks, listed as a catalog in the prompt and loaded with `load_skill` when one matches. A
-   * skill made with `tools` is left out when the toolkit lacks one of them.
+   * The loop's tools, as a native toolkit whose handlers come from the layer. Merge in a
+   * `Skill.toolkit(...)` for playbooks.
    */
-  readonly skills?: ReadonlyArray<Skill<RS>> | undefined
+  readonly toolkit?: Toolkit.Toolkit<T> | undefined
   /** The model calls allowed per brief. Defaults to 8. */
   readonly maxSteps?: number | undefined
 }
@@ -152,13 +149,13 @@ export interface Run {
    * (follow-ups and steering). Read it before every model call, as the loop does.
    */
   readonly history: Effect.Effect<ReadonlyArray<Prompt.Message>>
-  /** Runs the agent loop over the run's history, with the given instructions, tools, and skills. */
-  readonly loop: <T extends Record<string, Tool.Any> = Record<never, never>, RS = never>(
-    options: LoopOptions<T, RS>
+  /** Runs the agent loop over the run's history, with the given instructions and tools. */
+  readonly loop: <T extends Record<string, Tool.Any> = Record<never, never>>(
+    options: LoopOptions<T>
   ) => Stream.Stream<
     AssistantLoop.Event,
     AiError.AiError,
-    LanguageModel.LanguageModel | AssistantLoop.ToolkitServices<T> | RS
+    LanguageModel.LanguageModel | AssistantLoop.ToolkitServices<T>
   >
 }
 

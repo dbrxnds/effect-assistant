@@ -69,12 +69,11 @@ history wired in.
 
 `turn.loop` takes:
 
-| Option         | What it is                                                                        |
-| -------------- | --------------------------------------------------------------------------------- |
-| `instructions` | The assistant's role and rules: text, or [resolved instructions](./instructions). |
-| `toolkit`      | Its [tools](./tools), next to its own: a native toolkit, handlers from the layer. |
-| `skills`       | [Playbooks](./skills) it loads when a task matches.                               |
-| `maxSteps`     | Model calls per turn. Default 16.                                                 |
+| Option         | What it is                                                                             |
+| -------------- | -------------------------------------------------------------------------------------- |
+| `instructions` | The assistant's role and rules: text, or [resolved instructions](./instructions).      |
+| `toolkit`      | Its [tools](./tools) and [skills](./skills), next to its own: handlers from the layer. |
+| `maxSteps`     | Model calls per turn. Default 16.                                                      |
 
 `turn.loop` ends with `turn.replyIfOwed`, so a user who asked something gets
 an answer (see [a reply to every message](./turns#a-reply-to-every-message)).
@@ -140,7 +139,7 @@ just any service in scope. It may use:
 - what it provides to its own stream, like a user it
   [looked up](./chats#look-up-the-user-in-the-handler).
 
-The same goes for its tools and skills. Anything else is a type error that
+The same goes for its tools, skills included. Anything else is a type error that
 names the missing services. For a tool's own services, see
 [tools that use services](./tools#tools-that-use-services).
 

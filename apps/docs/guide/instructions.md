@@ -46,7 +46,8 @@ model call it's used for. That's how a trace links each generation to the
 prompt version behind it.
 
 A [skill's](./skills) instructions can be an Effect too
-(`Instructions.Instructions`), resolved each time the skill is loaded.
+(`Instructions.Instructions`), resolved each time the skill is loaded, with
+the services its toolkit's `layer` was given.
 
 ## Prompts from Langfuse
 
@@ -111,15 +112,17 @@ const ordering = Skill.make("Ordering a campaign", {
   instructions: Prompts.instructions("skill-ordering")
 })
 
+const Skills = Skill.toolkit([ordering])
+
 const MyAssistantHandlers = MyAssistant.toLayer(
   Effect.gen(function* () {
     const prompts = yield* Prompts
 
     return Effect.fn(function* (turn: Assistant.Turn) {
-      return turn.loop({ instructions: yield* prompts.get("my-assistant"), skills: [ordering] })
+      return turn.loop({ instructions: yield* prompts.get("my-assistant"), toolkit: Skills })
     })
   })
-)
+).pipe(Layer.provide(Skills.layer)) // its layer requires Prompts too
 
 // Tests and local dev: the text in code. Production: Langfuse.
 MyAssistantHandlers.pipe(Layer.provide(process.env.LANGFUSE_SECRET_KEY ? layerLangfuse : layerDefaults))

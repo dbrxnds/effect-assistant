@@ -126,8 +126,8 @@ const AnalystLive = Analyst.toLayer(
 ).pipe(Layer.provide([SpendToolsLive, AnthropicLanguageModel.model("claude-haiku-4-5")])) // a model of its own
 ```
 
-- `run.loop` takes `instructions`, `toolkit`, `skills` (its own
-  [catalog](./skills)), and `maxSteps`.
+- `run.loop` takes `instructions`, `toolkit` (merge in a
+  [skills](./skills) toolkit for playbooks), and `maxSteps`.
 - A run calls the assistant's `LanguageModel`, unless the specialist's layer
   is given one of its own, as here.
 - The handler may use the run's services (`Specialist.RunServices`) and what
