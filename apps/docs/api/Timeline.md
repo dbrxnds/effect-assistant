@@ -9,8 +9,9 @@ import { Timeline } from "effect-assistant"
 This module provides a chat's timeline: the chat as its user sees it. A chat client receives the
 timeline and nothing else.
 
-A `Timeline` holds the chat's items: the messages with their blocks, and the app's own
-events it shows (each typed with its event, see `EventItem`). It also holds the chat's
+A `Timeline` holds the chat's items: the messages with their blocks, the app's own events
+it shows (each typed with its event, see `EventItem`), and the tool calls waiting for the
+user's approval (`ApprovalItem`). It also holds the chat's
 `Activity`, and whether the last turn failed or the chat was deleted. It never contains the
 model's output, tool calls or results, what the model read, or why a turn failed. The server
 streams `Change`s by piping the assistant's `subscribe` through `changes`, and the
@@ -231,10 +232,22 @@ type EventItem<E> = E extends { readonly _tag: infer Tag extends string }
 
 <small>Since 0.3.0</small>
 
+### ApprovalItem
+
+Represents a tool call that waits, or waited, for the user's approval, as an item on the
+timeline.
+
+```ts
+type ApprovalItem = typeof ApprovalItem.Type
+```
+
+<small>Since 0.4.0</small>
+
 ### Item
 
-Represents an item in the chat's timeline: a message the user or the assistant sent, or one of
-the app's own events it shows (see `EventItem`).
+Represents an item in the chat's timeline: a message the user or the assistant sent, one of the
+app's own events it shows (see `EventItem`), or a tool call waiting for the user's approval
+(see `ApprovalItem`).
 
 **Example** (Showing each item of a chat)
 
@@ -254,7 +267,7 @@ const line = (item: Timeline.Item<DailyBudgetReached>) =>
 ```
 
 ```ts
-type Item<Events = never> = UserMessage | AssistantMessage | EventItem<Events>
+type Item<Events = never> = UserMessage | AssistantMessage | EventItem<Events> | ApprovalItem
 ```
 
 <small>Since 0.3.0</small>
@@ -306,7 +319,7 @@ Represents a change to a chat's timeline, typed with the app's events it shows.
 **Details**
 
 A change holds each item that is new or changed (for example, a message whose block was
-answered or closed), in full. It also holds the current activity, whether the last turn failed,
+answered or closed, or a call the user approved), in full. It also holds the current activity, whether the last turn failed,
 and whether the chat was deleted. `seq` is the position in the chat's log that the change is up
 to.
 
@@ -419,6 +432,26 @@ const AssistantMessage = Schema.TaggedStruct("AssistantMessage", { …
 
 <small>Since 0.1.0</small>
 
+### ApprovalItem
+
+Schema for a tool call that waits, or waited, for the user's approval, as an item on the
+timeline.
+
+**Details**
+
+It is only the yes or no: the assistant's own message tells the user what it asks them to
+approve, so the item carries no params. `id` is the call's id, which the decision is for (see
+`ToolApproval.approve`), and `tool` the tool's name, for a label. `status` is where the call stands
+(`ToolApproval.Status`); `reason` is the user's, when they rejected it with one; `outcome` is how
+the approved call went, once it ran. `at` is when the call started waiting, in epoch
+milliseconds. A change updates the item in place as the call is decided and run.
+
+```ts
+const ApprovalItem = Schema.TaggedStruct("ToolApproval", { …
+```
+
+<small>Since 0.4.0</small>
+
 ### SpecialistWorking
 
 Schema for a specialist that is working for the assistant. It holds the specialist's name and
@@ -452,7 +485,8 @@ in JSON.
 **Details**
 
 It is the success schema of the RPC that streams a chat's timeline: name the events the chat's
-users see, the same ones the handler passes to `changes` as `show`. Each item decodes its
+users see, the same ones the handler passes to `changes` as `show`. Tool calls waiting for
+approval are always in it, as `ApprovalItem`s. Each item decodes its
 event with that event's schema, so the client gets `Change<Events>` typed with them and folds it
 with `fold`, no definition needed. `Change()` carries no app events.
 

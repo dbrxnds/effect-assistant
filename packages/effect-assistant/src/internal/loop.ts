@@ -21,7 +21,18 @@ import * as Toolkits from "./toolkit.ts"
 import { isTurnEnding } from "./tools.ts"
 
 /** @internal */
-export type Event = AssistantEvent.ModelOutput | AssistantEvent.ToolStarted | AssistantEvent.ToolResult
+export type Event =
+  | AssistantEvent.ModelOutput
+  | AssistantEvent.ToolStarted
+  | AssistantEvent.ToolResult
+  | AssistantEvent.ApprovalRequested
+
+// Only a turn's loop can wait for the user's approval, and runs the calls they approved. A turn's specialists inherit
+// its context, so their runs set it back to none.
+/** @internal */
+export const TurnApprovals = Context.Reference<
+  Option.Option<{ readonly approved: Effect.Effect<ReadonlyArray<AssistantEvent.ToolCallPart>> }>
+>("effect-assistant/TurnApprovals", { defaultValue: Option.none })
 
 // The assistant's own tools with the turn's services, so an app's own loop in a turn can message the user. A
 // specialist's run has none.
@@ -61,8 +72,9 @@ export interface StepResult {
   /** The model's output; unset when the step only ran calls a crash cut off. */
   readonly output: AssistantEvent.ModelOutput | undefined
   /**
-   * Whether the model is done: it made no tool calls, or ended its turn (`wait`, or a message
-   * with `wait: true`) and none of the step's calls failed.
+   * Whether the model is done: it made no tool calls, one of its calls waits for the user's
+   * approval, or it ended its turn (`wait`, or a message with `wait: true`) and none of the step's
+   * calls failed.
    */
   readonly done: boolean
   /**
@@ -71,9 +83,15 @@ export interface StepResult {
   readonly historyLength: number
 }
 
-// The loop runs the calls itself, after storing each as started, so the model call runs none.
+// The loop runs the calls itself, after storing each as started, so the model call runs none. It also decides which
+// calls wait for approval: the model call would ask for approvals of its own.
 const requestToolkit = (definitions: ReadonlyArray<Tool.Any>): Toolkit.WithHandler<Record<string, Tool.Any>> => ({
-  tools: Object.fromEntries(definitions.map((tool) => [tool.name, tool])),
+  tools: Object.fromEntries(
+    definitions.map((tool) => [
+      tool.name,
+      tool.needsApproval === undefined || tool.needsApproval === false ? tool : tool.setNeedsApproval(false)
+    ])
+  ),
   handle: () => Effect.succeed(Stream.empty)
 })
 
@@ -111,28 +129,79 @@ const runCall = Effect.fnUntraced(function* <R>(tools: Toolkits.Tools<R>, call: 
   return AssistantEvent.ToolResult.make({ callId: call.id, tool: call.name, ...result })
 })
 
-// Every `ToolStarted` is stored before any call runs. `then` is told whether one of the calls failed, so the model
-// has to read the results.
+// A call that needs approval waits for the user in a turn. A specialist's run can't ask them, so its call fails.
+const awaitApproval = Effect.fnUntraced(function* (call: AssistantEvent.ToolCallPart) {
+  if (Option.isNone(yield* TurnApprovals)) {
+    return AssistantEvent.ToolResult.make({
+      callId: call.id,
+      tool: call.name,
+      ...Toolkits.failed(
+        `${call.name} needs the user's approval, and only the assistant can ask for it. Don't run it: say in your answer what needs approving, with the details.`,
+        "NeedsApproval"
+      )
+    })
+  }
+
+  return AssistantEvent.ApprovalRequested.make({ callId: call.id, tool: call.name, params: call.params })
+})
+
+interface Pending {
+  readonly call: AssistantEvent.ToolCallPart
+  /** The user approved it: it runs without asking again. */
+  readonly approved: boolean
+}
+
+interface Ran {
+  /** One of the calls failed, so the model has to read the results. */
+  readonly failed: boolean
+  /** One of the calls waits for the user's approval, so the turn ends. */
+  readonly waiting: boolean
+}
+
+// Every `ToolStarted` is stored before any call runs; a call that waits for approval doesn't start.
 const runCalls = <R, S, E, R2>(
   tools: Toolkits.Tools<R>,
-  calls: ReadonlyArray<AssistantEvent.ToolCallPart>,
-  then: (failed: boolean) => Stream.Stream<Step<never, S>, E, R2>
+  pending: ReadonlyArray<Pending>,
+  history: ReadonlyArray<Prompt.Message>,
+  then: (ran: Ran) => Stream.Stream<Step<never, S>, E, R2>
 ): Stream.Stream<Step<Event, S>, E, R | R2> =>
-  Stream.fromIterable(
-    calls.map((call) => value(AssistantEvent.ToolStarted.make({ callId: call.id, tool: call.name })))
-  ).pipe(
-    Stream.concat(
-      Stream.unwrap(
-        Effect.gen(function* () {
-          const done = yield* Effect.forEach(calls, (call) => runCall(tools, call), { concurrency: "unbounded" })
-
-          return Stream.fromIterable(done.map(value)).pipe(Stream.concat(then(done.some(isFailure))))
-        })
+  Stream.unwrap(
+    Effect.gen(function* () {
+      const waits = yield* Effect.forEach(pending, ({ call, approved }) =>
+        approved ? Effect.succeed(false) : tools.needsApproval(call, history)
       )
-    )
+
+      const started = pending.flatMap(({ call }, i) =>
+        waits[i] === true ? [] : [value(AssistantEvent.ToolStarted.make({ callId: call.id, tool: call.name }))]
+      )
+
+      return Stream.fromIterable(started).pipe(
+        Stream.concat(
+          Stream.unwrap(
+            Effect.gen(function* () {
+              const done = yield* Effect.forEach(
+                pending,
+                ({ call }, i): Effect.Effect<Event, never, R> =>
+                  waits[i] === true ? awaitApproval(call) : runCall(tools, call),
+                { concurrency: "unbounded" }
+              )
+
+              return Stream.fromIterable(done.map(value)).pipe(
+                Stream.concat(
+                  then({
+                    failed: done.some(isFailure),
+                    waiting: done.some((event) => Predicate.isTagged(event, "ApprovalRequested"))
+                  })
+                )
+              )
+            })
+          )
+        )
+      )
+    })
   )
 
-const isFailure = (result: AssistantEvent.ToolResult) => result.outcome === "failure"
+const isFailure = (event: Event) => Predicate.isTagged(event, "ToolResult") && event.outcome === "failure"
 
 /** @internal */
 export type Step<A, S> = Data.TaggedEnum<{
@@ -192,19 +261,31 @@ export const step = <R, S, E2 = never, R2 = never>(
   const instructions = Predicate.isString(options.instructions) ? { text: options.instructions } : options.instructions
 
   const after = (result: StepResult) => Stream.suspend(() => then(result))
-  const needingApproval = Toolkits.needingApproval(toolkit.definitions)
-
-  if (needingApproval.length > 0) return Stream.die(Toolkits.needsApprovalMessage(needingApproval))
 
   return Stream.unwrap(
     Effect.gen(function* () {
       const { messages: history, throughSeq } = readHistory(yield* options.history)
       // Calls a crash cut off, with no result: they run again, with the same ids, before the model goes on.
       const cutOff = History.unansweredCalls(history)
+      const approvals = yield* TurnApprovals
 
-      if (cutOff.length > 0) {
-        return runCalls(toolkit, cutOff, () =>
-          after({ output: undefined, done: false, historyLength: history.length + cutOff.length })
+      // Calls the user approved: they run as the model made them, with the same ids, before the model goes on. Not in
+      // a loop without their tools.
+      const approved = Option.isNone(approvals)
+        ? []
+        : (yield* approvals.value.approved).filter(
+            (call) =>
+              toolkit.definitions.some((tool) => tool.name === call.name) && !cutOff.some((cut) => cut.id === call.id)
+          )
+
+      if (cutOff.length > 0 || approved.length > 0) {
+        const pending = [
+          ...cutOff.map((call) => ({ call, approved: false })),
+          ...approved.map((call) => ({ call, approved: true }))
+        ]
+
+        return runCalls(toolkit, pending, history, ({ waiting }) =>
+          after({ output: undefined, done: waiting, historyLength: history.length + pending.length })
         )
       }
 
@@ -230,15 +311,20 @@ export const step = <R, S, E2 = never, R2 = never>(
       const calls = toolCalls(output.parts)
       const historyLength = history.length + Prompt.fromResponseParts(output.parts).content.length + calls.length
 
-      // A failed call doesn't end the turn: a message that failed never reached the user, so the model reads why.
+      // A failed call doesn't end the turn: a message that failed never reached the user, so the model reads why. A call
+      // that waits for approval does: the turn waits for the user.
       return Stream.make(value(output)).pipe(
         Stream.concat(
-          runCalls(toolkit, calls, (failed) =>
-            after({
-              output,
-              done: calls.length === 0 || (!failed && calls.some(isTurnEnding)),
-              historyLength
-            })
+          runCalls(
+            toolkit,
+            calls.map((call) => ({ call, approved: false })),
+            history,
+            ({ failed, waiting }) =>
+              after({
+                output,
+                done: calls.length === 0 || waiting || (!failed && calls.some(isTurnEnding)),
+                historyLength
+              })
           )
         )
       )

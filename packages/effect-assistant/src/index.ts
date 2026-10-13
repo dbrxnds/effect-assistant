@@ -105,6 +105,11 @@ export * as Specialist from "./Specialist.ts"
 export * as Timeline from "./Timeline.ts"
 
 /**
+ * @since 0.4.0
+ */
+export * as ToolApproval from "./ToolApproval.ts"
+
+/**
  * @since 0.1.0
  */
 export * as ToolDiscovery from "./ToolDiscovery.ts"

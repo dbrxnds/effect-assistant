@@ -126,8 +126,8 @@ const AnalystLive = Analyst.toLayer(
 ).pipe(Layer.provide([SpendToolsLive, AnthropicLanguageModel.model("claude-haiku-4-5")])) // a model of its own
 ```
 
-- `run.loop` takes `instructions`, `toolkit`, `skills` (its own
-  [catalog](./skills)), and `maxSteps`.
+- `run.loop` takes `instructions`, `toolkit` (merge in a
+  [skills](./skills) toolkit for playbooks), and `maxSteps`.
 - A run calls the assistant's `LanguageModel`, unless the specialist's layer
   is given one of its own, as here.
 - The handler may use the run's services (`Specialist.RunServices`) and what
@@ -150,8 +150,9 @@ in the chat's entity, which keeps itself alive while a run (or a turn for its
 answer) works. A finished run stays warm for 15 minutes for follow-ups.
 
 A run can't ask the user anything: it reports what needs asking, and the
-assistant asks. A run whose toolkit has a tool with `needsApproval` fails (see
-[involving the user](./user-involvement#not-needsapproval)).
+assistant asks. A run's call to a tool that needs the user's approval fails,
+and the run reads why (see
+[involving the user](./user-involvement#the-assistant-acts-after-the-users-yes)).
 
 Runs aren't durable. That's deliberate: a specialist is a quick helper, not
 a durable job. A run cut off by a shutdown answers that it was cut off, so

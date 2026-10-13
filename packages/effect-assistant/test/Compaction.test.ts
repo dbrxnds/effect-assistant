@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { Assistant, AssistantEvent, ChatId, Compaction, CurrentChat, RunId } from "../src/index.ts"
+import { Assistant, AssistantEvent, ChatId, Compaction, CurrentChat, RunId, ToolApproval } from "../src/index.ts"
 import { collectUntil, newChat, runMemory, say, turnsDone } from "./utils/fixtures.ts"
 import * as Scripted from "./utils/scripted.ts"
 
@@ -108,5 +108,22 @@ describe("Compaction", () => {
 
     expect(viewed).toHaveLength(2)
     expect(viewed[1]).toEqual(entries[2])
+  })
+
+  it("keeps a call that still waits for the user's approval among what's open", () => {
+    const chatId = Effect.runSync(ChatId.make())
+
+    const events = [
+      say("Order 300 totes."),
+      AssistantEvent.ApprovalRequested.make({ callId: "c1", tool: "place_order", params: { quantity: 300 } }),
+      AssistantEvent.ApprovalRequested.make({ callId: "c2", tool: "place_order", params: { quantity: 5 } }),
+      ToolApproval.reject({ id: "c2" })
+    ]
+
+    const entries = events.map((event, i) => AssistantEvent.Entry.make({ chatId, seq: i + 1, at: 0, event }))
+
+    expect(Compaction.openItems(entries, entries.length)).toEqual(
+      Option.some(`Calls waiting for the user's approval:\n- your call to place_order (c1): {"quantity":300}`)
+    )
   })
 })

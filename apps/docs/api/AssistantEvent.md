@@ -214,25 +214,45 @@ class SpecialistFinished extends Schema.TaggedClass<SpecialistFinished>()("Speci
 
 <small>Since 0.1.0</small>
 
+### ApprovalDecision
+
+Represents the user's decision on a tool call that waits for their approval: `"approved"`, so
+the call runs, or `"rejected"`, with an optional short reason the model reads.
+
+Its id is fixed per call (see `ToolApproval.approve`), so a decision is stored once. A decision on
+a call that isn't waiting any more (decided, or expired) isn't stored.
+
+```ts
+class ApprovalDecision extends Schema.TaggedClass<ApprovalDecision>()("ApprovalDecision", {
+  id: InputId,
+  callId: Schema.String,
+  decision: Schema.Literals(["approved", "rejected"]),
+  reason: Schema.optional(Schema.String.check(Schema.isMaxLength(500)))
+})
+```
+
+<small>Since 0.4.0</small>
+
 ### Input
 
 Schema for every input `Assistant.submit` accepts.
 
 ```ts
-const Input = Schema.Union([UserMessage, BlockAnswer, SpecialistFinished])
+const Input = Schema.Union([UserMessage, BlockAnswer, SpecialistFinished, ApprovalDecision])
 ```
 
 <small>Since 0.1.0</small>
 
 ### UserInput
 
-Schema for the inputs from the chat's user, which are messages and block answers.
+Schema for the inputs from the chat's user, which are messages, block answers, and decisions on
+tool calls that wait for their approval.
 
 A turn owes each one a reply. It is also what a chat client usually may submit, since the app's
 events come from the server.
 
 ```ts
-const UserInput = Schema.Union([UserMessage, BlockAnswer])
+const UserInput = Schema.Union([UserMessage, BlockAnswer, ApprovalDecision])
 ```
 
 <small>Since 0.1.0</small>
@@ -463,6 +483,40 @@ class BlocksClosed extends Schema.TaggedClass<BlocksClosed>()("BlocksClosed", {
 
 <small>Since 0.1.0</small>
 
+### ApprovalRequested
+
+Represents a tool call that waits for the user's approval instead of running: its tool needs
+approval (Effect's `needsApproval`).
+
+**Details**
+
+It holds the call's id, the tool, and its params, in JSON, as the model wrote them. The model
+reads it as the call's result, saying it waits for the user; the user's
+`ApprovalDecision` decides it, and an approved call runs then, with the same id.
+
+```ts
+class ApprovalRequested extends Schema.TaggedClass<ApprovalRequested>()("ApprovalRequested", {
+  callId: Schema.String,
+  tool: Schema.String,
+  params: Schema.Json
+})
+```
+
+<small>Since 0.4.0</small>
+
+### ApprovalsExpired
+
+Represents tool calls that waited for the user's approval and won't run: the user moved on, like
+the ones `ToolApproval.closeStale` expires. The model reads that they weren't approved.
+
+```ts
+class ApprovalsExpired extends Schema.TaggedClass<ApprovalsExpired>()("ApprovalsExpired", {
+  callIds: Schema.Array(Schema.String)
+})
+```
+
+<small>Since 0.4.0</small>
+
 ### AssistantEvent
 
 Schema for every event the library defines.
@@ -548,7 +602,7 @@ const isAppInput: (event: { readonly _tag: string }) => boolean
 ### isInput
 
 Returns whether an event is one of the library's inputs, which are a user message, a block
-answer, or a finished specialist run.
+answer, a finished specialist run, or a decision on a tool call waiting for approval.
 
 The application's events that came in through the assistant's `submit` are inputs too (see
 `isAppInput`).

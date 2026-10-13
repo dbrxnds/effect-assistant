@@ -98,7 +98,8 @@ timeline itself uses `Timeline.fromEntries(entries, MyAssistant, { show })`.
   with `at` (epoch milliseconds). An assistant's message has its `block`,
   if it has one: its `kind` and `props`, its `status` (`"open"`,
   `"answered"`, or `"closed"`), and the user's `answer`. Between them, an
-  item for each of your events the timeline shows (see below).
+  item for each of your events the timeline shows, and for each tool call
+  waiting for the user's approval (see below).
 - **`activity`**: `working` while a turn runs, or is about to start for
   something that arrived; `specialists`, the ones working (which, since
   when). `Timeline.isIdle(timeline)` is neither. A workflow waiting on a timer
@@ -173,3 +174,43 @@ const rows = (timeline: Timeline.Timeline<DailyBudgetReached | OrderPlaced>) =>
 An item whose event the RPC's schema doesn't name, or that doesn't decode (a
 newer server than the client, say), is left out of the change.
 `Timeline.fromEntries` and `Timeline.snapshot` take the same `show`.
+
+## Tool calls to approve
+
+A call to a tool that needs the user's approval (see
+[involving the user](./user-involvement)) is an item on the timeline too, a
+[`Timeline.ApprovalItem`](/api/Timeline#approvalitem): `_tag: "ToolApproval"`,
+the call's `id`, the `tool`'s name, its `status` (`"pending"`, `"approved"`,
+`"rejected"`, or `"expired"`), the user's `reason` when they rejected it with
+one, the `outcome` of an approved call once it ran, and `at`. A change
+updates it in place as it's decided and run.
+
+It's only the yes or no. The assistant's own message, sent with the call,
+tells the user what it asks them to approve, so the item carries no params,
+and the client needs nothing of the tool. Every call waiting for approval is
+on the timeline, with no option on the RPC's schema or on `changes`.
+
+[`ToolApproval.approve`](/api/ToolApproval#approve) and
+[`ToolApproval.reject`](/api/ToolApproval#reject) build the decision to
+submit, like a block's `respond` builds its answer:
+
+```tsx
+import { Timeline, ToolApproval } from "effect-assistant"
+import * as Match from "effect/Match"
+
+const row = (item: Timeline.Item<DailyBudgetReached>) =>
+  Match.valueTags(item, {
+    UserMessage: (sent) => <UserBubble key={sent.id} text={sent.text} />,
+    AssistantMessage: (sent) => <AssistantBubble key={sent.id} message={sent} />,
+    DailyBudgetReached: (budget) => <BudgetNotice key={budget.id} at={budget.at} />,
+    ToolApproval: (approval) => (
+      <ApproveOrReject
+        key={approval.id}
+        label={approval.tool}
+        status={approval.status}
+        onApprove={() => submit(ToolApproval.approve(approval))}
+        onReject={(reason) => submit(ToolApproval.reject(approval, { reason }))}
+      />
+    )
+  })
+```

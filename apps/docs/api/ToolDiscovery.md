@@ -24,8 +24,9 @@ Merge the toolkit into the loop's, and provide `layer` for the same catalog, whi
 the tools' handlers. A catalog tool's services are `execute_tool`'s, so the turn provides them
 as it does for any tool.
 
-A catalog tool with Effect's `needsApproval` set fails the layer when it is built, as it would
-fail a loop: the library doesn't run calls that wait for approval.
+A catalog tool with Effect's `needsApproval` set fails the layer when it is built: a call
+through `execute_tool` can't wait for the user's approval. Give such a tool to the loop's toolkit
+directly (see `ToolApproval`).
 
 **Example** (Finding rarely used tools when needed)
 
@@ -74,7 +75,11 @@ export const layer = <T extends Record<string, Tool.Any>>(catalog: Toolkit.Toolk
       const definitions = Object.values(resolved.tools)
       const needingApproval = Toolkits.needingApproval(definitions)
 
-      if (needingApproval.length > 0) return yield* Effect.die(Toolkits.needsApprovalMessage(needingApproval))
+      if (needingApproval.length > 0) {
+        return yield* Effect.die(
+          `${needingApproval.join(", ")} ${needingApproval.length === 1 ? "sets" : "set"} needsApproval, and a call through execute_tool can't wait for the user's approval. Give it to the loop's toolkit instead of ToolDiscovery's catalog.`
+        )
+      }
 
       return {
         search_tools: ({ query }) =>

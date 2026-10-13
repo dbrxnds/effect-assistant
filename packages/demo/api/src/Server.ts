@@ -15,13 +15,10 @@ import * as HttpRouter from "effect/http/HttpRouter"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as RpcSerialization from "effect/rpc/RpcSerialization"
 import * as RpcServer from "effect/rpc/RpcServer"
-import type * as WorkflowEngine from "effect/workflow/WorkflowEngine"
 import { createServer } from "node:http"
 import { AcmeAssistant } from "./AcmeAssistant.ts"
-import * as Campaign from "./Campaign.ts"
 import * as Chats from "./Chats.ts"
 import * as LiveOrders from "./LiveOrders.ts"
-import * as PrintOrders from "./PrintOrders.ts"
 import * as StaticSite from "./StaticSite.ts"
 
 const layerRpcHandlers = AcmeRpcs.toLayer(
@@ -29,11 +26,10 @@ const layerRpcHandlers = AcmeRpcs.toLayer(
     const acme = yield* AcmeAssistant
     const chats = yield* Chats.Chats
     const orders = yield* LiveOrders.LiveOrders
-    // The buttons on order and campaign blocks: they place what the block shows, and tell the chat.
-    const placing = yield* Effect.context<LiveOrders.LiveOrders | WorkflowEngine.WorkflowEngine>()
 
     return AcmeRpcs.of({
-      // No `show`: Acme's own events are for the model, so none reach the user.
+      // No `show`: Acme's own events are for the model, so none reach the user. Its orders and campaigns waiting for
+      // the user's approval are on the timeline anyway.
       Subscribe: ({ chatId }) => acme.subscribe(chatId).pipe(Timeline.changes(AcmeAssistant)),
       Submit: ({ chatId, input }) =>
         (Predicate.isTagged(input, "UserMessage") ? chats.titleFromMessage(chatId, input.text) : Effect.void).pipe(
@@ -43,17 +39,7 @@ const layerRpcHandlers = AcmeRpcs.toLayer(
       CreateChat: () => chats.create.pipe(Effect.map((chat) => ({ chatId: chat.chatId }))),
       // A deleted chat takes its demo orders along, so budgets don't drift with every test run.
       DeleteChat: ({ chatId }) =>
-        chats.delete(chatId).pipe(Effect.andThen(acme.delete(chatId)), Effect.andThen(orders.removeChat(chatId))),
-      PlaceOrder: ({ chatId, messageId, order }) =>
-        PrintOrders.place(chatId, messageId, order).pipe(
-          Effect.provideService(AcmeAssistant, acme),
-          Effect.provideContext(placing)
-        ),
-      StartCampaign: ({ chatId, messageId, campaign }) =>
-        Campaign.start(chatId, messageId, campaign).pipe(
-          Effect.provideService(AcmeAssistant, acme),
-          Effect.provideContext(placing)
-        )
+        chats.delete(chatId).pipe(Effect.andThen(acme.delete(chatId)), Effect.andThen(orders.removeChat(chatId)))
     })
   })
 )

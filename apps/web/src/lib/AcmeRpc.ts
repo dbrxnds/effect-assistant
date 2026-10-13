@@ -76,8 +76,3 @@ export const createChat = AcmeRpc.mutation("CreateChat")
 export const deleteChat = AcmeRpc.mutation("DeleteChat")
 
 export const submit = AcmeRpc.mutation("Submit")
-
-/** The buttons on order and campaign blocks: the API places what the block shows, and tells the chat. */
-export const placeOrder = AcmeRpc.mutation("PlaceOrder")
-
-export const startCampaign = AcmeRpc.mutation("StartCampaign")

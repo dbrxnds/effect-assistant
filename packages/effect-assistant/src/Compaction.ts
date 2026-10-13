@@ -18,6 +18,8 @@ import * as AssistantActivity from "./AssistantActivity.ts"
 import * as AssistantEvent from "./AssistantEvent.ts"
 import * as BlockKit from "./BlockKit.ts"
 import { userText } from "./internal/history.ts"
+import { toJsonText } from "./internal/schema.ts"
+import * as ToolApproval from "./ToolApproval.ts"
 
 /**
  * Represents the fields a summary event must have: its text and the last `seq` it covers.
@@ -54,7 +56,7 @@ export const inputTokens = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): nu
 
 /**
  * Returns the items that were open at `throughSeq` and are still open: blocks the user hasn't
- * answered, and specialists that are working. The result is text for
+ * answered, specialists that are working, and tool calls waiting for the user's approval. The result is text for
  * the model, or `None` when nothing is open.
  *
  * @category utils
@@ -100,9 +102,24 @@ export const openItems = (
       : []
   )
 
+  const approvals = [...ToolApproval.fromEntries(entries).values()].flatMap((approval) =>
+    approval.status === "pending" &&
+    opened(
+      seqOf(
+        (event) =>
+          AssistantEvent.isLibraryEvent(event) &&
+          Predicate.isTagged(event, "ApprovalRequested") &&
+          event.callId === approval.request.callId
+      )
+    )
+      ? [`- your call to ${approval.request.tool} (${approval.request.callId}): ${toJsonText(approval.request.params)}`]
+      : []
+  )
+
   const sections = [
     blocks.length > 0 ? `Blocks the user hasn't answered:\n${blocks.join("\n")}` : "",
-    specialists.length > 0 ? `Specialists still working:\n${specialists.join("\n")}` : ""
+    specialists.length > 0 ? `Specialists still working:\n${specialists.join("\n")}` : "",
+    approvals.length > 0 ? `Calls waiting for the user's approval:\n${approvals.join("\n")}` : ""
   ].filter((section) => section.length > 0)
 
   return sections.length === 0 ? Option.none() : Option.some(sections.join("\n\n"))

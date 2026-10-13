@@ -8,9 +8,9 @@ import { Skill } from "effect-assistant"
 
 Defines skills, which are playbooks with step-by-step instructions for a kind of task.
 
-A loop lists its skills as a catalog in the prompt, with each skill's name and description
-(`withCatalog`). The model loads a skill's instructions with the `load_skill` tool when a
-task matches.
+A list of skills becomes a toolkit with one tool, `load_skill` (`toolkit`). Its
+description is the catalog, each skill's name and when to use it, and the model calls it to read
+a skill's instructions when a task matches. Merge it into a loop's toolkit like any other.
 
 ## Constructors
 
@@ -22,12 +22,7 @@ Creates a skill from its name, a description of when to use it, and its instruct
 
 Write the description as a trigger ("Use when…"), since it's all the model sees until it loads
 the skill. The instructions are text, or an Effect that is resolved each time the skill is
-loaded.
-
-`tools` lists the tools the instructions use. A loop whose toolkit lacks any of them, matched by
-name, leaves the skill out of its catalog and of `load_skill`, so a loop that gets its tools per
-user (by role, say) never offers a playbook it can't follow. A tool that only `ToolDiscovery`
-finds isn't in the toolkit, so it doesn't count. Without `tools`, every loop offers the skill.
+loaded. Offer skills to a loop with `toolkit`.
 
 **Example** (Defining a playbook for ordering campaigns)
 
@@ -40,30 +35,6 @@ const orderingCampaigns = Skill.make("Ordering a campaign", {
 2. You need who it should reach and a budget. Ask for what's missing, one question at a time.
 3. When you have both, call start_campaign.`
 })
-
-const MyAssistantLive = MyAssistant.toLayer((turn) =>
-  turn.loop({ instructions, skills: [orderingCampaigns] })
-)
-```
-
-**Example** (Offering a skill only with the tools it uses)
-
-```ts
-import { Skill } from "effect-assistant"
-import * as Tool from "effect/ai/Tool"
-import * as Schema from "effect/Schema"
-
-const StartCampaign = Tool.make("start_campaign", {
-  parameters: Schema.Struct({ campaignId: Schema.String, budget: Schema.Finite }),
-  success: Schema.String
-})
-
-// Left out of a loop whose toolkit has no start_campaign, like a viewer's.
-const orderingCampaigns = Skill.make("Ordering a campaign", {
-  description: "Use when the user wants to order or start a campaign.",
-  instructions: "When you know who it should reach and the budget, call start_campaign.",
-  tools: [StartCampaign]
-})
 ```
 
 ```ts
@@ -74,13 +45,69 @@ const make: <R = never>(
     readonly description: string
     /** Text, or an Effect resolved each time the skill is loaded. */
     readonly instructions: Instructions.Instructions<R>
-    /** The tools its instructions use: a loop whose toolkit lacks one leaves the skill out. */
-    readonly tools?: ReadonlyArray<Tool.Any> | undefined
   }
 ) => Skill<R>
 ```
 
 <small>Since 0.1.0</small>
+
+### toolkit
+
+Creates a toolkit from a list of skills: the `load_skill` tool, whose description lists each
+skill's name and when to use it, and its handler's `layer`.
+
+**Details**
+
+Merge the toolkit into a loop's own with `Toolkit.merge`, and provide its `layer`, which requires
+the services the skills' instructions need. The model loads a skill by name; a name that isn't
+in the list is a failure the model reads, with the names there are.
+
+The handler resolves only the skills of its own list. To offer each user the skills they may
+use, build the toolkit in the turn from that user's list, and provide its layer to the loop's
+stream (`Stream.provide(skills.layer)`): building one does no work.
+
+**Example** (Giving an assistant its playbooks)
+
+```ts
+import { Skill } from "effect-assistant"
+import * as Layer from "effect/Layer"
+import * as Toolkit from "effect/ai/Toolkit"
+
+const AssistantSkills = Skill.toolkit([orderingCampaigns, sharingAssets])
+
+const MyAssistantLive = MyAssistant.toLayer((turn) =>
+  turn.loop({ instructions, toolkit: Toolkit.merge(MyTools, AssistantSkills) })
+).pipe(Layer.provide([MyToolsLive, AssistantSkills.layer]))
+```
+
+**Example** (Offering each user the skills their role allows)
+
+```ts
+import { Skill } from "effect-assistant"
+import * as Effect from "effect/Effect"
+import * as Stream from "effect/Stream"
+import * as Toolkit from "effect/ai/Toolkit"
+
+const MyAssistantLive = MyAssistant.toLayer((turn) =>
+  Stream.unwrap(
+    Effect.map(roleOf(turn.chatId), (role) => {
+      const skills = Skill.toolkit(allSkills.filter((skill) => allowed(role, skill)))
+
+      return turn
+        .loop({ instructions, toolkit: Toolkit.merge(MyTools, skills) })
+        .pipe(Stream.provide(skills.layer))
+    })
+  )
+)
+```
+
+```ts
+const toolkit: <const Skills extends ReadonlyArray<Skill<unknown>>>(
+  skills: Skills
+) => Toolkit<Services<Skills[number]>>
+```
+
+<small>Since 0.4.0</small>
 
 ## Models
 
@@ -97,15 +124,35 @@ interface Skill<R = never> {
   readonly description: string
   /** Text, or an Effect resolved each time the skill is loaded. */
   readonly instructions: Instructions.Instructions<R>
-  /**
-   * The tools its instructions use. A loop offers the skill only when its toolkit has every one of
-   * them, matched by name. Unset, a loop always offers it.
-   */
-  readonly tools?: ReadonlyArray<Tool.Any> | undefined
 }
 ```
 
 <small>Since 0.1.0</small>
+
+### LoadSkill
+
+Represents the `load_skill` tool, which reads a skill's instructions by name.
+
+```ts
+type LoadSkill = ReturnType<typeof loadSkill>
+```
+
+<small>Since 0.4.0</small>
+
+### Toolkit
+
+Represents a list of skills as a toolkit: the `load_skill` tool, and the layer with its handler.
+
+`R` is the services the skills' instructions need, which the layer requires.
+
+```ts
+interface Toolkit<R = never> extends AiToolkit.Toolkit<{ readonly load_skill: LoadSkill }> {
+  /** The handler of `load_skill`, which resolves the instructions of these skills. */
+  readonly layer: Layer.Layer<Tool.Handler<"load_skill">, never, R>
+}
+```
+
+<small>Since 0.4.0</small>
 
 ## Utility types
 
@@ -115,19 +162,6 @@ Extracts the services that skills need when they're loaded.
 
 ```ts
 type Services<S> = S extends Skill<infer R> ? R : never
-```
-
-<small>Since 0.1.0</small>
-
-## Utils
-
-### withCatalog
-
-Returns the prompt with the skills' catalog appended, or the prompt unchanged when there are no
-skills.
-
-```ts
-const withCatalog: <R>(prompt: string, skills: ReadonlyArray<Skill<R>>) => string
 ```
 
 <small>Since 0.1.0</small>

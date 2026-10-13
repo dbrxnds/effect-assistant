@@ -2,8 +2,9 @@
  * This module provides a chat's timeline: the chat as its user sees it. A chat client receives the
  * timeline and nothing else.
  *
- * A {@link Timeline} holds the chat's items: the messages with their blocks, and the app's own
- * events it shows (each typed with its event, see {@link EventItem}). It also holds the chat's
+ * A {@link Timeline} holds the chat's items: the messages with their blocks, the app's own events
+ * it shows (each typed with its event, see {@link EventItem}), and the tool calls waiting for the
+ * user's approval ({@link ApprovalItem}). It also holds the chat's
  * {@link Activity}, and whether the last turn failed or the chat was deleted. It never contains the
  * model's output, tool calls or results, what the model read, or why a turn failed. The server
  * streams {@link Change}s by piping the assistant's `subscribe` through {@link changes}, and the
@@ -20,6 +21,7 @@
 import { dual } from "effect/Function"
 import * as Match from "effect/Match"
 import * as Option from "effect/Option"
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as SchemaTransformation from "effect/SchemaTransformation"
 import * as Stream from "effect/Stream"
@@ -29,6 +31,7 @@ import * as AssistantEvent from "./AssistantEvent.ts"
 import * as BlockKit from "./BlockKit.ts"
 import { InputId } from "./InputId.ts"
 import * as AppEvents from "./internal/events.ts"
+import * as ToolApproval from "./ToolApproval.ts"
 import { toJson } from "./internal/schema.ts"
 
 /**
@@ -135,8 +138,43 @@ export type EventItem<E> = E extends { readonly _tag: infer Tag extends string }
   : never
 
 /**
- * Represents an item in the chat's timeline: a message the user or the assistant sent, or one of
- * the app's own events it shows (see {@link EventItem}).
+ * Schema for a tool call that waits, or waited, for the user's approval, as an item on the
+ * timeline.
+ *
+ * **Details**
+ *
+ * It is only the yes or no: the assistant's own message tells the user what it asks them to
+ * approve, so the item carries no params. `id` is the call's id, which the decision is for (see
+ * `ToolApproval.approve`), and `tool` the tool's name, for a label. `status` is where the call stands
+ * (`ToolApproval.Status`); `reason` is the user's, when they rejected it with one; `outcome` is how
+ * the approved call went, once it ran. `at` is when the call started waiting, in epoch
+ * milliseconds. A change updates the item in place as the call is decided and run.
+ *
+ * @category schemas
+ * @since 0.4.0
+ */
+export const ApprovalItem = Schema.TaggedStruct("ToolApproval", {
+  id: Schema.String,
+  tool: Schema.String,
+  status: Schema.Literals(["pending", "approved", "rejected", "expired"]),
+  reason: Schema.optional(Schema.String),
+  outcome: Schema.optional(AssistantEvent.ToolOutcome),
+  at: Schema.Finite
+})
+
+/**
+ * Represents a tool call that waits, or waited, for the user's approval, as an item on the
+ * timeline.
+ *
+ * @category models
+ * @since 0.4.0
+ */
+export type ApprovalItem = typeof ApprovalItem.Type
+
+/**
+ * Represents an item in the chat's timeline: a message the user or the assistant sent, one of the
+ * app's own events it shows (see {@link EventItem}), or a tool call waiting for the user's approval
+ * (see {@link ApprovalItem}).
  *
  * **Example** (Showing each item of a chat)
  *
@@ -158,7 +196,7 @@ export type EventItem<E> = E extends { readonly _tag: infer Tag extends string }
  * @category models
  * @since 0.3.0
  */
-export type Item<Events = never> = UserMessage | AssistantMessage | EventItem<Events>
+export type Item<Events = never> = UserMessage | AssistantMessage | EventItem<Events> | ApprovalItem
 
 /**
  * Schema for a specialist that is working for the assistant. It holds the specialist's name and
@@ -227,7 +265,7 @@ export interface Timeline<Events = never> {
  * **Details**
  *
  * A change holds each item that is new or changed (for example, a message whose block was
- * answered or closed), in full. It also holds the current activity, whether the last turn failed,
+ * answered or closed, or a call the user approved), in full. It also holds the current activity, whether the last turn failed,
  * and whether the chat was deleted. `seq` is the position in the chat's log that the change is up
  * to.
  *
@@ -250,7 +288,10 @@ function makeChange<const Events extends ReadonlyArray<AssistantEvent.AppEventSc
 ): Schema.Codec<Change<Events[number]["Type"]>, Schema.Json>
 // The overload states the decoded type: an item per given schema, each typed with its own event.
 function makeChange(events: ReadonlyArray<AssistantEvent.AppEventSchema> = []): Schema.Top {
-  const AnyItem = Schema.toCodecJson(Schema.Union([UserMessage, AssistantMessage, ...events.map(eventItem)]))
+  const AnyItem = Schema.toCodecJson(
+    Schema.Union([UserMessage, AssistantMessage, ApprovalItem, ...events.map(eventItem)])
+  )
+
   const decodeItem = Schema.decodeUnknownOption(AnyItem)
   const encodeItem = Schema.encodeUnknownSync(AnyItem)
 
@@ -280,7 +321,8 @@ function makeChange(events: ReadonlyArray<AssistantEvent.AppEventSchema> = []): 
  * **Details**
  *
  * It is the success schema of the RPC that streams a chat's timeline: name the events the chat's
- * users see, the same ones the handler passes to {@link changes} as `show`. Each item decodes its
+ * users see, the same ones the handler passes to {@link changes} as `show`. Tool calls waiting for
+ * approval are always in it, as {@link ApprovalItem}s. Each item decodes its
  * event with that event's schema, so the client gets `Change<Events>` typed with them and folds it
  * with {@link fold}, no definition needed. `Change()` carries no app events.
  *
@@ -417,10 +459,12 @@ interface AnyEventItem {
   readonly event: { readonly _tag: string }
 }
 
+type AnyItem = UserMessage | AssistantMessage | AnyEventItem | ApprovalItem
+
 // What the fold below builds: the overloads that use it type its items with the events shown.
 interface AnyChange {
   readonly seq: number
-  readonly items: ReadonlyArray<UserMessage | AssistantMessage | AnyEventItem>
+  readonly items: ReadonlyArray<AnyItem>
   readonly activity: Activity
   readonly failed: boolean
   readonly deleted: boolean
@@ -575,13 +619,14 @@ const sameActivity = (a: Activity, b: Activity) =>
 
 const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding => {
   const shown = new Map(show.map((schema) => [AppEvents.tagOf(schema), schema]))
+  let approvals: ReadonlyMap<string, ToolApproval.State> = new Map()
   let seq = 0
   let failed = false
   let deleted = false
   let activity = AssistantActivity.empty
   let blocks: ReadonlyMap<string, BlockKit.State> = new Map()
   // The items in order, and the assistant's messages as stored: their blocks change as the chat goes on.
-  const items = new Map<string, UserMessage | AssistantMessage | AnyEventItem>()
+  const items = new Map<string, AnyItem>()
   const sent = new Map<string, AssistantEvent.AssistantMessage>()
 
   const blockOf = (message: AssistantEvent.AssistantMessage): Block | undefined => {
@@ -634,6 +679,13 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding =>
           return [answer.messageId]
         },
         BlocksClosed: (closed) => closed.messageIds,
+        ApprovalRequested: () => [],
+        ApprovalDecision: () => {
+          failed = false
+
+          return []
+        },
+        ApprovalsExpired: () => [],
         TurnFailed: () => {
           failed = true
 
@@ -670,8 +722,38 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding =>
     }))
   }
 
+  const callsOf = (event: AssistantEvent.AssistantEvent): ReadonlyArray<string> =>
+    Predicate.isTagged(event, "ApprovalsExpired")
+      ? event.callIds
+      : Predicate.isTagged(event, "ApprovalRequested") ||
+          Predicate.isTagged(event, "ApprovalDecision") ||
+          Predicate.isTagged(event, "ToolResult")
+        ? [event.callId]
+        : []
+
+  // The items of the calls this entry changed.
+  const approvalItems = (event: AssistantEvent.AssistantEvent, before: ReadonlyMap<string, ToolApproval.State>) =>
+    callsOf(event).flatMap((callId) => {
+      const state = approvals.get(callId)
+
+      if (state === undefined || state === before.get(callId)) return []
+
+      const item = ApprovalItem.make({
+        id: callId,
+        tool: state.request.tool,
+        status: state.status,
+        reason: state.reason,
+        outcome: state.outcome,
+        at: state.at
+      })
+
+      items.set(callId, item)
+
+      return [item]
+    })
+
   const step = (entry: AssistantEvent.AnyEntry): AnyChange | undefined => {
-    const before = { activity: activityOf(activity), failed, deleted }
+    const previous = { activity: activityOf(activity), failed, deleted }
     const { event } = entry
 
     seq = entry.seq
@@ -682,7 +764,7 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding =>
 
       return Option.match(eventItemOf(entry), {
         onNone: () =>
-          sameActivity(before.activity, now) ? undefined : { seq, items: [], activity: now, failed, deleted },
+          sameActivity(previous.activity, now) ? undefined : { seq, items: [], activity: now, failed, deleted },
         onSome: (item) => {
           items.set(item.id, item)
 
@@ -692,6 +774,9 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding =>
     }
 
     blocks = BlockKit.apply(blocks, event)
+
+    const decidedBefore = approvals
+    approvals = ToolApproval.apply(approvals, entry)
 
     const changed = [...new Set(touched(event, entry.at))].flatMap((id) => {
       const message = sent.get(id)
@@ -705,14 +790,15 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding =>
       return [next]
     })
 
+    const all = [...changed, ...approvalItems(event, decidedBefore)]
     const now = activityOf(activity)
 
-    return changed.length === 0 &&
-      failed === before.failed &&
-      deleted === before.deleted &&
-      sameActivity(before.activity, now)
+    return all.length === 0 &&
+      failed === previous.failed &&
+      deleted === previous.deleted &&
+      sameActivity(previous.activity, now)
       ? undefined
-      : { seq, items: changed, activity: now, failed, deleted }
+      : { seq, items: all, activity: now, failed, deleted }
   }
 
   return {
@@ -728,7 +814,7 @@ const merge = (changes: ReadonlyArray<AnyChange>): AnyChange | undefined => {
 
   if (last === undefined) return undefined
 
-  const items = new Map<string, UserMessage | AssistantMessage | AnyEventItem>()
+  const items = new Map<string, AnyItem>()
 
   for (const change of changes) for (const item of change.items) items.set(item.id, item)
 

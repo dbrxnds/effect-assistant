@@ -1,7 +1,7 @@
 /**
- * What the demo orders share: telling the chat the user placed one (an
- * `OrderPlaced`), reporting a workflow's step to the chat (a `WorkflowStep`),
- * and waiting between steps at demo pace.
+ * What the demo orders share: an order's reference, reporting a workflow's
+ * step to the chat (a `WorkflowStep`), and waiting between steps at demo
+ * pace.
  *
  * @since 0.1.0
  */
@@ -14,8 +14,6 @@ import * as Effect from "effect/Effect"
 import * as Activity from "effect/workflow/Activity"
 import * as DurableClock from "effect/workflow/DurableClock"
 import { AcmeAssistant } from "./AcmeAssistant.ts"
-import type { LiveOrder } from "./LiveOrders.ts"
-import { OrderPlaced } from "./OrderPlaced.ts"
 import { WorkflowStep } from "./WorkflowStep.ts"
 
 /**
@@ -93,27 +91,3 @@ export const reference = (runId: RunId.RunId): string =>
     .replace(/[^A-Za-z0-9]/g, "")
     .slice(0, 6)
     .toUpperCase()}`
-
-/**
- * Tells the chat the user placed an order from the block on `messageId`, as
- * an `OrderPlaced`, which wakes Acme to follow up. Its id is the order's, so
- * a second click tells the chat once.
- *
- * @category combinators
- * @since 0.1.0
- */
-export const placed = (chatId: ChatId.ChatId, messageId: string, order: LiveOrder) =>
-  AcmeAssistant.use((acme) =>
-    acme.submit(
-      chatId,
-      OrderPlaced.make({
-        id: InputId.fromKey(`placed:${order.reference}`),
-        kind: order.kind,
-        messageId,
-        reference: order.reference,
-        office: order.office,
-        description: order.description,
-        total: order.total
-      })
-    )
-  )

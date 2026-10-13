@@ -86,21 +86,16 @@ const make: <
 Represents the options accepted by `turn.loop`.
 
 ```ts
-interface LoopOptions<T extends Record<string, Tool.Any> = Record<never, never>, RS = never, Events = never> {
+interface LoopOptions<T extends Record<string, Tool.Any> = Record<never, never>, Events = never> {
   /** The assistant's role and rules. The loop places `Instructions.protocol` before them. */
   readonly instructions: string | Instructions.Resolved
   /**
    * Tools the model can use in addition to the assistant's own. This is an `effect/ai` toolkit,
    * and its handlers come from the layer. Combine several toolkits with `Toolkit.merge`, for
-   * example `Memory.Tools` or a `ToolDiscovery.make(...)` toolkit together with your own.
+   * example `Memory.Tools`, a `Skill.toolkit(...)`, or a `ToolDiscovery.make(...)` toolkit together
+   * with your own.
    */
   readonly toolkit?: Toolkit.Toolkit<T> | undefined
-  /**
-   * Playbooks the model can follow. The prompt lists them as a catalog, and the model loads one
-   * with `load_skill` when a task matches it. A skill made with `tools` is left out when the turn's
-   * tools lack one of them.
-   */
-  readonly skills?: ReadonlyArray<Skill<RS>> | undefined
   /** The maximum number of model calls per turn. Defaults to 16. */
   readonly maxSteps?: number | undefined
   /** The message the reply pass gives the model when the turn would end without a reply. */
@@ -228,15 +223,15 @@ interface Turn<Events = never> {
   readonly instructions: (instructions: string | Instructions.Resolved) => Instructions.Resolved
   /**
    * Runs the agent loop over the chat. The loop uses `Instructions.protocol`, the assistant's own
-   * tools, and the instructions, tools, and skills in `options`. Every step is a tool call, and
+   * tools, and the instructions and tools in `options`. Every step is a tool call, and
    * the loop ends with `replyIfOwed`.
    */
-  readonly loop: <T extends Record<string, Tool.Any> = Record<never, never>, RS = never>(
-    options: LoopOptions<T, RS, Events>
+  readonly loop: <T extends Record<string, Tool.Any> = Record<never, never>>(
+    options: LoopOptions<T, Events>
   ) => Stream.Stream<
     AssistantLoop.Event,
     AiError.AiError,
-    LanguageModel.LanguageModel | TurnServices | AssistantLoop.ToolkitServices<T> | RS
+    LanguageModel.LanguageModel | TurnServices | AssistantLoop.ToolkitServices<T>
   >
   /**
    * Runs one more pass when the turn would otherwise end without a reply to the user's latest

@@ -3,13 +3,13 @@
  * `/rpc`.
  *
  * `Subscribe` streams a chat as its user sees it (its `Timeline`): its messages
- * and their blocks, and whether Acme or a specialist is working. The web app
- * folds the changes and renders them; it never gets the assistant's own work
- * (model output, tool calls, workflow steps).
+ * and their blocks, the orders and campaigns waiting for the user's approval,
+ * and whether Acme or a specialist is working. The web app folds the changes
+ * and renders them; it never gets the assistant's own work (model output, tool
+ * results, workflow steps).
  *
- * `PlaceOrder` and `StartCampaign` are the buttons on an order or campaign
- * block: the user commits with exactly what the block shows, and the API
- * tells the chat, which wakes Acme to follow up.
+ * `Submit` takes what the user does: a message, a block's answer, or a
+ * decision on a call waiting for approval.
  *
  * @since 0.1.0
  */
@@ -20,7 +20,6 @@ import * as Timeline from "effect-assistant/Timeline"
 import * as Schema from "effect/Schema"
 import * as Rpc from "effect/rpc/Rpc"
 import * as RpcGroup from "effect/rpc/RpcGroup"
-import { CampaignDraft, OrderDraft } from "./Blocks.ts"
 import { ChatList } from "./ChatList.ts"
 
 /**
@@ -31,15 +30,15 @@ import { ChatList } from "./ChatList.ts"
  */
 export const Subscribe = Rpc.make("Subscribe", {
   payload: { chatId: ChatId.ChatId },
-  // The timeline with none of Acme's own events: the server shows none.
+  // None of Acme's own events. Its calls waiting for the user's approval are always in it.
   success: Timeline.Change(),
   stream: true
 })
 
 /**
- * Sends what the user did: typed text (`UserMessage`) or a block they used
- * (`BlockAnswer`). The client mints `input.id`, so a retried send is stored
- * once.
+ * Sends what the user did: typed text (`UserMessage`), a block they used
+ * (`BlockAnswer`), or a decision on a call (`ApprovalDecision`). Each has an
+ * id (the client mints a message's), so a retried send is stored once.
  *
  * @category rpcs
  * @since 0.1.0
@@ -79,47 +78,9 @@ export const DeleteChat = Rpc.make("DeleteChat", {
 })
 
 /**
- * Why the API didn't place an order or start a campaign, for the user to
- * read, like an office that no longer has the budget.
- *
- * @category errors
- * @since 0.1.0
- */
-export class OrderRefused extends Schema.Error<OrderRefused>("acme/OrderRefused")({
-  _tag: Schema.tag("OrderRefused"),
-  message: Schema.String
-}) {}
-
-/**
- * Places the product order an `order_draft` block shows. Once per block: a
- * second click returns the same reference.
- *
- * @category rpcs
- * @since 0.1.0
- */
-export const PlaceOrder = Rpc.make("PlaceOrder", {
-  payload: { chatId: ChatId.ChatId, messageId: Schema.String, order: OrderDraft.props },
-  success: Schema.Struct({ reference: Schema.String }),
-  error: Schema.Union([OrderRefused, Chats.GetChatError])
-})
-
-/**
- * Starts the campaign a `campaign_draft` block shows. Once per block: a
- * second click returns the same reference.
- *
- * @category rpcs
- * @since 0.1.0
- */
-export const StartCampaign = Rpc.make("StartCampaign", {
-  payload: { chatId: ChatId.ChatId, messageId: Schema.String, campaign: CampaignDraft.props },
-  success: Schema.Struct({ reference: Schema.String }),
-  error: Schema.Union([OrderRefused, Chats.GetChatError])
-})
-
-/**
  * Every RPC the API serves.
  *
  * @category rpcs
  * @since 0.1.0
  */
-export const AcmeRpcs = RpcGroup.make(Subscribe, Submit, ListChats, CreateChat, DeleteChat, PlaceOrder, StartCampaign)
+export const AcmeRpcs = RpcGroup.make(Subscribe, Submit, ListChats, CreateChat, DeleteChat)

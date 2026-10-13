@@ -42,8 +42,8 @@ const MyAssistantHandlers = MyAssistant.toLayer((turn) => turn.loop({ instructio
 A tool is a name, a description the model reads, schemas for its parameters
 and its result (`success`, `Schema.Void` if you leave it out), and a handler.
 Names must be unique in a turn, including the assistant's own tools
-(`send_user_message`, `wait`, `load_skill`, and the specialist tools): a
-clash fails the turn.
+(`send_user_message`, `wait`, and the specialist tools) and a
+[skills](./skills) toolkit's `load_skill`: a clash fails the turn.
 
 The assistant's layer needs every tool's handler: leave out
 `ProductToolsLive` and it's a type error naming the tool
@@ -158,11 +158,10 @@ workflow step, which runs once per key however often the tool call does.
 That's how durable-execution tools handle it too: a step runs at least once,
 and the side effect is idempotent.
 
-A tool is what the assistant may do by itself. What the user must agree to
-first isn't a tool: the assistant shows it in a block, and the user does it
-with the block's button, through your API. The library doesn't run tools with
-Effect's `needsApproval`: a loop with one fails. See
-[involving the user](./user-involvement).
+A tool is what the assistant may do. What the user must agree to first is a
+tool made with Effect's `needsApproval`: a turn's call to it waits for the
+user's approval, and runs once they approve it, with the same id and key.
+See [involving the user](./user-involvement#the-assistant-acts-after-the-users-yes).
 
 A call whose handler stopped while it ran (not a crash) gets a failed result
 saying it may have run (reason `MayHaveRun`); one that never started, that it
@@ -233,5 +232,6 @@ it's the same when a crash runs the call again.
 
 Keep the tools an assistant uses often in the toolkit directly; discovery
 costs an extra step. A catalog with a `needsApproval` tool fails the layer
-when it's built, as it would fail a loop. For discovery over the tools a user may use, build it in
+when it's built: a call through `execute_tool` can't wait for the user's
+approval, so give such a tool to the loop's toolkit directly. For discovery over the tools a user may use, build it in
 the handler, over [that user's tools](./chats#tools-per-user).

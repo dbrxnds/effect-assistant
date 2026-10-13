@@ -1,4 +1,5 @@
 import type * as LanguageModel from "effect/ai/LanguageModel"
+import * as Response from "effect/ai/Response"
 import type * as Tool from "effect/ai/Tool"
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
@@ -19,8 +20,7 @@ import * as Loop from "./loop.ts"
 import type * as BlockKit from "../BlockKit.ts"
 import type { CurrentChat } from "../CurrentChat.ts"
 import * as Instructions from "../Instructions.ts"
-import * as Skill from "../Skill.ts"
-import * as Skills from "./skills.ts"
+import * as ToolApproval from "../ToolApproval.ts"
 import type * as Specialist from "../Specialist.ts"
 import * as AppEvents from "./events.ts"
 import * as History from "./history.ts"
@@ -124,6 +124,21 @@ const failureMessage = (cause: Cause.Cause<unknown>): string =>
     onNone: () => Cause.pretty(cause),
     onSome: ({ _tag, raw }) => `${_tag ?? "Error"}: ${Predicate.isString(raw) ? raw : toJsonText(raw)}`
   })
+
+// Approved, and not run yet: also one a crash cut off while it ran, which runs again with the same id.
+const approvedCalls = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): ReadonlyArray<AssistantEvent.ToolCallPart> =>
+  [...ToolApproval.fromEntries(entries).values()].flatMap(({ request, status, outcome }) =>
+    status === "approved" && outcome === undefined
+      ? [
+          Response.makePart("tool-call", {
+            id: request.callId,
+            name: request.tool,
+            params: request.params,
+            providerExecuted: false
+          })
+        ]
+      : []
+  )
 
 const lastSeq = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, otherwise: number) => entries.at(-1)?.seq ?? otherwise
 
@@ -266,7 +281,8 @@ const makeTurnApi = (
           }),
           // A second step, for a reply after a call it was refused.
           maxSteps: 2
-        })
+          // The loop ran the approved calls; a pass that can only reply runs none.
+        }).pipe(Stream.provideService(Loop.TurnApprovals, Option.none()))
       })
     )
 
@@ -280,13 +296,12 @@ const makeTurnApi = (
       })
     )
 
-  const prepare = <T extends Record<string, Tool.Any>, RS>(options: Assistant.LoopOptions<T, RS, any>) => {
+  const prepare = <T extends Record<string, Tool.Any>>(options: Assistant.LoopOptions<T, any>) => {
     const own = Toolkits.fromToolkitOrEmpty(options.toolkit)
-    const skills = Skills.available(options.skills ?? [], [...builtins.definitions, ...own.definitions])
 
     return {
-      system: mapText(instructions(options.instructions), (text) => Skill.withCatalog(text, skills)),
-      toolkit: Toolkits.merge(Toolkits.merge(builtins, Skills.toTools(skills)), own),
+      system: instructions(options.instructions),
+      toolkit: Toolkits.merge(builtins, own),
       view: options.history ?? identity
     }
   }
@@ -357,6 +372,8 @@ export const run = Effect.fnUntraced(
         Loop.TurnTools,
         Option.some(Toolkits.provide(options.registration.builtins, options.services))
       ),
+      // A turn's loop waits for the user's approval, and runs the calls they approved.
+      Effect.provideService(Loop.TurnApprovals, Option.some({ approved: Effect.map(chat.entries, approvedCalls) })),
       Effect.provideContext(options.services),
       Effect.matchCauseEffect({
         onSuccess: Effect.fnUntraced(function* () {

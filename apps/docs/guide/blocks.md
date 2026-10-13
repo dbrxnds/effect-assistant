@@ -4,9 +4,10 @@ A block is a bit of UI the assistant can put in a message when a structured answ
 is easier than typing: options to pick from, a small input. It's only a
 shortcut. The user can always type instead, and the assistant reads either.
 
-A block without an answer is a card, and its buttons can call your app's API:
-that's how the user places an order the assistant prepared (see
-[involving the user](./user-involvement)).
+A block collects input. Work the user must agree to, like placing an order,
+is a tool call that waits for their approval instead (see
+[involving the user](./user-involvement)). A block without an answer is a
+card.
 
 ## Define a catalog
 
