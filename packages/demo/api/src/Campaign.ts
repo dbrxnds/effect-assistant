@@ -1,11 +1,11 @@
 /**
  * Ordering a campaign.
  *
- * The assistant collects the audience and budget in chat, then shows the
- * campaign, office, audience, and budget in a `campaign_draft` block. Only the
- * user starts it, with the block's button: {@link start} checks the budget
- * again, starts the `CreateCampaign` workflow, and tells the chat. The
- * workflow reports each stage as a `WorkflowStep`:
+ * The assistant collects the audience and budget in chat, then calls
+ * `start_campaign` with the campaign, office, audience, and budget. Only the
+ * user starts it, by approving the call: {@link start} checks the budget
+ * again and starts the `CreateCampaign` workflow. The workflow reports each
+ * stage as a `WorkflowStep`:
  *
  * 1. `creative_in_progress`, then `scheduled`;
  * 2. `live`;
@@ -13,18 +13,21 @@
  *
  * @since 0.1.0
  */
-import type { CampaignDraft } from "@acme/demo-shared/Blocks"
+import { StartCampaignParams } from "@acme/demo-shared/Approvals"
 import * as Budgets from "@acme/demo-shared/Budgets"
 import * as Locations from "@acme/demo-shared/Locations"
 import * as Orders from "@acme/demo-shared/Orders"
-import { OrderRefused } from "@acme/demo-shared/Rpc"
+import * as AssistantToolCall from "effect-assistant/AssistantToolCall"
 import * as ChatId from "effect-assistant/ChatId"
+import { CurrentChat } from "effect-assistant/CurrentChat"
 import * as RunId from "effect-assistant/RunId"
+import * as ToolFailure from "effect-assistant/ToolFailure"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Tool from "effect/ai/Tool"
 import * as Toolkit from "effect/ai/Toolkit"
 import * as Workflow from "effect/workflow/Workflow"
+import type * as WorkflowEngine from "effect/workflow/WorkflowEngine"
 import * as LiveOrders from "./LiveOrders.ts"
 import * as PrintOrders from "./PrintOrders.ts"
 import * as Steps from "./Steps.ts"
@@ -171,28 +174,44 @@ export const ListCampaignProducts = Tool.make("list_campaign_products", {
  * Fails for an unknown product or office, a budget under the product's
  * minimum, or one over the office's budget.
  */
-const check = Effect.fn(function* ({ campaignId, office, audience, budget }: typeof CampaignDraft.props.Type) {
+const check = Effect.fn(function* ({ campaignId, office, audience, budget }: typeof StartCampaignParams.Type) {
   const product = campaignProducts.find((candidate) => candidate.campaignId === campaignId)
 
-  if (product === undefined) return yield* new OrderRefused({ message: `Unknown campaignId ${campaignId}` })
+  if (product === undefined) return yield* ToolFailure.fail(`Unknown campaignId ${campaignId}`)
 
   if (budget < product.minimumBudget) {
-    return yield* new OrderRefused({ message: `${product.name} needs at least $${product.minimumBudget}.` })
+    return yield* ToolFailure.fail(`${product.name} needs at least $${product.minimumBudget}.`)
   }
 
   const location = Locations.findByName(office)
 
-  if (location === undefined) return yield* new OrderRefused({ message: `No office named ${office}.` })
+  if (location === undefined) return yield* ToolFailure.fail(`No office named ${office}.`)
 
   const officeBudget = yield* PrintOrders.officeBudget(location)
 
   if (budget > officeBudget.remaining) {
-    return yield* new OrderRefused({
-      message: `${location.name} has $${officeBudget.remaining} left in ${Budgets.currentQuarter.name}, less than $${budget}.`
-    })
+    return yield* ToolFailure.fail(
+      `${location.name} has $${officeBudget.remaining} left in ${Budgets.currentQuarter.name}, less than $${budget}.`
+    )
   }
 
   return { product, location, audience, budget, remainingBudget: officeBudget.remaining - budget }
+})
+
+/**
+ * Starts a campaign, once the user approves the call.
+ *
+ * @category tools
+ * @since 0.1.0
+ */
+export const StartCampaign = Tool.make("start_campaign", {
+  description:
+    "Starts a campaign. The user approves it first: they see the campaign, office, audience, and budget and approve or reject it, your turn ends meanwhile, and the outcome arrives later. Say in the same step what you're asking them to approve, in one line.",
+  parameters: StartCampaignParams,
+  success: Schema.Struct({ reference: Schema.String }),
+  failure: ToolFailure.ToolFailure,
+  needsApproval: true,
+  dependencies: [CurrentChat, AssistantToolCall.AssistantToolCall]
 })
 
 /**
@@ -201,7 +220,7 @@ const check = Effect.fn(function* ({ campaignId, office, audience, budget }: typ
  * @category toolkits
  * @since 0.1.0
  */
-export const CampaignTools = Toolkit.make(ListCampaignProducts)
+export const CampaignTools = Toolkit.make(ListCampaignProducts, StartCampaign)
 
 /**
  * Layer for the campaign tools' handlers.
@@ -209,67 +228,64 @@ export const CampaignTools = Toolkit.make(ListCampaignProducts)
  * @category layers
  * @since 0.1.0
  */
-export const layerTools = CampaignTools.toLayer({
-  list_campaign_products: () => Effect.succeed(campaignProducts)
-})
+export const layerTools = CampaignTools.toLayer(
+  Effect.gen(function* () {
+    const services = yield* Effect.context<LiveOrders.LiveOrders | WorkflowEngine.WorkflowEngine>()
+
+    return CampaignTools.of({
+      list_campaign_products: () => Effect.succeed(campaignProducts),
+      start_campaign: (campaign) => start(campaign).pipe(Effect.provideContext(services))
+    })
+  })
+)
 
 /**
- * Starts the campaign a `campaign_draft` block shows, when the user clicks
- * its button: it checks the budget again, starts the `CreateCampaign`
- * workflow, and tells the chat. Once per block: a second click finds the
- * first order.
+ * Starts the campaign the user approved: it checks the budget again and
+ * starts the `CreateCampaign` workflow. Once per call: the run's key is the
+ * call's, so a call that runs again after a crash finds the first order.
  *
  * @category constructors
  * @since 0.1.0
  */
-export const start = Effect.fn(function* (
-  chatId: ChatId.ChatId,
-  messageId: string,
-  campaign: typeof CampaignDraft.props.Type
-) {
-  const runId = RunId.fromKey(`campaign:${chatId}:${messageId}`)
+export const start = Effect.fn(function* (campaign: typeof StartCampaignParams.Type) {
+  const chatId = (yield* CurrentChat).chatId
+  const runId = RunId.fromKey(yield* AssistantToolCall.idempotencyKey)
   const reference = Steps.reference(runId)
   const orders = yield* LiveOrders.LiveOrders
-  const existing = yield* orders.get(reference)
 
-  const placed =
-    existing ??
-    (yield* Effect.gen(function* () {
-      // The budget may have moved since Acme showed the campaign.
-      const { product, location, audience, budget } = yield* check(campaign)
+  if ((yield* orders.get(reference)) !== undefined) return { reference }
 
-      const placedNow = LiveOrders.LiveOrder.make({
-        reference,
-        chatId,
-        kind: "campaign",
-        office: location.name,
-        locationId: location.locationId,
-        description: `${product.name} for ${audience}`,
-        total: budget,
-        status: "placed",
-        placedOn: new Date().toISOString().slice(0, 10),
-        updatedAt: Date.now()
-      })
+  // The budget may have moved since Acme asked.
+  const { product, location, audience, budget } = yield* check(campaign)
 
-      yield* orders.put(placedNow)
-      yield* CreateCampaign.execute(
-        {
-          runId,
-          chatId,
-          reference,
-          campaignName: product.name,
-          office: location.name,
-          audience,
-          budget,
-          channels: product.channels
-        },
-        { discard: true }
-      )
+  yield* orders.put(
+    LiveOrders.LiveOrder.make({
+      reference,
+      chatId,
+      kind: "campaign",
+      office: location.name,
+      locationId: location.locationId,
+      description: `${product.name} for ${audience}`,
+      total: budget,
+      status: "placed",
+      placedOn: new Date().toISOString().slice(0, 10),
+      updatedAt: Date.now()
+    })
+  )
 
-      return placedNow
-    }))
-
-  yield* Steps.placed(chatId, messageId, placed)
+  yield* CreateCampaign.execute(
+    {
+      runId,
+      chatId,
+      reference,
+      campaignName: product.name,
+      office: location.name,
+      audience,
+      budget,
+      channels: product.channels
+    },
+    { discard: true }
+  )
 
   return { reference }
 })

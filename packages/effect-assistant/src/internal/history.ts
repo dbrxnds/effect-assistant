@@ -110,6 +110,35 @@ const answerText = (answer: AssistantEvent.BlockAnswer) =>
 const resultText = (result: AssistantEvent.ToolResult) =>
   `<result tool="${result.tool}" call="${result.callId}" outcome="${result.outcome}">\nThe result of a call from earlier in this chat.\n${toJsonText(result.result)}\n</result>`
 
+/** @internal */
+export const awaitingApprovalOutput =
+  "Waiting for the user's approval: they see this call and approve or reject it. Its outcome arrives later in this chat; don't call it again meanwhile."
+
+const awaitingText = (request: AssistantEvent.ApprovalRequested) =>
+  `<approval tool="${request.tool}" call="${request.callId}" status="pending">\nYour call to ${request.tool} from earlier in this chat waits for the user's approval.\n${toJsonText(request.params)}\n</approval>`
+
+const approvedText = (result: AssistantEvent.ToolResult) =>
+  `<result tool="${result.tool}" call="${result.callId}" outcome="${result.outcome}">\nThe user approved your call to ${result.tool} from earlier in this chat, and it ran.\n${toJsonText(result.result)}\n</result>`
+
+const rejectedText = (decision: AssistantEvent.ApprovalDecision, tool: string) =>
+  `<approval tool="${tool}" call="${decision.callId}" decision="rejected">\nThe user rejected your call to ${tool}; it didn't run.${decision.reason === undefined ? "" : `\nTheir reason: ${decision.reason}`}\n</approval>`
+
+const expiredText = (callId: string, tool: string) =>
+  `<approval tool="${tool}" call="${callId}" status="expired">\nThe user moved on without approving your call to ${tool}; it didn't run.\n</approval>`
+
+const awaitingMessage = (request: AssistantEvent.ApprovalRequested): Prompt.ToolMessage =>
+  Prompt.toolMessage({
+    content: [
+      Prompt.toolResultPart({
+        id: request.callId,
+        name: request.tool,
+        isFailure: false,
+        result: awaitingApprovalOutput,
+        providerExecuted: false
+      })
+    ]
+  })
+
 const isEntry = (item: AssistantEvent.AnyEntry | Prompt.Message): item is AssistantEvent.AnyEntry =>
   Predicate.hasProperty(item, "seq")
 
@@ -125,6 +154,9 @@ export const fromEntries = (
   const held: Array<Prompt.Message> = []
   const open = new Set<string>()
   const called = new Set<string>()
+  // Calls that waited for approval: the placeholder answered them, so what came of them later is an input.
+  const requests = new Map<string, AssistantEvent.ApprovalRequested>()
+  const toolOf = (callId: string) => requests.get(callId)?.tool ?? "a tool"
 
   const flushIfClosed = () => {
     if (open.size === 0) history.push(...held.splice(0))
@@ -180,6 +212,8 @@ export const fromEntries = (
           flushIfClosed()
         },
         ToolResult: (result) => {
+          if (requests.has(result.callId)) return input(at, seq, userText(approvedText(result)))
+
           // A view that starts after the call (since a summary, say) keeps its result as text: a tool result needs its
           // call right before it.
           if (!called.has(result.callId)) return input(at, seq, userText(resultText(result)))
@@ -197,6 +231,23 @@ export const fromEntries = (
         // Every run starts in a call of the model's own (a spawn or a follow-up), whose result says so.
         SpecialistStarted: () => undefined,
         BlocksClosed: () => undefined,
+        // The call's result, for the provider's pairing; what the user decides comes later.
+        ApprovalRequested: (request) => {
+          requests.set(request.callId, request)
+
+          if (!called.has(request.callId)) return input(at, seq, userText(awaitingText(request)))
+
+          history.push(awaitingMessage(request))
+          open.delete(request.callId)
+          flushIfClosed()
+        },
+        // An approved call's result says so.
+        ApprovalDecision: (decision) =>
+          decision.decision === "rejected"
+            ? input(at, seq, userText(rejectedText(decision, toolOf(decision.callId))))
+            : undefined,
+        ApprovalsExpired: (expired) =>
+          expired.callIds.forEach((callId) => input(at, seq, userText(expiredText(callId, toolOf(callId))))),
         ChatDeleted: () => undefined
       })
     )
@@ -232,7 +283,7 @@ export const unhandledInputs = (
 export const needsTurn = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): boolean =>
   unhandledInputs(entries).length > 0
 
-// A failure the user was shown counts as a reply.
+// A failure the user was shown counts as a reply, and so does a call they're asked to approve.
 /** @internal */
 export const owesReply = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, throughSeq: number): boolean => {
   const latest = entries.findLast(
@@ -243,7 +294,10 @@ export const owesReply = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, throu
     latest !== undefined &&
     !entries.some(
       ({ event, seq }) =>
-        seq > latest.seq && (Predicate.isTagged(event, "AssistantMessage") || Predicate.isTagged(event, "TurnFailed"))
+        seq > latest.seq &&
+        (Predicate.isTagged(event, "AssistantMessage") ||
+          Predicate.isTagged(event, "TurnFailed") ||
+          Predicate.isTagged(event, "ApprovalRequested"))
     )
   )
 }
@@ -288,10 +342,11 @@ export const owesDelivery = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, th
     )
   )
 
+  // A call waiting for the user's approval is what comes next, like a specialist's report.
   return (
     messages.length > 0 &&
     messages.every((message) => message.block === undefined && progress.has(message.id)) &&
-    !after.some((event) => Predicate.isTagged(event, "TurnFailed")) &&
+    !after.some((event) => Predicate.isTagged(event, "TurnFailed") || Predicate.isTagged(event, "ApprovalRequested")) &&
     started.every((runId) => finished.has(runId))
   )
 }

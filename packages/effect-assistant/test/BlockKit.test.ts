@@ -148,25 +148,3 @@ describe("BlockKit.fromEntries", () => {
     expect(BlockKit.fromEntries(closed).get("m2")?.open).toBe(true)
   })
 })
-
-describe("Block.answer", () => {
-  it("builds the answer a client's respond sends: encoded with the block's schema, one id per message", () => {
-    const sent: Array<AssistantEvent.BlockAnswer> = []
-
-    const render = BlockKit.toClient(kit, {
-      choose_one: () => undefined,
-      pick_date: ({ respond }) => respond({ date: new Date("2026-10-01T00:00:00Z") })
-    })
-
-    render(
-      viewed("m3", [message("m3", AssistantEvent.MessageBlock.make({ kind: "pick_date", props: { label: "When?" } }))]),
-      { respond: (answer) => sent.push(answer) }
-    )
-
-    const answer = Block.answer(PickDate, { messageId: "m3", value: { date: new Date("2026-10-01T00:00:00Z") } })
-
-    expect(answer).toEqual(sent[0])
-    expect(answer.id).toBe(InputId.fromKey("m3:answer"))
-    expect(answer.value).toEqual({ date: "2026-10-01T00:00:00.000Z" })
-  })
-})

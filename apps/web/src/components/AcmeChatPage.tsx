@@ -11,7 +11,6 @@ import { useAtom, useAtomMount, useAtomSet, useAtomValue } from "@effect/atom-re
 import { useNavigate } from "@tanstack/react-router"
 import * as AssistantEvent from "effect-assistant/AssistantEvent"
 import type * as ChatId from "effect-assistant/ChatId"
-import type * as Timeline from "effect-assistant/Timeline"
 import * as InputId from "effect-assistant/InputId"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -23,14 +22,20 @@ import * as ChatState from "~/lib/ChatState.ts"
 import { userMessage, useSend } from "~/lib/useSend.ts"
 import { Route } from "~/routes/chats/$chatId.tsx"
 import "../chat.css"
-import { BlockContext, type BlockContextValue } from "./Blocks.tsx"
+import { type AcmeItem, approvalTitle, BlockContext, type BlockContextValue } from "./Blocks.tsx"
 import { Message, Typing } from "./Message.tsx"
 import { ThreadList } from "./ThreadList.tsx"
 
-const toThreadMessage = (message: Timeline.Item): ThreadMessageLike =>
-  Predicate.isTagged(message, "UserMessage")
-    ? { id: message.id, role: "user", content: message.text }
-    : { id: message.id, role: "assistant", content: message.text, status: { type: "complete", reason: "stop" } }
+// A call to approve is one of Acme's messages too, with its card under it (see `MessageBlock`).
+const toThreadMessage = (item: AcmeItem): ThreadMessageLike =>
+  Predicate.isTagged(item, "UserMessage")
+    ? { id: item.id, role: "user", content: item.text }
+    : {
+        id: item.id,
+        role: "assistant",
+        content: Predicate.isTagged(item, "ToolApproval") ? approvalTitle(item) : item.text,
+        status: { type: "complete", reason: "stop" }
+      }
 
 const messageComponents = { Message }
 
@@ -100,7 +105,7 @@ export function AcmeChatPage() {
     if (target === chatId) openChat(demoChatId)
   }
 
-  const runtime = useExternalStoreRuntime<Timeline.Item>({
+  const runtime = useExternalStoreRuntime<AcmeItem>({
     messages: [...state.items],
     isRunning: false,
     convertMessage: toThreadMessage,

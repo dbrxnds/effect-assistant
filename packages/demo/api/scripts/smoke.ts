@@ -11,22 +11,22 @@
  *   works.
  * - interrupt: a second question while the assistant works on the first; both get
  *   answered.
- * - campaign: order with office, audience, and budget up front; start it with
- *   the campaign block's button (`StartCampaign`); the assistant reports going
- *   live and the first results.
- * - products: order tote bags; place it with the order block's button
- *   (`PlaceOrder`); the assistant reports shipping (with tracking) and
- *   delivery.
+ * - campaign: order with office, audience, and budget up front; approve the
+ *   `start_campaign` call; the assistant reports going live and the first
+ *   results.
+ * - products: order tote bags; approve the `place_order` call; the assistant
+ *   reports shipping (with tracking) and delivery.
  * - research: a performance report across campaigns, from the research
  *   specialist, in the background.
  *
  * Scenarios run at the same time, in separate chats.
  */
-import { CampaignDraft, OrderDraft } from "@acme/demo-shared/Blocks"
+import type { Approvals } from "@acme/demo-shared/Approvals"
 import { AcmeRpcs } from "@acme/demo-shared/Rpc"
 import * as AssistantEvent from "effect-assistant/AssistantEvent"
 import type * as ChatId from "effect-assistant/ChatId"
 import * as Timeline from "effect-assistant/Timeline"
+import * as ToolApproval from "effect-assistant/ToolApproval"
 import * as InputId from "effect-assistant/InputId"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -49,19 +49,26 @@ const layer = RpcClient.layerProtocolSocket().pipe(
 )
 
 /** What the smoke test sees of a chat: its timeline after each change, as a client folds them. */
-type Timelines = ReadonlyArray<Timeline.Timeline>
+type AcmeTimeline = Timeline.Timeline<never, Timeline.ParamsOf<typeof Approvals>>
+
+type Timelines = ReadonlyArray<AcmeTimeline>
 
 const ChoiceProps = Schema.Struct({ options: Schema.Array(Schema.String) })
 
-const latest = (timelines: Timelines): Timeline.Timeline => timelines.at(-1) ?? Timeline.empty
+const latest = (timelines: Timelines): AcmeTimeline => timelines.at(-1) ?? Timeline.empty
 
-const sent = (timeline: Timeline.Timeline): ReadonlyArray<Timeline.AssistantMessage> =>
+const sent = (timeline: AcmeTimeline): ReadonlyArray<Timeline.AssistantMessage> =>
   timeline.items.flatMap((message) => (Predicate.isTagged(message, "AssistantMessage") ? [message] : []))
 
 const messages = (timelines: Timelines): ReadonlyArray<string> => sent(latest(timelines)).map((message) => message.text)
 
 const blockMessages = (timelines: Timelines, kind: string): ReadonlyArray<Timeline.AssistantMessage> =>
   sent(latest(timelines)).filter((message) => message.block?.kind === kind)
+
+const pendingCalls = (timelines: Timelines, tool: string) =>
+  latest(timelines).items.flatMap((item) =>
+    Predicate.isTagged(item, "ToolApproval") && item.tool === tool && item.status === "pending" ? [item] : []
+  )
 
 const failed = (timelines: Timelines) => latest(timelines).failed
 
@@ -155,26 +162,20 @@ const program = Effect.gen(function* () {
       })
     })
 
-  /** Waits for the order or campaign block, and clicks its button the way the web app does. */
-  const place = Effect.fn(function* (chatId: ChatId.ChatId, label: string, kind: "order_draft" | "campaign_draft") {
+  /** Waits for the order or campaign call, and approves it the way the web app does. */
+  const place = Effect.fn(function* (chatId: ChatId.ChatId, label: string, tool: "place_order" | "start_campaign") {
     const asked = yield* waitFor(
       chatId,
-      `${label}: ${kind} block`,
-      (es) => blockMessages(es, kind).length > 0 && idle(es),
+      `${label}: ${tool} to approve`,
+      (es) => pendingCalls(es, tool).length > 0 && idle(es),
       150
     )
 
-    const ask = blockMessages(asked, kind)[0]!
+    const call = pendingCalls(asked, tool)[0]!
 
-    console.log(`     ${label} > ${oneLine(ask.text)} [${kind}]`)
+    console.log(`     ${label} > ${oneLine(JSON.stringify(call.params))} [${tool}]`)
 
-    if (kind === "order_draft") {
-      const order = yield* Schema.decodeUnknownEffect(OrderDraft.props)(ask.block!.props).pipe(Effect.orDie)
-      yield* client.PlaceOrder({ chatId, messageId: ask.id, order })
-    } else {
-      const campaign = yield* Schema.decodeUnknownEffect(CampaignDraft.props)(ask.block!.props).pipe(Effect.orDie)
-      yield* client.StartCampaign({ chatId, messageId: ask.id, campaign })
-    }
+    yield* client.Submit({ chatId, input: ToolApproval.approve(call) })
   })
 
   const timed = Effect.fn(function* <A, E, R>(label: string, effect: Effect.Effect<A, E, R>) {
@@ -237,7 +238,7 @@ const program = Effect.gen(function* () {
   )
 
   const campaign = timed(
-    "campaign: started from its block, live, first results",
+    "campaign: approved, live, first results",
     Effect.gen(function* () {
       const chatId = yield* newChat
       yield* send(
@@ -245,7 +246,7 @@ const program = Effect.gen(function* () {
         "Order the Summer Campaign for the Amsterdam office, for parents in Austin planning trips, budget $4,000."
       )
 
-      yield* place(chatId, "campaign", "campaign_draft")
+      yield* place(chatId, "campaign", "start_campaign")
 
       const done = yield* waitFor(chatId, "first results", (timelines) => said(timelines, /conversion|clicks/i), 240)
 
@@ -254,11 +255,11 @@ const program = Effect.gen(function* () {
   )
 
   const products = timed(
-    "products: placed from its block, shipped, delivered",
+    "products: approved, shipped, delivered",
     Effect.gen(function* () {
       const chatId = yield* newChat
       yield* send(chatId, "Please order 300 cotton tote bags for the Berlin office.")
-      yield* place(chatId, "products", "order_draft")
+      yield* place(chatId, "products", "place_order")
 
       // The tracking number is only in the workflow's shipped step: the assistant shared it.
       const shipped = yield* waitFor(chatId, "shipped, with tracking", (timelines) => said(timelines, /1Z/), 240)

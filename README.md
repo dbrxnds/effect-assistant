@@ -215,32 +215,36 @@ const deleteChat = (chatId: ChatId.ChatId) =>
 
 ### Ask before acting
 
-Some things the assistant shouldn't do on its own, like placing an order. The assistant prepares it and shows
-it in a block; the block's button calls your API with exactly what it shows. Your API places the order and
-answers the block with `Block.answer`: the block shows as answered, and a turn wakes for the assistant to follow
-up.
+Some things the assistant shouldn't do on its own, like placing an order. Make the tool with Effect's
+`needsApproval`: the model's call doesn't run, the turn ends, and the chat's timeline shows the call for the user
+to approve or reject. Their decision is an input; an approved call runs then, with the same id and idempotency
+key, and the model reads its result.
 
 ```ts
-const OrderCheckout = Block.make("order_checkout", {
-  description: "An order ready to place, with a Place order button. Only the user places it.",
-  props: Schema.Struct({ sku: Schema.String, quantity: Schema.Int, total: Schema.Finite }),
-  answer: Schema.Struct({ orderId: Schema.String }) // your API answers it
+// Shared with the client: what the user approves.
+const PlaceOrderParams = Schema.Struct({ sku: Schema.String, quantity: Schema.Int, total: Schema.Finite })
+
+const PlaceOrder = Tool.make("place_order", {
+  description: "Places an order. The user approves it first; say what you're asking them to approve.",
+  parameters: PlaceOrderParams,
+  success: Schema.Struct({ orderId: Schema.String }),
+  needsApproval: true,
+  dependencies: [AssistantToolCall.AssistantToolCall]
 })
 
-export const Shop = Assistant.make("shop", { blocks: BlockKit.make([OrderCheckout]) })
+// The RPC's schema names the calls the client shows, with their params, and the server passes the same.
+const Subscribe = Rpc.make("Subscribe", {
+  payload: { chatId: ChatId.ChatId },
+  success: Timeline.Change({ approvals: { place_order: PlaceOrderParams } }),
+  stream: true
+})
 
-// Your API, behind the block's button: once per block, then answer the block.
-const placeOrder = (chatId: ChatId.ChatId, messageId: string, order: typeof OrderCheckout.props.Type) =>
-  Effect.gen(function* () {
-    const orderId = yield* placeOnce(`${chatId}:${messageId}`, order)
-    yield* Shop.use((shop) => shop.submit(chatId, Block.answer(OrderCheckout, { messageId, value: { orderId } })))
-  })
+// The client: an item per call, `{ _tag: "ToolApproval", id, tool, params, status, ... }`.
+submit(ToolApproval.approve(item)) // or ToolApproval.reject(item, { reason })
 ```
 
-The answer's id is the one a client's `respond` uses, so the block takes one answer however often it's clicked.
-
-What the assistant may do by itself is a tool with final values; a question for the user is a block with an
-`answer` schema. The library doesn't run tools with Effect's `needsApproval`: a loop with one fails. See
+A call the user moves on from expires with `ToolApproval.expireStale({ messages })`, and the model reads that it
+wasn't approved. A question for the user is a block with an `answer` schema. See
 [involving the user](./apps/docs/guide/user-involvement.md).
 
 ### UI blocks

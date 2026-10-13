@@ -141,12 +141,29 @@ export class SpecialistFinished extends Schema.TaggedClass<SpecialistFinished>()
 }) {}
 
 /**
+ * Represents the user's decision on a tool call that waits for their approval: `"approved"`, so
+ * the call runs, or `"rejected"`, with an optional short reason the model reads.
+ *
+ * Its id is fixed per call (see `ToolApproval.approve`), so a decision is stored once. A decision on
+ * a call that isn't waiting any more (decided, or expired) isn't stored.
+ *
+ * @category schemas
+ * @since 0.4.0
+ */
+export class ApprovalDecision extends Schema.TaggedClass<ApprovalDecision>()("ApprovalDecision", {
+  id: InputId,
+  callId: Schema.String,
+  decision: Schema.Literals(["approved", "rejected"]),
+  reason: Schema.optional(Schema.String.check(Schema.isMaxLength(500)))
+}) {}
+
+/**
  * Schema for every input `Assistant.submit` accepts.
  *
  * @category schemas
  * @since 0.1.0
  */
-export const Input = Schema.Union([UserMessage, BlockAnswer, SpecialistFinished])
+export const Input = Schema.Union([UserMessage, BlockAnswer, SpecialistFinished, ApprovalDecision])
 
 /**
  * Represents an input to an assistant.
@@ -157,7 +174,8 @@ export const Input = Schema.Union([UserMessage, BlockAnswer, SpecialistFinished]
 export type Input = typeof Input.Type
 
 /**
- * Schema for the inputs from the chat's user, which are messages and block answers.
+ * Schema for the inputs from the chat's user, which are messages, block answers, and decisions on
+ * tool calls that wait for their approval.
  *
  * A turn owes each one a reply. It is also what a chat client usually may submit, since the app's
  * events come from the server.
@@ -165,7 +183,7 @@ export type Input = typeof Input.Type
  * @category schemas
  * @since 0.1.0
  */
-export const UserInput = Schema.Union([UserMessage, BlockAnswer])
+export const UserInput = Schema.Union([UserMessage, BlockAnswer, ApprovalDecision])
 
 /**
  * Represents an input from the chat's user.
@@ -401,6 +419,36 @@ export class BlocksClosed extends Schema.TaggedClass<BlocksClosed>()("BlocksClos
 }) {}
 
 /**
+ * Represents a tool call that waits for the user's approval instead of running: its tool needs
+ * approval (Effect's `needsApproval`).
+ *
+ * **Details**
+ *
+ * It holds the call's id, the tool, and its params, in JSON, as the model wrote them. The model
+ * reads it as the call's result, saying it waits for the user; the user's
+ * {@link ApprovalDecision} decides it, and an approved call runs then, with the same id.
+ *
+ * @category schemas
+ * @since 0.4.0
+ */
+export class ApprovalRequested extends Schema.TaggedClass<ApprovalRequested>()("ApprovalRequested", {
+  callId: Schema.String,
+  tool: Schema.String,
+  params: Schema.Json
+}) {}
+
+/**
+ * Represents tool calls that waited for the user's approval and won't run: the user moved on, like
+ * the ones `ToolApproval.expireStale` expires. The model reads that they weren't approved.
+ *
+ * @category schemas
+ * @since 0.4.0
+ */
+export class ApprovalsExpired extends Schema.TaggedClass<ApprovalsExpired>()("ApprovalsExpired", {
+  callIds: Schema.Array(Schema.String)
+}) {}
+
+/**
  * Schema for every event the library defines.
  *
  * @category schemas
@@ -419,6 +467,9 @@ export const AssistantEvent = Schema.Union([
   SpecialistStarted,
   SpecialistFinished,
   BlocksClosed,
+  ApprovalRequested,
+  ApprovalDecision,
+  ApprovalsExpired,
   ChatDeleted
 ])
 
@@ -554,7 +605,7 @@ export type Entry = typeof Entry.Type
 
 /**
  * Returns whether an event is one of the library's inputs, which are a user message, a block
- * answer, or a finished specialist run.
+ * answer, a finished specialist run, or a decision on a tool call waiting for approval.
  *
  * The application's events that came in through the assistant's `submit` are inputs too (see
  * {@link isAppInput}).
@@ -565,7 +616,8 @@ export type Entry = typeof Entry.Type
 export const isInput = (event: { readonly _tag: string }): event is Input =>
   Predicate.isTagged(event, "UserMessage") ||
   Predicate.isTagged(event, "BlockAnswer") ||
-  Predicate.isTagged(event, "SpecialistFinished")
+  Predicate.isTagged(event, "SpecialistFinished") ||
+  Predicate.isTagged(event, "ApprovalDecision")
 
 /**
  * Returns whether an input starts a turn, which every input does except a run the assistant
@@ -584,7 +636,9 @@ export const isWaking = (input: Input): boolean =>
  * @since 0.1.0
  */
 export const isUserInput = (input: Input): input is UserInput =>
-  Predicate.isTagged(input, "UserMessage") || Predicate.isTagged(input, "BlockAnswer")
+  Predicate.isTagged(input, "UserMessage") ||
+  Predicate.isTagged(input, "BlockAnswer") ||
+  Predicate.isTagged(input, "ApprovalDecision")
 
 /**
  * Returns whether an event ends a turn, and so says how far the assistant has read.

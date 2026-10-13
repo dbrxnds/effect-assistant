@@ -9,6 +9,7 @@ import * as AnthropicLanguageModel from "@effect/ai-anthropic/AnthropicLanguageM
 import type * as Assistant from "effect-assistant/Assistant"
 import * as BlockKit from "effect-assistant/BlockKit"
 import * as Skill from "effect-assistant/Skill"
+import * as ToolApproval from "effect-assistant/ToolApproval"
 import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -67,8 +68,9 @@ export const layer = AcmeAssistant.toLayer(
     return Effect.fn(function* (turn) {
       const prompt = yield* prompts.get("acme")
 
-      // A block the user moved on from (three messages later) stops taking answers.
+      // A block or an order the user moved on from (three messages later) stops taking answers.
       yield* BlockKit.closeStale({ messages: 3 })
+      yield* ToolApproval.expireStale({ messages: 3 })
 
       return turn.loop({
         instructions: { ...prompt, text: `${prompt.text}\n\nToday is ${new Date().toDateString()}.` },

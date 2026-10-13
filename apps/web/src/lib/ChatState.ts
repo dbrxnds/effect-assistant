@@ -6,21 +6,27 @@
  * the assistant's work. Every Subscribe replays the chat from the start;
  * applying a change again changes nothing.
  */
+import type { Approvals } from "@acme/demo-shared/Approvals"
 import type * as ChatId from "effect-assistant/ChatId"
 import * as Timeline from "effect-assistant/Timeline"
 import * as Atom from "effect/reactivity/Atom"
 
-/** A chat's timeline, and whether anything works in it: the assistant's turn, or a specialist. */
-export type ChatState = Timeline.Timeline & { readonly working: boolean }
+/** A chat's timeline, with Acme's calls to approve, and whether anything works in it: its turn, or a specialist. */
+export type ChatState = AcmeTimeline & { readonly working: boolean }
 
-const withWorking = (timeline: Timeline.Timeline): ChatState => ({ ...timeline, working: !Timeline.isIdle(timeline) })
+/** What `Subscribe` streams: no events of Acme's own, and the calls the user approves. */
+type AcmeTimeline = Timeline.Timeline<never, Timeline.ParamsOf<typeof Approvals>>
+
+const withWorking = (timeline: AcmeTimeline): ChatState => ({ ...timeline, working: !Timeline.isIdle(timeline) })
 
 /** A chat before its first change. */
 export const initial: ChatState = withWorking(Timeline.empty)
 
 /** A chat after one more change. */
-export const apply = (state: ChatState, change: Timeline.Change): ChatState =>
-  withWorking(Timeline.apply(state, change))
+export const apply = (
+  state: ChatState,
+  change: Timeline.Change<never, Timeline.ParamsOf<typeof Approvals>>
+): ChatState => withWorking(Timeline.apply(state, change))
 
 /** Messages this tab sent that the server hasn't echoed yet. */
 export const pendingSends = Atom.family((_chatId: ChatId.ChatId) => Atom.make<ReadonlyArray<Timeline.UserMessage>>([]))

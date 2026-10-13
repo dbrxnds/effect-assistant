@@ -520,28 +520,6 @@ describe("UI blocks", () => {
     }).pipe(Effect.provide(layer))
   )
 
-  it.live("takes a block's answer the server submits with Block.answer, once, as an input", () =>
-    Effect.gen(function* () {
-      const chat = yield* newChat
-      yield* (yield* BlockAssistant).submit(chat, say("Pick a banner color."))
-      const first = yield* collectUntil(BlockAssistant, chat, (es) => shown(es) !== undefined && idle(es))
-      const messageId = shown(first)!.id
-
-      // An API that acted on the block records its answer; the client's respond sends the same one.
-      const answer = Block.answer(ChooseOne, { messageId, value: { choice: "blue" } })
-      yield* (yield* BlockAssistant).submit(chat, answer)
-      yield* (yield* BlockAssistant).submit(chat, answer)
-
-      const entries = yield* collectUntil(BlockAssistant, chat, (es) => text(es).includes("blue it is") && idle(es))
-      const block = viewedMessages(entries).find(({ id }) => id === messageId)?.block
-
-      expect(failures(entries), traceEntries(entries)).toEqual([])
-      expect(entries.filter(({ event }) => Predicate.isTagged(event, "BlockAnswer"))).toHaveLength(1)
-      expect(block?.status).toBe("answered")
-      expect(block?.answer).toEqual({ choice: "blue" })
-    }).pipe(Effect.provide(layer))
-  )
-
   it.live("closes a block the user answered by typing, through `closes`", () =>
     Effect.gen(function* () {
       const chat = yield* newChat

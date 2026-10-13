@@ -34,5 +34,6 @@ import * as Assistant from "effect-assistant/Assistant"
 - [Skill](./Skill)
 - [Specialist](./Specialist)
 - [Timeline](./Timeline)
+- [ToolApproval](./ToolApproval)
 - [ToolDiscovery](./ToolDiscovery)
 - [ToolFailure](./ToolFailure)

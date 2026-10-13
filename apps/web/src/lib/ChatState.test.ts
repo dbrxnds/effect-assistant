@@ -1,5 +1,6 @@
 import * as Timeline from "effect-assistant/Timeline"
 import * as InputId from "effect-assistant/InputId"
+import * as Predicate from "effect/Predicate"
 import assert from "node:assert/strict"
 import { test } from "vite-plus/test"
 import * as ChatState from "./ChatState.ts"
@@ -40,7 +41,9 @@ test("shows this tab's sends until the server has them, as working", () => {
   const pending = ChatState.withPendingSends(state, [sent])
 
   assert.deepEqual(
-    pending.items.map((item) => item.text),
+    pending.items.flatMap((item) =>
+      Predicate.isTagged(item, "UserMessage") || Predicate.isTagged(item, "AssistantMessage") ? [item.text] : []
+    ),
     ["hi", "and another thing"]
   )
   assert.equal(pending.working, true)

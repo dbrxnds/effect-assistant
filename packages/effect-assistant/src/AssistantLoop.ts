@@ -161,8 +161,10 @@ const toolsOf = <T extends Record<string, Tool.Any>>(toolkit: Toolkit.Toolkit<T>
  * the step's result and decides what comes next, with `AssistantLoop.next(state)` or
  * `AssistantLoop.stop()`.
  *
- * A tool with Effect's `needsApproval` set fails the loop before the model is called: the
- * library doesn't run calls that wait for approval (see the guide on involving the user).
+ * In a turn's loop, a call to a tool with Effect's `needsApproval` doesn't run: the step emits an
+ * `ApprovalRequested` for it, and ends the turn, which waits for the user (see `ToolApproval`). A
+ * call the user approved runs at the start of the next step, before the model is called. A
+ * specialist's run can't wait for the user: such a call fails, and the run reads why.
  *
  * @category constructors
  * @since 0.1.0

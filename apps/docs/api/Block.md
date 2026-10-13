@@ -51,59 +51,6 @@ const make: <const Kind extends string, Props extends Codec, Answer extends Code
 
 <small>Since 0.1.0</small>
 
-### answer
-
-Returns the user's answer to a block on a message, as the input that records it.
-
-**Details**
-
-The value is encoded with the block's answer schema. The input's id is fixed per message, the
-same one a client's `respond` uses (see `BlockKit.toClient`), so a block takes one answer however
-often it's sent.
-
-**When to use it**
-
-For a block whose button calls your app's own API (the user acts, and your API does the work):
-once the work is done, the API submits the block's answer itself. The block shows as answered
-on the timeline, and a turn wakes and reads what the user did.
-
-**Example** (Recording an order the user placed from its block)
-
-```ts
-import { Block, type ChatId } from "effect-assistant"
-import * as Effect from "effect/Effect"
-import * as Schema from "effect/Schema"
-
-const OrderCheckout = Block.make("order_checkout", {
-  description: "An order ready to place, with a Place order button. Only the user places it.",
-  props: Schema.Struct({ product: Schema.String, quantity: Schema.Int }),
-  answer: Schema.Struct({ orderId: Schema.String })
-})
-
-// Your API, behind the block's button.
-const placeOrder = Effect.fn(function* (chatId: ChatId.ChatId, messageId: string, order: typeof OrderCheckout.props.Type) {
-  const orderId = yield* placeOnce(`${chatId}:${messageId}`, order)
-
-  yield* MyAssistant.use((assistant) =>
-    assistant.submit(chatId, Block.answer(OrderCheckout, { messageId, value: { orderId } }))
-  )
-})
-```
-
-```ts
-const answer: <Kind extends string, Props extends Codec, Answer extends Codec>(
-  block: Block<Kind, Props, Answer>,
-  options: {
-    /** The id of the message the block is on. */
-    readonly messageId: string
-    /** The answer, in the block's answer schema. */
-    readonly value: Answer["Type"]
-  }
-) => AssistantEvent.BlockAnswer
-```
-
-<small>Since 0.4.0</small>
-
 ## Models
 
 ### Block

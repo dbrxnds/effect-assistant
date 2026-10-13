@@ -80,19 +80,19 @@ export const runBrief = Effect.fnUntraced(
       chatId: options.chatId,
       brief: options.brief,
       history: current,
-      loop: (loop) => {
-        return Loop.run({
+      // A run can't wait for the user's approval: a call that needs it fails, and the run reads why.
+      loop: (loop) =>
+        Loop.run({
           instructions: loop.instructions,
           toolkit: Toolkits.fromToolkitOrEmpty(loop.toolkit),
           history: current,
           maxSteps: loop.maxSteps ?? 8
-        })
-      }
+        }).pipe(Stream.provideService(Loop.TurnApprovals, Option.none()))
     }
 
     // A run lives in memory, so there's nothing to run again after a crash: `ToolStarted` isn't kept.
     const record = Effect.fnUntraced(function* (event: AssistantLoop.Event) {
-      if (Predicate.isTagged(event, "ToolStarted")) return
+      if (Predicate.isTagged(event, "ToolStarted") || Predicate.isTagged(event, "ApprovalRequested")) return
 
       if (Predicate.isTagged(event, "ToolResult")) return yield* add([toolMessage(event)])
 

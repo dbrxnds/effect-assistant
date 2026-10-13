@@ -13,9 +13,10 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as AssistantEvent from "./AssistantEvent.ts"
-import * as Block from "./Block.ts"
+import type * as Block from "./Block.ts"
 import type * as Timeline from "./Timeline.ts"
 import { CurrentChat } from "./CurrentChat.ts"
+import * as InputId from "./InputId.ts"
 
 /**
  * Represents a catalog of blocks, with a lookup by kind.
@@ -215,8 +216,8 @@ export interface RenderOptions {
  * **Details**
  *
  * The renderers are type-checked, so every kind in the kit needs one, and each receives typed
- * `props` and `answer`. A renderer's `respond` builds a `BlockAnswer` input with `Block.answer`,
- * and passes it to the `respond` option to submit.
+ * `props` and `answer`. A renderer's `respond` builds a `BlockAnswer` input, with the answer
+ * encoded by the block's answer schema, and passes it to the `respond` option to submit.
  *
  * The returned function returns `undefined` for a message without a block, or with a block it
  * can't decode or has no renderer for.
@@ -236,11 +237,8 @@ export interface RenderOptions {
  *         {option}
  *       </button>
  *     )),
- *   // The button calls the app's own API with the props the user sees; the API answers the block
- *   // with `Block.answer` once the order is placed.
- *   order_draft: ({ messageId, props, open }) => (
- *     <button disabled={!open} onClick={() => placeOrder(messageId, props)}>Place order</button>
- *   )
+ *   // No answer schema: the button calls the app's own API with the props the user sees.
+ *   order_draft: ({ props }) => <button onClick={() => placeOrder(props)}>Place order</button>
  * })
  *
  * // For each AssistantMessage in the chat's timeline:
@@ -274,11 +272,10 @@ export function toClient<Out>(
     if (Option.isNone(props)) return undefined
 
     const given = message.block.answer
+    const answerCodec = block.answer === undefined ? undefined : Schema.toCodecJson(block.answer)
 
     const answer =
-      given === undefined || block.answer === undefined
-        ? Option.none()
-        : Schema.decodeUnknownOption(Schema.toCodecJson(block.answer))(given)
+      given === undefined || answerCodec === undefined ? Option.none() : Schema.decodeUnknownOption(answerCodec)(given)
 
     return render({
       messageId: message.id,
@@ -286,7 +283,16 @@ export function toClient<Out>(
       props: props.value,
       open: message.block.status === "open",
       answer: Option.getOrUndefined(answer),
-      respond: (value) => options.respond(Block.answer(block, { messageId: message.id, value }))
+      respond: (value) =>
+        options.respond(
+          AssistantEvent.BlockAnswer.make({
+            // A block takes one answer: the same id every time, so a second click is stored once.
+            id: InputId.fromKey(`${message.id}:answer`),
+            messageId: message.id,
+            kind,
+            value: answerCodec === undefined ? value : Schema.encodeUnknownSync(answerCodec)(value)
+          })
+        )
     })
   }
 }

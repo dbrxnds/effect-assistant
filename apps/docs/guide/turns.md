@@ -93,7 +93,9 @@ the user must agree to starts from a block's button, through your API (see
 reply, and nothing arrived after the loop's last read, the model gets one more
 pass in which it can only reply. If there's still no reply, the turn ends with
 `TurnFailed` ("I finished without sending a reply."). So a user's message
-always gets an answer or a visible failure, from a turn that runs the loop.
+always gets an answer or a visible failure, from a turn that runs the loop. A
+tool call waiting for the user's [approval](./user-involvement) is an answer
+too: the user has something to decide.
 
 A handler that ends the turn without running the loop (`turn.loop` or
 `turn.replyIfOwed`) decides itself, and its turn is never failed for being

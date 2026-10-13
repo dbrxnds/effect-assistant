@@ -46,16 +46,17 @@ Use it on the server for an RPC that returns a whole chat at once: its success s
 
 **Details**
 
-Only the app's events in `show` become items; without it, the timeline has none.
+Only the app's events in `show`, and the calls to the tools in `approvals`, become items;
+without them, the timeline has none.
 
 ```ts
 const snapshot: {
   (entries: ReadonlyArray<AssistantEvent.AnyEntry>): Change
-  <Events, const Show extends Shown<Events> = readonly []>(
+  <Events, const Show extends Shown<Events> = readonly [], const Approvals extends ApprovalSchemas = NoSchemas>(
     entries: ReadonlyArray<AssistantEvent.AnyEntry>,
     definition: Definition<Events>,
-    options?: ShowOptions<Show>
-  ): Change<Show[number]["Type"]>
+    options?: ShowOptions<Show, Approvals>
+  ): Change<Show[number]["Type"], ParamsOf<Approvals>>
 }
 ```
 
@@ -72,8 +73,8 @@ Use it in server-side code that reads a whole chat. A client gets the timeline a
 
 **Details**
 
-Only the app's events in `show` become items, typed with their schemas; without it, the timeline
-has none.
+Only the app's events in `show`, and the calls to the tools in `approvals`, become items, typed
+with their schemas; without them, the timeline has none.
 
 **Example** (Building a chat's timeline from its log)
 
@@ -90,11 +91,11 @@ const timelineOf = (chatId: ChatId.ChatId) =>
 ```ts
 const fromEntries: {
   (entries: ReadonlyArray<AssistantEvent.AnyEntry>): Timeline
-  <Events, const Show extends Shown<Events> = readonly []>(
+  <Events, const Show extends Shown<Events> = readonly [], const Approvals extends ApprovalSchemas = NoSchemas>(
     entries: ReadonlyArray<AssistantEvent.AnyEntry>,
     definition: Definition<Events>,
-    options?: ShowOptions<Show>
-  ): Timeline<Show[number]["Type"]>
+    options?: ShowOptions<Show, Approvals>
+  ): Timeline<Show[number]["Type"], ParamsOf<Approvals>>
 }
 ```
 
@@ -135,7 +136,10 @@ const next = <Events>(state: State<Events>, change: Timeline.Change<Events>): St
 ```
 
 ```ts
-const apply: <Events>(timeline: Timeline<Events>, change: Change<Events>) => Timeline<Events>
+const apply: <Events, Approvals>(
+  timeline: Timeline<Events, Approvals>,
+  change: Change<Events, Approvals>
+) => Timeline<Events, Approvals>
 ```
 
 <small>Since 0.1.0</small>
@@ -161,9 +165,9 @@ const timelines = changes.pipe(Timeline.fold) // Stream<Timeline.Timeline<DailyB
 ```
 
 ```ts
-const fold: <Events, E, R>(
-  changes: Stream.Stream<Change<Events>, E, R>
-) => Stream.Stream<Timeline<Events>, E, R>
+const fold: <Events, Approvals, E, R>(
+  changes: Stream.Stream<Change<Events, Approvals>, E, R>
+) => Stream.Stream<Timeline<Events, Approvals>, E, R>
 ```
 
 <small>Since 0.3.0</small>
@@ -231,10 +235,44 @@ type EventItem<E> = E extends { readonly _tag: infer Tag extends string }
 
 <small>Since 0.3.0</small>
 
+### ApprovalItem
+
+Represents a tool call that waits, or waited, for the user's approval, as an item on the
+timeline, typed with its tool's params.
+
+**Details**
+
+`id` is the call's id, which the decision is for (see `ToolApproval.approve`). `tool` is the
+tool's name, so a check on it gives the call's `params`, decoded with the schema the timeline
+was given for that tool. `status` is where the call stands (`ToolApproval.Status`); `reason` is
+the user's, when they rejected it with one; `outcome` is how the approved call went, once it
+ran. `at` is when the call started waiting, in epoch milliseconds.
+
+```ts
+type ApprovalItem<Approvals> = Approvals extends {
+  readonly tool: infer Tool extends string
+  readonly params: infer Params
+}
+  ? {
+      readonly _tag: "ToolApproval"
+      readonly id: string
+      readonly tool: Tool
+      readonly params: Params
+      readonly status: ToolApproval.Status
+      readonly reason?: string | undefined
+      readonly outcome?: AssistantEvent.ToolOutcome | undefined
+      readonly at: number
+    }
+  : never
+```
+
+<small>Since 0.4.0</small>
+
 ### Item
 
-Represents an item in the chat's timeline: a message the user or the assistant sent, or one of
-the app's own events it shows (see `EventItem`).
+Represents an item in the chat's timeline: a message the user or the assistant sent, one of the
+app's own events it shows (see `EventItem`), or a tool call waiting for the user's approval
+(see `ApprovalItem`).
 
 **Example** (Showing each item of a chat)
 
@@ -254,7 +292,11 @@ const line = (item: Timeline.Item<DailyBudgetReached>) =>
 ```
 
 ```ts
-type Item<Events = never> = UserMessage | AssistantMessage | EventItem<Events>
+type Item<Events = never, Approvals = NoApprovals> =
+  | UserMessage
+  | AssistantMessage
+  | EventItem<Events>
+  | ApprovalItem<Approvals>
 ```
 
 <small>Since 0.3.0</small>
@@ -281,14 +323,15 @@ type Activity = typeof Activity.Type
 
 ### Timeline
 
-Represents a chat's timeline: the chat as its user sees it, typed with the app's events it shows.
+Represents a chat's timeline: the chat as its user sees it, typed with the app's events it shows
+and the params of the tool calls it shows waiting for approval.
 It holds the chat's items in order, what is working in it, whether the last turn failed, and
 whether the chat was deleted. `seq` is the position in the chat's log that the timeline is up to.
 
 ```ts
-interface Timeline<Events = never> {
+interface Timeline<Events = never, Approvals = NoApprovals> {
   readonly seq: number
-  readonly items: ReadonlyArray<Item<Events>>
+  readonly items: ReadonlyArray<Item<Events, Approvals>>
   readonly activity: Activity
   /** Whether the last turn failed with no message after it. */
   readonly failed: boolean
@@ -301,19 +344,19 @@ interface Timeline<Events = never> {
 
 ### Change
 
-Represents a change to a chat's timeline, typed with the app's events it shows.
+Represents a change to a chat's timeline, typed with the app's events and the approvals it shows.
 
 **Details**
 
 A change holds each item that is new or changed (for example, a message whose block was
-answered or closed), in full. It also holds the current activity, whether the last turn failed,
+answered or closed, or a call the user approved), in full. It also holds the current activity, whether the last turn failed,
 and whether the chat was deleted. `seq` is the position in the chat's log that the change is up
 to.
 
 ```ts
-interface Change<Events = never> {
+interface Change<Events = never, Approvals = NoApprovals> {
   readonly seq: number
-  readonly items: ReadonlyArray<Item<Events>>
+  readonly items: ReadonlyArray<Item<Events, Approvals>>
   readonly activity: Activity
   readonly failed: boolean
   readonly deleted: boolean
@@ -322,17 +365,48 @@ interface Change<Events = never> {
 
 <small>Since 0.3.0</small>
 
+### Shows
+
+Represents the app's events and approvals a timeline's changes show, as `Change` and the
+server's `changes` take them.
+
+```ts
+interface Shows<
+  Events extends ReadonlyArray<AssistantEvent.AppEventSchema> = readonly [],
+  Approvals extends ApprovalSchemas = NoSchemas
+> {
+  /** The schemas of the app's events the chat's users see. Defaults to none. */
+  readonly events?: Events | undefined
+  /**
+   * The params' schemas of the tool calls the chat's users approve, by tool name. Defaults to
+   * none.
+   */
+  readonly approvals?: Approvals | undefined
+}
+```
+
+<small>Since 0.4.0</small>
+
 ### ShowOptions
 
 Represents the options for building a chat's timeline from its log.
 
 ```ts
-interface ShowOptions<Show extends ReadonlyArray<AssistantEvent.AppEventSchema>> {
+interface ShowOptions<
+  Show extends ReadonlyArray<AssistantEvent.AppEventSchema>,
+  Approvals extends ApprovalSchemas = NoSchemas
+> {
   /**
    * The schemas of the app's events the chat's users see. Each becomes an item in the timeline;
    * the app's other events are left out. Defaults to none.
    */
   readonly show?: Show | undefined
+  /**
+   * The params' schemas of the tool calls the chat's users approve, by tool name. Each call to one
+   * of these tools that waits for approval becomes an item; calls to other tools are left out.
+   * Defaults to none.
+   */
+  readonly approvals?: Approvals | undefined
 }
 ```
 
@@ -360,8 +434,9 @@ Represents the options accepted by `changes`.
 
 ```ts
 interface ChangesOptions<
-  Show extends ReadonlyArray<AssistantEvent.AppEventSchema> = readonly []
-> extends ShowOptions<Show> {
+  Show extends ReadonlyArray<AssistantEvent.AppEventSchema> = readonly [],
+  Approvals extends ApprovalSchemas = NoSchemas
+> extends ShowOptions<Show, Approvals> {
   /**
    * The `seq` up to which the client already has the timeline. The result contains only the
    * changes after it. Defaults to `0`, every change.
@@ -446,19 +521,20 @@ const Activity = Schema.Struct({ …
 
 ### Change
 
-Creates the schema for the changes to a chat's timeline, with items for the given app events,
-in JSON.
+Creates the schema for the changes to a chat's timeline, with items for the given app events and
+the tool calls waiting for approval, in JSON.
 
 **Details**
 
-It is the success schema of the RPC that streams a chat's timeline: name the events the chat's
-users see, the same ones the handler passes to `changes` as `show`. Each item decodes its
-event with that event's schema, so the client gets `Change<Events>` typed with them and folds it
-with `fold`, no definition needed. `Change()` carries no app events.
+It is the success schema of the RPC that streams a chat's timeline. Name the events the chat's
+users see and the tools whose calls they approve, the same ones the handler passes to
+`changes`. Each item decodes its event, or its call's params, with the schema given for it,
+so the client gets `Change<Events, Approvals>` typed with them and folds it with `fold`, no
+definition and no tools needed. `Change()` carries neither; `Change([...])` takes only events.
 
-A handler whose changes show an event the schema doesn't name doesn't compile.
+A handler whose changes show an event or approval the schema doesn't name doesn't compile.
 
-**Example** (An RPC that streams a chat's timeline, with the budget notice)
+**Example** (An RPC that streams a chat's timeline, with the budget notice and order approvals)
 
 ```ts
 import { ChatId, Timeline } from "effect-assistant"
@@ -467,17 +543,28 @@ import * as Schema from "effect/Schema"
 
 class DailyBudgetReached extends Schema.TaggedClass<DailyBudgetReached>()("DailyBudgetReached", {}) {}
 
+// Shared with the client: place_order's parameters.
+const PlaceOrderParams = Schema.Struct({ product: Schema.String, quantity: Schema.Int })
+
 const Subscribe = Rpc.make("Subscribe", {
   payload: { chatId: ChatId.ChatId },
-  success: Timeline.Change([DailyBudgetReached]),
+  success: Timeline.Change({ events: [DailyBudgetReached], approvals: { place_order: PlaceOrderParams } }),
   stream: true
 })
 ```
 
 ```ts
-const Change: <const Events extends ReadonlyArray<AssistantEvent.AppEventSchema> = readonly []>(
-  events?: Events
-) => Schema.Codec<Change<Events[number]["Type"]>, Schema.Json>
+const Change: {
+  <const Events extends ReadonlyArray<AssistantEvent.AppEventSchema> = readonly []>(
+    events?: Events
+  ): Schema.Codec<Change<Events[number]["Type"]>, Schema.Json>
+  <
+    const Events extends ReadonlyArray<AssistantEvent.AppEventSchema> = readonly [],
+    const Approvals extends ApprovalSchemas = NoSchemas
+  >(
+    shows: Shows<Events, Approvals>
+  ): Schema.Codec<Change<Events[number]["Type"], ParamsOf<Approvals>>, Schema.Json>
+}
 ```
 
 <small>Since 0.3.0</small>
@@ -490,12 +577,46 @@ Returns whether nothing is working in the chat: no turn is running or about to s
 specialist is working.
 
 ```ts
-const isIdle: <Events>(timeline: Timeline<Events>) => boolean
+const isIdle: <Events, Approvals>(timeline: Timeline<Events, Approvals>) => boolean
 ```
 
 <small>Since 0.1.0</small>
 
 ## Utility types
+
+### ApprovalSchemas
+
+Represents the schemas of the params of the tool calls a timeline shows waiting for approval, by
+tool name. Each is the tool's `parameters` schema, shared from a module the client can import.
+
+```ts
+type ApprovalSchemas = { readonly [Tool in string]: Codec }
+```
+
+<small>Since 0.4.0</small>
+
+### ParamsOf
+
+Extracts the tool calls a timeline shows from `ApprovalSchemas`: a union of each tool's
+name with the type of its params.
+
+```ts
+type ParamsOf<Approvals extends ApprovalSchemas> = {
+  readonly [Tool in keyof Approvals & string]: { readonly tool: Tool; readonly params: Approvals[Tool]["Type"] }
+}[keyof Approvals & string]
+```
+
+<small>Since 0.4.0</small>
+
+### NoApprovals
+
+Represents a timeline that shows no tool calls waiting for approval.
+
+```ts
+type NoApprovals = never
+```
+
+<small>Since 0.4.0</small>
 
 ### Shown
 
@@ -554,15 +675,17 @@ const watch = (chatId: ChatId.ChatId, after: number) =>
 
 ```ts
 const changes: {
-  <Events, const Show extends Shown<Events> = readonly []>(
+  <Events, const Show extends Shown<Events> = readonly [], const Approvals extends ApprovalSchemas = NoSchemas>(
     definition: Definition<Events>,
-    options?: ChangesOptions<Show>
-  ): <E, R>(entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>) => Stream.Stream<Change<Show[number]["Type"]>, E, R>
-  <E, R, Events, const Show extends Shown<Events> = readonly []>(
+    options?: ChangesOptions<Show, Approvals>
+  ): <E, R>(
+    entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>
+  ) => Stream.Stream<Change<Show[number]["Type"], ParamsOf<Approvals>>, E, R>
+  <E, R, Events, const Show extends Shown<Events> = readonly [], const Approvals extends ApprovalSchemas = NoSchemas>(
     entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
     definition: Definition<Events>,
-    options?: ChangesOptions<Show>
-  ): Stream.Stream<Change<Show[number]["Type"]>, E, R>
+    options?: ChangesOptions<Show, Approvals>
+  ): Stream.Stream<Change<Show[number]["Type"], ParamsOf<Approvals>>, E, R>
 }
 ```
 

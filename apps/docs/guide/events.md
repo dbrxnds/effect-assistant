@@ -34,6 +34,9 @@ Each event is stored as an `AssistantEvent.Entry`: the chat id, a `seq`
 | `TurnStarted`, `TurnCompleted`, `TurnFailed` | [Turn](./turns) bookkeeping.                                                                                             |
 | `SpecialistStarted`, `SpecialistFinished`    | A [specialist](./specialists) run working, and done; a finished run's report wakes a turn.                               |
 | `BlocksClosed`                               | [Blocks](./blocks) closed without an answer.                                                                             |
+| `ApprovalRequested`                          | A tool call waiting for the user's [approval](./user-involvement) instead of running.                                    |
+| `ApprovalDecision`                           | The user approved or rejected a call that waits; it wakes a turn, and an approved call runs then.                        |
+| `ApprovalsExpired`                           | Calls the user moved on from: they won't run.                                                                            |
 | `ChatDeleted`                                | The chat was [deleted](./chats#deleting-a-chat): nothing is stored after it.                                             |
 | Your own events                              | [Yours](./app-events), like a workflow's progress or a summary, stored as themselves.                                    |
 
@@ -46,12 +49,12 @@ writes), and how long it took. A `ToolResult` is a call's `outcome`
 the log to the trace.
 
 The first two are **inputs**: submitting one starts a turn, or joins the
-one that is running. So is a `SpecialistFinished`, and each of your events
-that comes in through the assistant's `submit` (the log marks it, see
-`AssistantEvent.isAppInput`); one a turn appends never wakes a turn. A chat
-client may submit `UserMessage` and `BlockAnswer`
-(`AssistantEvent.UserInput`); your events come from your server, which
-submits them itself.
+one that is running. So are an `ApprovalDecision`, a `SpecialistFinished`,
+and each of your events that comes in through the assistant's `submit` (the
+log marks it, see `AssistantEvent.isAppInput`); one a turn appends never
+wakes a turn. A chat client may submit `UserMessage`, `BlockAnswer`, and
+`ApprovalDecision` (`AssistantEvent.UserInput`); your events come from your
+server, which submits them itself.
 
 ## Evolving events
 

@@ -1,28 +1,29 @@
 /**
- * Renderers for the blocks Acme can put in a message. Each message in the timeline
- * says where its block stands. Answering sends a `BlockAnswer`; once
- * answered, a block shows the answer and stops taking input. An order or a
- * campaign has no answer: its button places it through the API, which tells
- * the chat.
+ * Renderers for what Acme puts in the thread besides text: the blocks on its
+ * messages, and the orders and campaigns it asks the user to approve. Using a
+ * block sends a `BlockAnswer`; approving or rejecting a call sends an
+ * `ApprovalDecision`. Either way the item shows where it stands, and stops
+ * taking input once it's answered or decided.
  */
-import { useAtomSet } from "@effect/atom-react"
-import { Blocks, type CampaignDraft, type OrderDraft } from "@acme/demo-shared/Blocks"
-import { OrderRefused } from "@acme/demo-shared/Rpc"
+import type { Approvals } from "@acme/demo-shared/Approvals"
+import { Blocks } from "@acme/demo-shared/Blocks"
 import type * as AssistantEvent from "effect-assistant/AssistantEvent"
 import * as BlockKit from "effect-assistant/BlockKit"
 import type * as ChatId from "effect-assistant/ChatId"
 import type * as Timeline from "effect-assistant/Timeline"
-import * as Exit from "effect/Exit"
-import * as Option from "effect/Option"
+import * as ToolApproval from "effect-assistant/ToolApproval"
+import * as Match from "effect/Match"
 import * as Predicate from "effect/Predicate"
 import { createContext, type ReactNode, useContext, useState } from "react"
-import * as AcmeRpc from "~/lib/AcmeRpc.ts"
 
-/** What block renderers need from the page: the chat, its messages, and a way to answer. */
+/** The items of Acme's timeline: messages, and its orders and campaigns waiting for approval. */
+export type AcmeItem = Timeline.Item<never, Timeline.ParamsOf<typeof Approvals>>
+
+/** What the renderers need from the page: the chat, its items, and a way to send what the user does. */
 export interface BlockContextValue {
   readonly chatId: ChatId.ChatId | undefined
-  readonly byId: ReadonlyMap<string, Timeline.Item>
-  readonly respond: (answer: AssistantEvent.BlockAnswer) => void
+  readonly byId: ReadonlyMap<string, AcmeItem>
+  readonly respond: (input: AssistantEvent.UserInput) => void
 }
 
 export const BlockContext = createContext<BlockContextValue>({
@@ -47,105 +48,57 @@ function Preview(props: { readonly value: unknown }) {
   )
 }
 
-type Placed = Exit.Exit<{ readonly reference: string }, { readonly _tag: string }>
+type AcmeApproval = Extract<AcmeItem, { readonly _tag: "ToolApproval" }>
 
-/** Why the API refused, or a generic line when it didn't say. */
-const refusal = (exit: Placed) =>
-  Option.match(Exit.findErrorOption(exit), {
-    onNone: () => "Couldn't place it. Try again.",
-    onSome: (error) => (error instanceof OrderRefused ? error.message : "Couldn't place it. Try again.")
-  })
+/** The line above a call to approve: what it does, in words. */
+export const approvalTitle = (approval: AcmeApproval): string =>
+  Match.value(approval).pipe(
+    Match.when(
+      { tool: "place_order" },
+      ({ params }) => `Place ${params.quantity} × ${params.product} for ${params.office}?`
+    ),
+    Match.when({ tool: "start_campaign" }, ({ params }) => `Start ${params.campaign} for ${params.office}?`),
+    Match.exhaustive
+  )
 
-/** The message whose block is rendering: the API places one order per block. */
+const decided = {
+  approved: "Approved",
+  rejected: "Rejected",
+  expired: "Expired"
+}
 
-/**
- * What the block shows, and a button that places it through the API. The
- * API tells the chat, and Acme follows up with the reference.
- */
-function PlaceBlock(props: {
-  readonly shows: object
-  readonly label: string
-  readonly open: boolean
-  /** The reference the API answered the block with, once it's placed. */
-  readonly answered: string | undefined
-  readonly place: () => Promise<Placed>
-}) {
-  const [busy, setBusy] = useState(false)
-  const [clicked, setPlaced] = useState<string | undefined>(undefined)
-  const placed = props.answered ?? clicked
-  const [refused, setRefused] = useState<string | undefined>(undefined)
+/** A call Acme asks the user to approve: what it does, and Approve and Reject while it waits. */
+function ApprovalCard(props: { readonly approval: AcmeApproval }) {
+  const { respond } = useContext(BlockContext)
+  const [clicked, setClicked] = useState(false)
+  const { approval } = props
+  const waiting = approval.status === "pending" && !clicked
 
-  const onClick = async () => {
-    setBusy(true)
-    setRefused(undefined)
-
-    const exit = await props.place()
-
-    setBusy(false)
-
-    if (Exit.isSuccess(exit)) setPlaced(exit.value.reference)
-    else setRefused(refusal(exit))
+  const decide = (input: AssistantEvent.ApprovalDecision) => {
+    setClicked(true)
+    respond(input)
   }
 
   return (
     <div className="block-place">
-      <Preview value={props.shows} />
+      <Preview value={approval.params} />
       <div className="block-options">
-        <button
-          type="button"
-          className={placed === undefined ? undefined : "picked"}
-          disabled={!props.open || busy || placed !== undefined}
-          onClick={() => void onClick()}
-        >
-          {placed === undefined ? props.label : `Placed: ${placed}`}
-        </button>
+        {approval.status === "pending" ? (
+          <>
+            <button type="button" disabled={!waiting} onClick={() => decide(ToolApproval.approve(approval))}>
+              Approve
+            </button>
+            <button type="button" disabled={!waiting} onClick={() => decide(ToolApproval.reject(approval))}>
+              Reject
+            </button>
+          </>
+        ) : (
+          <button type="button" className="picked" disabled>
+            {approval.outcome === "failure" ? "Approved, but it failed" : decided[approval.status]}
+          </button>
+        )}
       </div>
-      {refused === undefined ? null : <p className="block-refused">{refused}</p>}
     </div>
-  )
-}
-
-function OrderBlock(props: {
-  readonly order: typeof OrderDraft.props.Type
-  readonly messageId: string
-  readonly open: boolean
-  readonly answered: string | undefined
-}) {
-  const { chatId } = useContext(BlockContext)
-  const placeOrder = useAtomSet(AcmeRpc.placeOrder, { mode: "promiseExit" })
-
-  if (chatId === undefined) return null
-
-  return (
-    <PlaceBlock
-      shows={props.order}
-      label="Place order"
-      open={props.open}
-      answered={props.answered}
-      place={() => placeOrder({ payload: { chatId, messageId: props.messageId, order: props.order } })}
-    />
-  )
-}
-
-function CampaignBlock(props: {
-  readonly campaign: typeof CampaignDraft.props.Type
-  readonly messageId: string
-  readonly open: boolean
-  readonly answered: string | undefined
-}) {
-  const { chatId } = useContext(BlockContext)
-  const startCampaign = useAtomSet(AcmeRpc.startCampaign, { mode: "promiseExit" })
-
-  if (chatId === undefined) return null
-
-  return (
-    <PlaceBlock
-      shows={props.campaign}
-      label="Start campaign"
-      open={props.open}
-      answered={props.answered}
-      place={() => startCampaign({ payload: { chatId, messageId: props.messageId, campaign: props.campaign } })}
-    />
   )
 }
 
@@ -220,12 +173,6 @@ const render = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
   choose_one: ({ props, open, answer, respond }) => (
     <ChooseOne options={props.options} open={open} picked={answer?.choice} onPick={(choice) => respond({ choice })} />
   ),
-  order_draft: ({ messageId, props, open, answer }) => (
-    <OrderBlock order={props} messageId={messageId} open={open} answered={answer?.reference} />
-  ),
-  campaign_draft: ({ messageId, props, open, answer }) => (
-    <CampaignBlock campaign={props} messageId={messageId} open={open} answered={answer?.reference} />
-  ),
   text_input: ({ props, open, answer, respond }) => (
     <TextInput
       placeholder={props.placeholder}
@@ -236,12 +183,14 @@ const render = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
   )
 })
 
-/** The block under an assistant message, if it has one this app knows. */
+/** The block under an assistant message, or the card of a call to approve, if this app knows it. */
 export function MessageBlock(props: { readonly messageId: string }) {
   const { byId, respond } = useContext(BlockContext)
-  const message = byId.get(props.messageId)
+  const item = byId.get(props.messageId)
 
-  if (message === undefined || !Predicate.isTagged(message, "AssistantMessage")) return null
+  if (item === undefined) return null
 
-  return render(message, { respond }) ?? null
+  if (Predicate.isTagged(item, "ToolApproval")) return <ApprovalCard approval={item} />
+
+  return Predicate.isTagged(item, "AssistantMessage") ? (render(item, { respond }) ?? null) : null
 }

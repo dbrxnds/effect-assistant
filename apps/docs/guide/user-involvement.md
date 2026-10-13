@@ -1,14 +1,15 @@
 # Involving the user
 
 Some things the assistant shouldn't do on its own: place an order, publish a
-post, spend a budget. The library doesn't own approvals. Who acts decides
-how the user is involved, and there are three ways:
+post, spend a budget. Who acts decides how the user is involved, and there
+are three ways:
 
 1. **The assistant acts.** It calls a tool with final values.
-2. **The user acts.** A [block](./blocks) shows what to do, and its button
-   calls your app's API, which does the work and answers the block.
-3. **The user answers.** A block with an answer schema asks something; the
-   answer goes to the model, and the user may also just type.
+2. **The assistant acts after the user's yes.** It calls a tool that needs
+   the user's approval: the call waits, the user sees it and approves or
+   rejects it, and an approved call runs then.
+3. **The user answers.** A [block](./blocks) with an answer schema asks
+   something; the answer goes to the model, and the user may also just type.
 
 ## The assistant acts
 
@@ -41,89 +42,85 @@ const renameDraft = (input: { readonly draftId: string; readonly title: string }
 Keep this for what's fine without asking. Anything the user must agree to
 goes through the next way.
 
-## The user acts
+## The assistant acts after the user's yes
 
-The assistant prepares the work and shows it in a block. The block's button
-calls your API with exactly the props it shows, so the user commits to what
-they saw. Your API does the work, then answers the block itself with
-[`Block.answer`](/api/Block#answer): the block shows as answered on the
-timeline, and a turn wakes and reads what the user did, so the assistant
-follows up.
+A tool made with Effect's `needsApproval` doesn't run when the model calls
+it in a turn. The call waits for the user's approval
+([`ToolApproval`](/api/ToolApproval)):
 
-**Example** (Placing an order the assistant prepared)
+- The turn records it (`ApprovalRequested`) instead of running the handler,
+  gives the model a placeholder result (the call waits for the user's
+  approval), and ends. The step's other calls run as usual.
+- The chat's [timeline](./client#tool-calls-to-approve) shows the call, with
+  its params, for the user to approve or reject.
+- The user's decision is an input, like a message: built on the client with
+  `ToolApproval.approve(item)` or `ToolApproval.reject(item, { reason })`,
+  and submitted with the assistant's `submit`. Its id is fixed per call, so
+  a double click is stored once.
+- An approved call runs at the start of the next turn's loop, with the
+  params the model gave it and the same call id, so
+  [`AssistantToolCall.idempotencyKey`](./tools#tools-that-change-things) is
+  the key the call would have had. A crash after the approval runs it again
+  with that key. The model reads the result as the outcome of its earlier
+  call, and replies.
+- A rejected call doesn't run: the model reads that the user rejected it,
+  with their reason.
+- A call the user moves on from expires with
+  `ToolApproval.expireStale({ messages })`, run from the handler like
+  `BlockKit.closeStale`: the model reads that it wasn't approved, and a
+  decision that arrives later isn't stored. So isn't one for a call that's
+  already decided.
+
+**Example** (Placing an order once the user approves it)
 
 ```ts
-import { Assistant, Block, BlockKit } from "effect-assistant"
+import { AssistantToolCall, CurrentChat, ToolApproval } from "effect-assistant"
+import * as Tool from "effect/ai/Tool"
+import * as Toolkit from "effect/ai/Toolkit"
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 
-export const OrderCheckout = Block.make("order_checkout", {
-  description: "An order ready to place, with a Place order button. Only the user places it.",
-  props: Schema.Struct({ product: Schema.String, quantity: Schema.Int, total: Schema.Finite }),
-  // Your API answers it, once the order is placed.
-  answer: Schema.Struct({ orderId: Schema.String })
+// Shared with the client: what the user approves.
+export const PlaceOrderParams = Schema.Struct({ product: Schema.String, quantity: Schema.Int, total: Schema.Finite })
+
+const PlaceOrder = Tool.make("place_order", {
+  description:
+    "Places an order. The user approves it first: your turn ends, and the outcome arrives later. Say in the same step what you're asking them to approve.",
+  parameters: PlaceOrderParams,
+  success: Schema.Struct({ orderId: Schema.String }),
+  needsApproval: true,
+  dependencies: [CurrentChat.CurrentChat, AssistantToolCall.AssistantToolCall]
 })
 
-export const Shop = Assistant.make("shop", { blocks: BlockKit.make([OrderCheckout]) })
-```
+const OrderTools = Toolkit.make(PlaceOrder)
 
-The model sends the block like any other:
+const OrderToolsLive = OrderTools.toLayer({
+  place_order: (order) =>
+    Effect.gen(function* () {
+      // The same key every time this call runs: one order, also after a crash.
+      const key = yield* AssistantToolCall.idempotencyKey
 
-```ts
-send_user_message({
-  text: "300 cotton totes come to $930.",
-  wait: true,
-  block: { kind: "order_checkout", props: { product: "Cotton tote", quantity: 300, total: 930 } }
+      return { orderId: yield* placeOnce(key, order) }
+    })
 })
+
+const MyAssistantLive = MyAssistant.toLayer((turn) =>
+  Stream.unwrap(
+    // Calls the user moved on from (two messages later) expire.
+    ToolApproval.expireStale({ messages: 2 }).pipe(Effect.as(turn.loop({ instructions, toolkit: OrderTools })))
+  )
+).pipe(Layer.provide(OrderToolsLive))
 ```
 
-On the client, the renderer gets the props and the id of the message the
-block is on, and calls your API; once the block is answered, it shows the
-order:
+A `needsApproval` function decides per call, from its params. Only a turn
+can ask the user: a specialist's run that calls such a tool gets a failure
+it reads, and [`ToolDiscovery`](./tools#many-tools-discovery) refuses one in
+its catalog, since a call through `execute_tool` can't wait.
 
-```tsx
-const render = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
-  order_checkout: ({ messageId, props, open, answer }) =>
-    answer === undefined ? (
-      <button disabled={!open} onClick={() => placeOrder({ chatId, messageId, order: props })}>
-        Place order
-      </button>
-    ) : (
-      <span>Placed: {answer.orderId}</span>
-    )
-})
-```
-
-Your API (an RPC, a route) checks what it needs to, places the order once per
-block, and answers the block:
-
-```ts
-const placeOrder = Effect.fn(function* (
-  chatId: ChatId.ChatId,
-  messageId: string,
-  order: typeof OrderCheckout.props.Type
-) {
-  // One order per block: a second click finds the first.
-  const orderId = yield* placeOnce(`order:${chatId}:${messageId}`, order)
-
-  yield* Shop.use((shop) => shop.submit(chatId, Block.answer(OrderCheckout, { messageId, value: { orderId } })))
-
-  return { orderId }
-})
-```
-
-`Block.answer` encodes the value with the block's answer schema, and its id
-is the one a client's `respond` uses, fixed per message, so the block takes
-one answer however often the button is clicked. The model reads it as the
-user's answer on its message, and replies with the order. Things may have
-changed since the block was shown: the API can refuse (over budget, say),
-and the user sees why on the block, which stays open.
-
-What the work reports later (a workflow's progress) comes back as one of
-your [events](./app-events), submitted by the work.
-
-The demo does this for orders and campaigns: `OrderDraft` and
-`CampaignDraft` in `packages/demo/shared/src/Blocks.ts`, `PlaceOrder` and
-`StartCampaign` in its RPCs, and `placed` in `packages/demo/api/src/Steps.ts`.
+The user sees the call on the timeline; see
+[the chat client](./client#tool-calls-to-approve) for rendering it and
+sending the decision.
 
 ## The user answers
 
@@ -133,14 +130,5 @@ and the turn owes a reply. The user can type the answer instead, and the
 model closes the block. See [UI blocks](./blocks).
 
 An answer is information for the model, not a commitment: what the model
-does with it is its own tool call, with final values.
-
-## Not `needsApproval`
-
-Effect's `needsApproval` asks the caller to park a call until someone
-approves it. The library doesn't: a loop with such a tool fails before it
-calls the model, a specialist's run with one fails, and so does a
-[`ToolDiscovery`](./tools#many-tools-discovery) layer over a catalog that
-has one, each naming the tools. Remove `needsApproval`, and make the tool
-something the assistant may do, or put the commitment behind a block and
-your API.
+does with it is its own tool call, and one the user must agree to waits for
+their approval.

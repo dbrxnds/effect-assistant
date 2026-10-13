@@ -18,6 +18,7 @@ import { ChatLog } from "../ChatLog.ts"
 import { CurrentChat } from "../CurrentChat.ts"
 import * as Chats from "../Chats.ts"
 import * as SpecialistService from "../Specialist.ts"
+import * as ToolApproval from "../ToolApproval.ts"
 import * as AppEvents from "./events.ts"
 import * as History from "./history.ts"
 import * as Specialists from "./specialists.ts"
@@ -197,8 +198,17 @@ export const make = Effect.fnUntraced(function* (options: {
         if (yield* isDeleted) return yield* refused(input, "is deleted")
 
         const id = idOf(input)
+        const all = yield* Ref.get(entries)
 
-        if (id !== undefined && (yield* Ref.get(entries)).some(({ event }) => idOf(event) === id)) return
+        if (id !== undefined && all.some(({ event }) => idOf(event) === id)) return
+
+        // A decision counts only for a call that still waits: not one decided, or expired, or unknown.
+        if (
+          Predicate.isTagged(input, "ApprovalDecision") &&
+          ToolApproval.fromEntries(all).get(input.callId)?.status !== "pending"
+        ) {
+          return yield* refused(input, "has no call waiting for that decision")
+        }
 
         // Stored as an input: it came in from outside a turn, so it wakes one, also after a restart.
         yield* write([AssistantEvent.isLibraryEvent(input) ? input : AppEvents.markInput(input)])

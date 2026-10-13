@@ -15,6 +15,7 @@ const modules = [
   "Instructions",
   "Skill",
   "Specialist",
+  "ToolApproval",
   "ToolDiscovery",
   "ToolFailure",
   "ChatId",

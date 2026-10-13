@@ -2,22 +2,21 @@
  * Ordering branded products for an office.
  *
  * `quote_order` says what an order comes to (the product, units, total, and
- * the budget left after it), for the assistant to show the user in an
- * `order_draft` block. Only the user places it, with the block's button:
- * {@link place} checks the budget again, starts the `PrintOrder` workflow, and
- * tells the chat. The workflow reports each stage as a `WorkflowStep` from
+ * the budget left after it). `place_order` places it, once the user approves
+ * the call: it checks the budget again and starts the `PrintOrder` workflow. The workflow reports each stage as a `WorkflowStep` from
  * `workflow:PrintOrder`: `confirmed`, `printing`, `shipped` (with a tracking
  * number), and `delivered`. The assistant decides which ones the user hears
  * about.
  *
  * @since 0.1.0
  */
-import type { OrderDraft } from "@acme/demo-shared/Blocks"
+import { PlaceOrderParams } from "@acme/demo-shared/Approvals"
 import * as Budgets from "@acme/demo-shared/Budgets"
 import * as Locations from "@acme/demo-shared/Locations"
 import * as Products from "@acme/demo-shared/Products"
-import { OrderRefused } from "@acme/demo-shared/Rpc"
+import * as AssistantToolCall from "effect-assistant/AssistantToolCall"
 import * as ChatId from "effect-assistant/ChatId"
+import { CurrentChat } from "effect-assistant/CurrentChat"
 import * as RunId from "effect-assistant/RunId"
 import * as ToolFailure from "effect-assistant/ToolFailure"
 import * as Effect from "effect/Effect"
@@ -26,6 +25,7 @@ import * as Schema from "effect/Schema"
 import * as Tool from "effect/ai/Tool"
 import * as Toolkit from "effect/ai/Toolkit"
 import * as Workflow from "effect/workflow/Workflow"
+import type * as WorkflowEngine from "effect/workflow/WorkflowEngine"
 import * as LiveOrders from "./LiveOrders.ts"
 import * as Steps from "./Steps.ts"
 
@@ -189,12 +189,28 @@ export const QuoteOrder = Tool.make("quote_order", {
 })
 
 /**
+ * Places a product order, once the user approves the call.
+ *
+ * @category tools
+ * @since 0.1.0
+ */
+export const PlaceOrder = Tool.make("place_order", {
+  description:
+    "Places a product order, with exactly what quote_order returned. The user approves it first: they see the order and approve or reject it, your turn ends meanwhile, and the outcome arrives later. Say in the same step what you're asking them to approve, in one line.",
+  parameters: PlaceOrderParams,
+  success: Schema.Struct({ reference: Schema.String }),
+  failure: ToolFailure.ToolFailure,
+  needsApproval: true,
+  dependencies: [CurrentChat, AssistantToolCall.AssistantToolCall]
+})
+
+/**
  * The product ordering tools.
  *
  * @category toolkits
  * @since 0.1.0
  */
-export const PrintTools = Toolkit.make(ProductCatalog, QuoteOrder)
+export const PrintTools = Toolkit.make(ProductCatalog, QuoteOrder, PlaceOrder)
 
 /**
  * Layer for the product ordering tools' handlers, on the orders placed
@@ -205,7 +221,7 @@ export const PrintTools = Toolkit.make(ProductCatalog, QuoteOrder)
  */
 export const layerTools = PrintTools.toLayer(
   Effect.gen(function* () {
-    const services = yield* Effect.context<LiveOrders.LiveOrders>()
+    const services = yield* Effect.context<LiveOrders.LiveOrders | WorkflowEngine.WorkflowEngine>()
 
     return PrintTools.of({
       product_catalog: ({ category }) =>
@@ -221,73 +237,54 @@ export const layerTools = PrintTools.toLayer(
             leadTimeDays
           })),
           Effect.provideContext(services)
-        )
+        ),
+      place_order: (order) => place(order).pipe(Effect.provideContext(services))
     })
   })
 )
 
 /**
- * Places the order an `order_draft` block shows, when the user clicks its
- * button: it checks the budget again, starts the `PrintOrder` workflow, and
- * tells the chat. Once per block: a second click finds the first order.
+ * Places the order the user approved: it checks the budget again and starts
+ * the `PrintOrder` workflow. Once per call: the run's key is the call's, so a
+ * call that runs again after a crash finds the first order.
  *
  * @category constructors
  * @since 0.1.0
  */
-export const place = Effect.fn(function* (
-  chatId: ChatId.ChatId,
-  messageId: string,
-  order: typeof OrderDraft.props.Type
-) {
-  const runId = RunId.fromKey(`order:${chatId}:${messageId}`)
+export const place = Effect.fn(function* (order: typeof PlaceOrderParams.Type) {
+  const chatId = (yield* CurrentChat).chatId
+  const runId = RunId.fromKey(yield* AssistantToolCall.idempotencyKey)
   const reference = Steps.reference(runId)
   const orders = yield* LiveOrders.LiveOrders
-  const existing = yield* orders.get(reference)
 
-  const placed =
-    existing ??
-    (yield* Effect.gen(function* () {
-      // The budget may have moved since the quote the block shows; the user agreed to that total, not another.
-      const quoted = yield* quote(order).pipe(
-        Effect.mapError((failure) => new OrderRefused({ message: failure.message }))
-      )
+  if ((yield* orders.get(reference)) !== undefined) return { reference }
 
-      if (quoted.total !== order.total) {
-        return yield* new OrderRefused({
-          message: `That order now comes to $${quoted.total}, not $${order.total}. Ask Acme again.`
-        })
-      }
+  // The budget may have moved since the quote the user approved; they agreed to that total, not another.
+  const quoted = yield* quote(order)
 
-      const placedNow = LiveOrders.LiveOrder.make({
-        reference,
-        chatId,
-        kind: "product",
-        office: quoted.office,
-        locationId: quoted.locationId,
-        description: `${quoted.quantity} × ${quoted.product}`,
-        total: quoted.total,
-        status: "placed",
-        placedOn: new Date().toISOString().slice(0, 10),
-        updatedAt: Date.now()
-      })
+  if (quoted.total !== order.total) {
+    return yield* ToolFailure.fail(`That order now comes to $${quoted.total}, not $${order.total}. Quote it again.`)
+  }
 
-      yield* orders.put(placedNow)
-      yield* PrintOrder.execute(
-        {
-          runId,
-          chatId,
-          reference,
-          office: quoted.office,
-          productName: quoted.product,
-          quantity: quoted.quantity
-        },
-        { discard: true }
-      )
+  yield* orders.put(
+    LiveOrders.LiveOrder.make({
+      reference,
+      chatId,
+      kind: "product",
+      office: quoted.office,
+      locationId: quoted.locationId,
+      description: `${quoted.quantity} × ${quoted.product}`,
+      total: quoted.total,
+      status: "placed",
+      placedOn: new Date().toISOString().slice(0, 10),
+      updatedAt: Date.now()
+    })
+  )
 
-      return placedNow
-    }))
-
-  yield* Steps.placed(chatId, messageId, placed)
+  yield* PrintOrder.execute(
+    { runId, chatId, reference, office: quoted.office, productName: quoted.product, quantity: quoted.quantity },
+    { discard: true }
+  )
 
   return { reference }
 })
