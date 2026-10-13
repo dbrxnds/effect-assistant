@@ -48,8 +48,8 @@ On the service, `yield* MyAssistant`:
 | `subscribe(chatId)`  | Streams the chat's whole [log](./events), for the server: stored entries first (or those after `after`), then live ones. |
 | `delete(chatId)`     | [Deletes the chat](./chats#deleting-a-chat): stops what works in it, and keeps its log.                                  |
 
-A [chat client](./client) gets `subscribe(chatId).pipe(ChatView.updates(MyAssistant))`: the chat as its
-user sees it, with only the app events the user may see left in (see [the chat client](./client)).
+A [chat client](./client) gets `subscribe(chatId).pipe(Timeline.changes(MyAssistant))`: the chat's timeline,
+as its user sees it, with only the app events you `show` (see [the chat client](./client)).
 
 Code that runs in a chat uses the chat itself instead. `yield* MyAssistant.Chat`
 (in the handler, its build, or a tool its turns run) has the chat's id, its

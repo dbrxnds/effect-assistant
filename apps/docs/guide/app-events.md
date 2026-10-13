@@ -32,9 +32,9 @@ What happens with an event is decided where it's used:
 - **What the model reads** is up to your [history view](./loops#your-own-events):
   it maps the events the model should read to prompt messages. The model
   reads none by itself.
-- **What the user sees** is up to `ChatView.updates(MyAssistant, { show })`:
-  only the events it names reach the client, and none by default (see
-  [the chat client](./client#your-events-in-the-view)).
+- **What the user sees** is up to `Timeline.changes(MyAssistant, { show })`:
+  only the events it names reach the client's timeline, and none by default
+  (see [the chat client](./client#your-events-on-the-timeline)).
 
 **Example** (The model reads a shipment as a short note)
 

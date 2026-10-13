@@ -48,7 +48,7 @@ It's stored as an `AssistantMessage` with a `block`.
 
 ## On the client
 
-The client gets the chat's [view](./client): each assistant message comes with
+The client gets the chat's [timeline](./client): each assistant message comes with
 its block, and where the block stands.
 [`BlockKit.toClient`](/api/BlockKit#toclient) maps each kind to a renderer.
 It's type-checked, so every kind in the kit is covered, and each renderer gets
@@ -64,7 +64,7 @@ const render = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
     ))
 })
 
-// For each AssistantMessage in the view:
+// For each AssistantMessage on the timeline:
 render(message, { respond: (answer) => submit(answer) })
 ```
 
@@ -79,7 +79,7 @@ A block stays open until it's answered: with the block itself, or in words.
 When the user types the answer instead, the assistant lists the block's
 message id in a later message's `closes`. Anything else the user sends, like another
 block's answer or a question about something else, leaves it open. The
-view's block `status` says which: `"open"`, `"answered"`, or `"closed"`
+timeline's block `status` says which: `"open"`, `"answered"`, or `"closed"`
 (without an answer). On the server,
 [`BlockKit.fromEntries(entries)`](/api/BlockKit#fromentries) computes the
 same from a log, and `BlockKit.apply` one event at a time.

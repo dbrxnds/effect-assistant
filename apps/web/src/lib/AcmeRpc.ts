@@ -43,7 +43,7 @@ export class AcmeRpc extends AtomRpc.Service<AcmeRpc>()("AcmeRpc", {
     )
 }) {}
 
-/** A chat's state from its `Subscribe` stream of view updates. Resubscribes every 2s after it drops. */
+/** A chat's state from its `Subscribe` stream of timeline changes. Resubscribes every 2s after it drops. */
 export const chatSessionAtom = Atom.family((chatId: ChatId.ChatId) =>
   AcmeRpc.runtime.atom(
     Stream.unwrap(

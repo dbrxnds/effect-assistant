@@ -80,6 +80,15 @@ const scanTo = (text: string, start: number, stop: (text: string, at: number) =>
       continue
     }
 
+    // A comment's apostrophe ("the app's") isn't a string.
+    if (char === "/" && text[at + 1] === "*") {
+      const end = text.indexOf("*/", at + 2)
+
+      if (end === -1) break
+      at = end + 1
+      continue
+    }
+
     if (char === '"' || char === "'" || char === "`") {
       quote = char
       continue

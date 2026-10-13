@@ -317,10 +317,10 @@ export interface Service<Events = never> {
    * A reader that already has the earlier entries passes `after` and receives only the entries
    * after that `seq`.
    *
-   * For a chat client, pipe the whole log into `ChatView.updates(MyAssistant, { after })`, which
-   * streams the chat as its user sees it. Its `after` goes there, not here: the view of a message
-   * depends on earlier entries. The view shows only the app events named in its `show`, none by
-   * default (see `ChatView.updates`).
+   * For a chat client, pipe the whole log into `Timeline.changes(MyAssistant, { after })`, which
+   * streams the chat's timeline, as its user sees it. Its `after` goes there, not here: a message
+   * on the timeline depends on earlier entries. The timeline shows only the app events named in its
+   * `show`, none by default (see `Timeline.changes`).
    */
   readonly subscribe: (
     chatId: ChatId,
@@ -484,8 +484,8 @@ function entrySchema(events: ReadonlyArray<AssistantEvent.AppEventSchema>): Sche
  * to the places that use it. One that comes in through the service's `submit`, from outside a
  * turn, is an input and wakes a turn, like a user's message; one a turn appends to its chat never
  * does. The handler decides what a turn does, a history view says how the model reads an event
- * ({@link HistoryView}), and the stream a chat client gets says which its user sees
- * (`ChatView.updates`).
+ * ({@link HistoryView}), and the chat's timeline says which its user sees
+ * (`Timeline.changes`).
  *
  * **Example** (Defining an assistant and submitting a message)
  *

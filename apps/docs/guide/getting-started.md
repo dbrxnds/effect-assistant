@@ -68,13 +68,13 @@ workflow:
 
 A chat is a `ChatId`. `submit` stores a message in it and returns at once;
 the assistant works in the background. `subscribe` streams the chat's log,
-and `ChatView.updates` turns it into the chat as its user sees it: the
-messages, and whether the assistant is working.
+and `Timeline.changes` turns it into the chat's timeline, as its user sees
+it: the messages, and whether the assistant is working.
 
 **Example** (Submit, then read the reply)
 
 ```ts
-import { AssistantEvent, ChatId, ChatView } from "effect-assistant"
+import { AssistantEvent, ChatId, Timeline } from "effect-assistant"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
@@ -85,22 +85,22 @@ const program = Effect.gen(function* () {
 
   yield* assistant.submit(chatId, AssistantEvent.UserMessage.make({ text: "Hi! What can you do?" }))
 
-  const view = yield* assistant.subscribe(chatId).pipe(
-    ChatView.updates(MyAssistant),
-    ChatView.views,
-    Stream.takeUntil((view) => view.messages.length > 1 && ChatView.isIdle(view)),
+  const timeline = yield* assistant.subscribe(chatId).pipe(
+    Timeline.changes(MyAssistant),
+    Timeline.fold,
+    Stream.takeUntil((timeline) => timeline.items.length > 1 && Timeline.isIdle(timeline)),
     Stream.runLast
   )
 
-  yield* Console.log(view)
+  yield* Console.log(timeline)
 })
 
 Effect.runPromise(program.pipe(Effect.provide(MyAssistantLive)))
 // { messages: [{ _tag: "UserMessage", text: "Hi! What can you do?" }, { _tag: "AssistantMessage", text: "Hi! I can help with …" }], … }
 ```
 
-A chat UI does the same over RPC: it folds the updates and renders the
-messages, and shows a working indicator while the view's `activity` says
+A chat UI does the same over RPC: it folds the changes and renders the
+messages, and shows a working indicator while the timeline's `activity` says
 something works. See [the chat client](./client).
 
 `subscribe` streams the chat's whole log instead, every event the

@@ -8,7 +8,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as Rpc from "effect/rpc/Rpc"
 import * as RpcGroup from "effect/rpc/RpcGroup"
-import { Assistant, AssistantEvent, ChatId, ChatView, InputId, RunId } from "../src/index.ts"
+import { Assistant, AssistantEvent, ChatId, Timeline, InputId, RunId } from "../src/index.ts"
 import {
   collectUntil,
   newChat,
@@ -35,8 +35,8 @@ const Viewing = Assistant.make("viewing", { events: [Update, Note] })
 const entries = (events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>) =>
   events.map((event, i) => AssistantEvent.Entry.make({ chatId, seq: i + 1, at: (i + 1) * 1000, event }))
 
-const view = (events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>) =>
-  ChatView.fromEntries(entries(events))
+const timeline = (events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>) =>
+  Timeline.fromEntries(entries(events))
 
 const hi = AssistantEvent.UserMessage.make({ id: InputId.fromKey("hi"), text: "Order 300 totes" })
 
@@ -80,13 +80,13 @@ const quoting = [
   pick
 ]
 
-describe("ChatView.fromEntries", () => {
+describe("Timeline.fromEntries", () => {
   it("has the messages and their blocks, with the user's answer, and nothing internal", () => {
-    const shown = view(quoting)
+    const shown = timeline(quoting)
 
-    expect(shown.messages).toEqual([
-      ChatView.UserMessage.make({ id: hi.id, text: "Order 300 totes", at: 1000 }),
-      ChatView.AssistantMessage.make({
+    expect(shown.items).toEqual([
+      Timeline.UserMessage.make({ id: hi.id, text: "Order 300 totes", at: 1000 }),
+      Timeline.AssistantMessage.make({
         id: "m1",
         text: "That's $1,200. Which color?",
         at: 6000,
@@ -99,7 +99,7 @@ describe("ChatView.fromEntries", () => {
       })
     ])
 
-    const json = JSON.stringify(Schema.encodeSync(ChatView.Update())(ChatView.snapshot(entries(quoting))))
+    const json = JSON.stringify(Schema.encodeSync(Timeline.Change())(Timeline.snapshot(entries(quoting))))
 
     for (const internal of ["toolu_quote", "ModelOutput", "TurnStarted"]) {
       expect(json).not.toContain(internal)
@@ -117,8 +117,8 @@ describe("ChatView.fromEntries", () => {
     })
 
     const status = (events: ReadonlyArray<AssistantEvent.AssistantEvent>) =>
-      view(events).messages.flatMap((message) =>
-        Predicate.isTagged(message, "AssistantMessage") ? [message.block?.status] : []
+      timeline(events).items.flatMap((item) =>
+        Predicate.isTagged(item, "AssistantMessage") ? [item.block?.status] : []
       )
 
     expect(status([choose])).toEqual(["open"])
@@ -126,9 +126,9 @@ describe("ChatView.fromEntries", () => {
   })
 
   it("says what works: a turn, one about to start, and specialists; and whether the last turn failed", () => {
-    const runId = RunId.fromKey("view-test")
+    const runId = RunId.fromKey("timeline-test")
 
-    const working = view([
+    const working = timeline([
       hi,
       AssistantEvent.TurnStarted.make({ assistant: "test" }),
       AssistantEvent.SpecialistStarted.make({
@@ -144,7 +144,7 @@ describe("ChatView.fromEntries", () => {
     })
     expect(JSON.stringify(working)).not.toContain("internal brief")
 
-    const failed = view([
+    const failed = timeline([
       hi,
       AssistantEvent.TurnStarted.make({ assistant: "test" }),
       AssistantEvent.TurnFailed.make({ throughSeq: 2, message: "AnthropicError: overloaded" })
@@ -153,18 +153,18 @@ describe("ChatView.fromEntries", () => {
     expect(failed.activity).toEqual({ working: false, specialists: [] })
     expect(failed.failed).toBe(true)
     expect(JSON.stringify(failed)).not.toContain("overloaded")
-    expect(ChatView.isIdle(failed)).toBe(true)
+    expect(Timeline.isIdle(failed)).toBe(true)
 
     // A workflow's update, submitted, wakes a turn: working until a turn reads it.
-    const woken = view([submittedUpdate("workflow:Order", { status: "shipped" })])
+    const woken = timeline([submittedUpdate("workflow:Order", { status: "shipped" })])
 
     expect(woken.activity.working).toBe(true)
 
     // One a turn appended wakes nothing.
-    expect(view([storedUpdate("workflow:Order", { status: "shipped" })]).activity.working).toBe(false)
+    expect(timeline([storedUpdate("workflow:Order", { status: "shipped" })]).activity.working).toBe(false)
   })
 
-  it("shows the app events in `show` as rows typed with their schemas, and leaves out the rest", () => {
+  it("shows the app events in `show` as items typed with their schemas, and leaves out the rest", () => {
     const shipped = Update.make({
       id: InputId.fromKey("shipped"),
       source: "workflow:Order",
@@ -181,14 +181,15 @@ describe("ChatView.fromEntries", () => {
       { chatId, seq: 4, at: 3000, event: ask }
     ]
 
-    const shown: ChatView.View<Update> = ChatView.fromEntries(decoded, Viewing, { show: [Update] })
+    const shown: Timeline.Timeline<Update> = Timeline.fromEntries(decoded, Viewing, { show: [Update] })
 
-    // Exhaustive over the events shown: the row's `_tag` is the event's, and the event is decoded.
-    const lines = shown.messages.map((message) =>
-      Match.valueTags(message, {
+    // Exhaustive over the events shown: the item's `_tag` is the event's, and the event is decoded.
+    const lines = shown.items.map((item) =>
+      Match.valueTags(item, {
         UserMessage: (sent) => `user: ${sent.text}`,
         AssistantMessage: (sent) => `assistant: ${sent.text}`,
-        Update: (row) => `${row.id} at ${row.at}: ${row.event.source} ${row.event instanceof Update}`
+        Update: (eventItem) =>
+          `${eventItem.id} at ${eventItem.at}: ${eventItem.event.source} ${eventItem.event instanceof Update}`
       })
     )
 
@@ -199,37 +200,37 @@ describe("ChatView.fromEntries", () => {
     ])
 
     // Without `show`, none of the app's events.
-    expect(ChatView.fromEntries(decoded, Viewing).messages.map((message) => message._tag)).toEqual([
+    expect(Timeline.fromEntries(decoded, Viewing).items.map((item) => item._tag)).toEqual([
       "UserMessage",
       "AssistantMessage"
     ])
 
     // On the wire, the event is in its JSON form, and the RPC's schema decodes it back.
-    const Wire = ChatView.Update([Update])
-    const json = Schema.encodeSync(Wire)(ChatView.snapshot(decoded, Viewing, { show: [Update] }))
+    const Wire = Timeline.Change([Update])
+    const json = Schema.encodeSync(Wire)(Timeline.snapshot(decoded, Viewing, { show: [Update] }))
 
     expect(JSON.stringify(json)).toContain(
       '{"_tag":"Update","id":"app-event:2","at":2000,"event":{"_tag":"Update","id":"shipped","source":"workflow:Order","payload":{"status":"shipped"}}}'
     )
-    expect(ChatView.apply(ChatView.empty, Schema.decodeUnknownSync(Wire)(JSON.parse(JSON.stringify(json))))).toEqual(
+    expect(Timeline.apply(Timeline.empty, Schema.decodeUnknownSync(Wire)(JSON.parse(JSON.stringify(json))))).toEqual(
       shown
     )
 
-    // As the log stores it, marked as submitted: the same rows.
+    // As the log stores it, marked as submitted: the same items.
     const stored = Schema.decodeUnknownSync(AssistantEvent.StoredAppEvent)(
       Schema.encodeSync(Schema.toCodecJson(Update))(shipped)
     )
 
     const log = entries([hi, AppEvents.markInput(stored), ask])
 
-    expect(ChatView.fromEntries(log, Viewing, { show: [Update] }).messages).toEqual(shown.messages)
+    expect(Timeline.fromEntries(log, Viewing, { show: [Update] }).items).toEqual(shown.items)
   })
 
-  it("decodes an update without the rows its schema doesn't name, or that don't decode", () => {
-    const update = Schema.decodeUnknownSync(ChatView.Update([Update]))(
+  it("decodes a change without the items its schema doesn't name, or that don't decode", () => {
+    const change = Schema.decodeUnknownSync(Timeline.Change([Update]))(
       JSON.parse(`{
         "seq": 4,
-        "messages": [
+        "items": [
           { "_tag": "UserMessage", "id": "${hi.id}", "text": "hi", "at": 1 },
           { "_tag": "Note", "id": "app-event:2", "at": 2, "event": { "_tag": "Note", "text": "hidden" } },
           { "_tag": "Update", "id": "app-event:3", "at": 3, "event": { "_tag": "Update", "source": 7 } },
@@ -241,76 +242,76 @@ describe("ChatView.fromEntries", () => {
       }`)
     )
 
-    expect(update.messages.map((message) => message.id)).toEqual([hi.id, "app-event:4"])
+    expect(change.items.map((item) => item.id)).toEqual([hi.id, "app-event:4"])
   })
 
   it("types a handler's updates with what it shows, so they must fit its RPC's schema", () => {
-    const Rpcs = RpcGroup.make(Rpc.make("Subscribe", { success: ChatView.Update([Update]), stream: true }))
+    const Rpcs = RpcGroup.make(Rpc.make("Subscribe", { success: Timeline.Change([Update]), stream: true }))
 
     const layers = [
-      Rpcs.toLayer({ Subscribe: () => Stream.empty.pipe(ChatView.updates(Viewing, { show: [Update] })) }),
-      // Showing fewer than the schema names is safe: the client never gets those rows.
-      Rpcs.toLayer({ Subscribe: () => Stream.empty.pipe(ChatView.updates(Viewing)) }),
-      // @ts-expect-error a row the schema doesn't name couldn't be encoded, so this doesn't compile
-      Rpcs.toLayer({ Subscribe: () => Stream.empty.pipe(ChatView.updates(Viewing, { show: [Update, Note] })) })
+      Rpcs.toLayer({ Subscribe: () => Stream.empty.pipe(Timeline.changes(Viewing, { show: [Update] })) }),
+      // Showing fewer than the schema names is safe: the client never gets those items.
+      Rpcs.toLayer({ Subscribe: () => Stream.empty.pipe(Timeline.changes(Viewing)) }),
+      // @ts-expect-error an item the schema doesn't name couldn't be encoded, so this doesn't compile
+      Rpcs.toLayer({ Subscribe: () => Stream.empty.pipe(Timeline.changes(Viewing, { show: [Update, Note] })) })
     ]
 
     expect(layers).toHaveLength(3)
   })
 
   it("says when the chat was deleted, and that nothing works in it any more, even mid-turn", () => {
-    const shown = view([
+    const shown = timeline([
       hi,
       AssistantEvent.TurnStarted.make({ assistant: "test" }),
       AssistantEvent.ChatDeleted.make({})
     ])
 
     expect(shown.deleted).toBe(true)
-    expect(ChatView.isIdle(shown)).toBe(true)
-    expect(shown.messages.map((message) => message.id)).toEqual([hi.id])
+    expect(Timeline.isIdle(shown)).toBe(true)
+    expect(shown.items.map((item) => item.id)).toEqual([hi.id])
   })
 })
 
-describe("ChatView.apply", () => {
+describe("Timeline.apply", () => {
   it("replaces changed messages in place, adds new ones after, and changes nothing applied twice", () => {
-    const first: ChatView.Update = {
+    const first: Timeline.Change = {
       seq: 2,
-      messages: [
-        ChatView.UserMessage.make({ id: hi.id, text: "hi", at: 1 }),
-        ChatView.AssistantMessage.make({ id: "m1", text: "Pick", at: 2 })
+      items: [
+        Timeline.UserMessage.make({ id: hi.id, text: "hi", at: 1 }),
+        Timeline.AssistantMessage.make({ id: "m1", text: "Pick", at: 2 })
       ],
       activity: { working: true, specialists: [] },
       failed: false,
       deleted: false
     }
 
-    const second: ChatView.Update = {
+    const second: Timeline.Change = {
       seq: 5,
-      messages: [
-        ChatView.AssistantMessage.make({
+      items: [
+        Timeline.AssistantMessage.make({
           id: "m1",
           text: "Pick",
           at: 2,
           block: { kind: "k", props: null, status: "closed" }
         }),
-        ChatView.AssistantMessage.make({ id: "m2", text: "Done", at: 5 })
+        Timeline.AssistantMessage.make({ id: "m2", text: "Done", at: 5 })
       ],
       activity: { working: false, specialists: [] },
       failed: false,
       deleted: false
     }
 
-    const once = [first, second].reduce(ChatView.apply, ChatView.empty)
-    const twice = [first, second, first, second].reduce(ChatView.apply, ChatView.empty)
+    const once = [first, second].reduce(Timeline.apply, Timeline.empty)
+    const twice = [first, second, first, second].reduce(Timeline.apply, Timeline.empty)
 
-    expect(once.messages.map((message) => message.id)).toEqual([hi.id, "m1", "m2"])
+    expect(once.items.map((item) => item.id)).toEqual([hi.id, "m1", "m2"])
     expect(once.seq).toBe(5)
     expect(twice).toEqual(once)
   })
 })
 
-describe("updates", () => {
-  it.live("folds to the log's view, in JSON over the wire, and after a seq streams only what came since", () =>
+describe("Timeline.changes", () => {
+  it.live("folds to the log's timeline, in JSON over the wire, and after a seq streams only what came since", () =>
     Effect.gen(function* () {
       const model = yield* Scripted.make((request) =>
         Scripted.lastInput(request).includes("shipped") ? Scripted.reply("It shipped.") : Scripted.reply("Hi!")
@@ -324,21 +325,21 @@ describe("updates", () => {
         const log = yield* collectUntil(Updating, chat, (es) => turnsDone(es) >= 2)
 
         // As an RPC would: encoded with its schema, to JSON text and back.
-        const Wire = ChatView.Update([Update])
+        const Wire = Timeline.Change([Update])
 
         const folded = yield* (yield* Updating).subscribe(chat).pipe(
-          ChatView.updates(Updating, { show: [Update] }),
-          Stream.map((update) =>
-            Schema.decodeUnknownSync(Wire)(JSON.parse(JSON.stringify(Schema.encodeSync(Wire)(update))))
+          Timeline.changes(Updating, { show: [Update] }),
+          Stream.map((change) =>
+            Schema.decodeUnknownSync(Wire)(JSON.parse(JSON.stringify(Schema.encodeSync(Wire)(change))))
           ),
-          ChatView.views,
+          Timeline.fold,
           Stream.takeUntil((shown) => shown.seq >= log.at(-1)!.seq),
           Stream.runLast,
           Effect.map(Option.getOrThrow)
         )
 
         // Data-first, to cover both forms.
-        const since = yield* ChatView.updates((yield* Updating).subscribe(chat), Updating, {
+        const since = yield* Timeline.changes((yield* Updating).subscribe(chat), Updating, {
           show: [Update],
           after: first.at(-1)!.seq
         }).pipe(
@@ -348,8 +349,8 @@ describe("updates", () => {
 
         // Without `show`, none of the app's events reach the client.
         const hidden = yield* (yield* Updating).subscribe(chat).pipe(
-          ChatView.updates(Updating),
-          ChatView.views,
+          Timeline.changes(Updating),
+          Timeline.fold,
           Stream.takeUntil((shown) => shown.seq >= log.at(-1)!.seq),
           Stream.runLast,
           Effect.map(Option.getOrThrow)
@@ -362,19 +363,19 @@ describe("updates", () => {
         )
       )
 
-      const shown = (messages: ReadonlyArray<ChatView.Message<Update>>) =>
-        messages.map((message) =>
-          Match.valueTags(message, {
+      const shown = (items: ReadonlyArray<Timeline.Item<Update>>) =>
+        items.map((item) =>
+          Match.valueTags(item, {
             UserMessage: (sent) => sent.text,
             AssistantMessage: (sent) => sent.text,
-            Update: (row) => `update: ${row.event.payload["status"]}`
+            Update: (eventItem) => `update: ${eventItem.event.payload["status"]}`
           })
         )
 
-      expect(folded).toEqual(ChatView.fromEntries(log, Updating, { show: [Update] }))
-      expect(shown(folded.messages)).toEqual(["hi", "Hi!", "update: shipped", "It shipped."])
-      expect(since.flatMap((changes) => shown(changes.messages))).toEqual(["update: shipped", "It shipped."])
-      expect(shown(hidden.messages)).toEqual(["hi", "Hi!", "It shipped."])
+      expect(folded).toEqual(Timeline.fromEntries(log, Updating, { show: [Update] }))
+      expect(shown(folded.items)).toEqual(["hi", "Hi!", "update: shipped", "It shipped."])
+      expect(since.flatMap((change) => shown(change.items))).toEqual(["update: shipped", "It shipped."])
+      expect(shown(hidden.items)).toEqual(["hi", "Hi!", "It shipped."])
     })
   )
 })

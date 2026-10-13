@@ -62,11 +62,6 @@ export * as Chats from "./Chats.ts"
 /**
  * @since 0.1.0
  */
-export * as ChatView from "./ChatView.ts"
-
-/**
- * @since 0.1.0
- */
 export * as Compaction from "./Compaction.ts"
 
 /**
@@ -103,6 +98,11 @@ export * as Skill from "./Skill.ts"
  * @since 0.1.0
  */
 export * as Specialist from "./Specialist.ts"
+
+/**
+ * @since 0.3.0
+ */
+export * as Timeline from "./Timeline.ts"
 
 /**
  * @since 0.1.0

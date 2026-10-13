@@ -7,7 +7,7 @@ const modules = [
   "AssistantEvent",
   "ChatLog",
   "Chats",
-  "ChatView",
+  "Timeline",
   "CurrentChat",
   "AssistantLoop",
   "Block",

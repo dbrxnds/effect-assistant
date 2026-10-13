@@ -9,7 +9,7 @@ import { AssistantEvent } from "effect-assistant"
 Defines the events that can happen in a chat.
 
 A chat is an append-only log of these events, and the log is the source of truth. A chat client
-receives the part of the log its user sees (`ChatView`), and the model's history is rebuilt
+receives the part of the log its user sees (its `Timeline`), and the model's history is rebuilt
 from the log before every model call. Besides the library's events (`AssistantEvent`), a
 log holds the application's own events (`StoredAppEvent`).
 

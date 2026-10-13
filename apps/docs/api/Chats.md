@@ -99,55 +99,6 @@ interface Service {
   /** Returns the chat, or fails with a `GetChatError` that says why it can't be used. */
   readonly get: (chatId: ChatId) => Effect.Effect<ChatRecord, GetChatError>
 }
-
-/**
- * Service that tells the library which of the app's chats exist.
- *
- * **Details**
- *
- * By default every chat exists from its first input, and a chat is deleted only when its log
- * says so (`ChatDeleted`). Provide your own implementation to have the app decide. Provide it
- * where you provide the `ChatLog`, so the engine and your server see the same one.
- *
- * **Example** (Reading chats from the app's own table)
- *
- * ```ts
- * import { type ChatId, Chats } from "effect-assistant"
- * import * as Effect from "effect/Effect"
- * import * as Layer from "effect/Layer"
- * import * as SqlClient from "effect/sql/SqlClient"
- *
- * const ChatsLive = Layer.effect(
- *   Chats.Chats,
- *   Effect.gen(function* () {
- *     const sql = yield* SqlClient.SqlClient
- *
- *     return {
- *       get: Effect.fn(function* (chatId: ChatId.ChatId) {
- *         const [row] = yield* sql<{ readonly deleted_at: number | null }>`
- *           SELECT deleted_at FROM chats WHERE chat_id = ${chatId}
- *         `.pipe(Effect.orDie)
- *
- *         if (row === undefined) {
- *           return yield* new Chats.GetChatError({ chatId, reason: "NotFound" })
- *         }
- *         if (row.deleted_at !== null) {
- *           return yield* new Chats.GetChatError({ chatId, reason: "Deleted" })
- *         }
- *
- *         return { chatId }
- *       })
- *     }
- *   })
- * )
- * ```
- *
- * @category services
- * @since 0.1.0
- */
-export const Chats: Context.Reference<Service> = Context.Reference<Service>("effect-assistant/Chats", {
-  defaultValue: () => ({ get: (chatId) => Effect.succeed({ chatId }) })
-})
 ```
 
 <small>Since 0.1.0</small>

@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
-import { AssistantEvent, ChatId, ChatView, Compaction, InputId } from "../src/index.ts"
+import { AssistantEvent, ChatId, Timeline, Compaction, InputId } from "../src/index.ts"
 import * as History from "../src/internal/history.ts"
 
 const chatId = Effect.runSync(ChatId.make())
@@ -50,11 +50,11 @@ describe("attachments", () => {
     expect(decoded.attachments).toEqual([flyer])
   })
 
-  it("shows the files in the chat view", () => {
-    const shown = ChatView.fromEntries(entries([withFile]))
+  it("shows the files in the chat's timeline", () => {
+    const shown = Timeline.fromEntries(entries([withFile]))
 
-    expect(shown.messages).toEqual([
-      ChatView.UserMessage.make({
+    expect(shown.items).toEqual([
+      Timeline.UserMessage.make({
         id: withFile.id,
         text: "Print this please",
         attachments: [flyer],

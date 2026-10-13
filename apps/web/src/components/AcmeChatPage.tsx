@@ -11,7 +11,7 @@ import { useAtom, useAtomMount, useAtomSet, useAtomValue } from "@effect/atom-re
 import { useNavigate } from "@tanstack/react-router"
 import * as AssistantEvent from "effect-assistant/AssistantEvent"
 import type * as ChatId from "effect-assistant/ChatId"
-import type * as ChatView from "effect-assistant/ChatView"
+import type * as Timeline from "effect-assistant/Timeline"
 import * as InputId from "effect-assistant/InputId"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -27,7 +27,7 @@ import { BlockContext, type BlockContextValue } from "./Blocks.tsx"
 import { Message, Typing } from "./Message.tsx"
 import { ThreadList } from "./ThreadList.tsx"
 
-const toThreadMessage = (message: ChatView.Message): ThreadMessageLike =>
+const toThreadMessage = (message: Timeline.Item): ThreadMessageLike =>
   Predicate.isTagged(message, "UserMessage")
     ? { id: message.id, role: "user", content: message.text }
     : { id: message.id, role: "assistant", content: message.text, status: { type: "complete", reason: "stop" } }
@@ -65,10 +65,10 @@ export function AcmeChatPage() {
   const blocks = useMemo<BlockContextValue>(
     () => ({
       chatId,
-      byId: new Map(state.messages.map((message) => [message.id, message])),
+      byId: new Map(state.items.map((item) => [item.id, item])),
       respond: (answer) => void send(answer)
     }),
-    [chatId, state.messages, send]
+    [chatId, state.items, send]
   )
 
   const openChat = (next: ChatId.ChatId) => {
@@ -100,8 +100,8 @@ export function AcmeChatPage() {
     if (target === chatId) openChat(demoChatId)
   }
 
-  const runtime = useExternalStoreRuntime<ChatView.Message>({
-    messages: [...state.messages],
+  const runtime = useExternalStoreRuntime<Timeline.Item>({
+    messages: [...state.items],
     isRunning: false,
     convertMessage: toThreadMessage,
     onNew

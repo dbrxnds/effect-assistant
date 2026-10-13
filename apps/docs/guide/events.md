@@ -1,7 +1,7 @@
 # The event log
 
 Every chat is an append-only log of [`AssistantEvent`](/api/AssistantEvent)s.
-A chat client gets what its user sees of it (its [view](./client)), and the
+A chat client gets what its user sees of it (its [timeline](./client)), and the
 model's history is rebuilt from it before every model call.
 
 **Example** (Print a chat's log)
@@ -61,7 +61,7 @@ old logs readable:
 - New event types can be added in minor versions. Code that switches over
   `AssistantEvent` needs a default case, which skips events it doesn't know.
 - Existing events only gain optional fields, and are never renamed.
-- UIs should build on [`ChatView`](./client), which is the stable surface,
+- UIs should build on the [`Timeline`](./client), which is the stable surface,
   rather than on the events themselves.
 
 ```ts
@@ -98,11 +98,11 @@ InputId.fromKey(`${orderId}:shipped`)
   and debugging, not for a client. A reader that reconnects passes the last
   `seq` it has, `subscribe(chatId, { after: seq })`, and gets only what's
   new.
-- Piped through `ChatView.updates(MyAssistant)`, it streams what the chat's
+- Piped through `Timeline.changes(MyAssistant)`, it streams what the chat's
   user sees, for a [chat client](./client). It never has the assistant's
   own work. A client that reconnects passes its `seq` there,
-  `ChatView.updates(MyAssistant, { after: seq })`, not to `subscribe`: the
-  view is folded from the whole log, and only the updates up to `after`
+  `Timeline.changes(MyAssistant, { after: seq })`, not to `subscribe`: the
+  timeline is folded from the whole log, and only the changes up to `after`
   are skipped.
 - An open chat keeps its entries in memory: turns and tools read them with
   `CurrentChat`'s `entries`, not from the log.
@@ -162,7 +162,7 @@ Server-side code that folds the log one entry at a time uses
 events that came in through `submit` count as inputs; `subscribe` streams
 them decoded, without that mark, so there a turn shows from its
 `TurnStarted`. A chat client gets the same from its
-[view](./client)'s `activity`. A workflow waiting on a timer
+[timeline](./client)'s `activity`. A workflow waiting on a timer
 isn't working: the assistant took its last step, and the workflow's next
 event wakes it.
 

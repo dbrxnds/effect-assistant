@@ -1,5 +1,5 @@
 /**
- * Renderers for the blocks Acme can put in a message. Each message's view
+ * Renderers for the blocks Acme can put in a message. Each message in the timeline
  * says where its block stands. Answering sends a `BlockAnswer`; once
  * answered, a block shows the answer and stops taking input. An order or a
  * campaign has no answer: its button places it through the API, which tells
@@ -11,7 +11,7 @@ import { OrderRefused } from "@acme/demo-shared/Rpc"
 import type * as AssistantEvent from "effect-assistant/AssistantEvent"
 import * as BlockKit from "effect-assistant/BlockKit"
 import type * as ChatId from "effect-assistant/ChatId"
-import type * as ChatView from "effect-assistant/ChatView"
+import type * as Timeline from "effect-assistant/Timeline"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
@@ -21,7 +21,7 @@ import * as AcmeRpc from "~/lib/AcmeRpc.ts"
 /** What block renderers need from the page: the chat, its messages, and a way to answer. */
 export interface BlockContextValue {
   readonly chatId: ChatId.ChatId | undefined
-  readonly byId: ReadonlyMap<string, ChatView.Message>
+  readonly byId: ReadonlyMap<string, Timeline.Item>
   readonly respond: (answer: AssistantEvent.BlockAnswer) => void
 }
 

@@ -93,7 +93,8 @@ Effect.runPromise(program.pipe(Effect.provide(AppLive)))
    calling `send_user_message`, and ends its turn with `wait`. Tool output and the model's
    working notes stay out of the chat; the user sees only what it chose to say.
 5. **Readers follow the log.** `subscribe` streams every event, for your server and tests. Piped through
-   `ChatView.updates`, it streams what the user sees: messages, blocks, and whether something is working.
+   `Timeline.changes`, it streams the chat's timeline, what the user sees: messages, blocks, and whether something is
+   working.
 
 Because a turn is a stream, you change it with ordinary stream code: run something after the reply with
 `Stream.concat`, provide services with `Stream.provideService`. Don't buffer it: events would run ahead of the
@@ -109,7 +110,7 @@ above, and `instructions` is a prompt.
 ### A chat UI
 
 Your server is the edge between users and chats: it checks the user may use a chat, then passes calls through.
-The client gets the chat's view, never its log.
+The client gets the chat's timeline, never its log.
 
 ```ts
 const send = (chatId: ChatId.ChatId, inputId: InputId.InputId, text: string) =>
@@ -117,19 +118,20 @@ const send = (chatId: ChatId.ChatId, inputId: InputId.InputId, text: string) =>
 
 const watch = (chatId: ChatId.ChatId, after?: number) =>
   Stream.unwrap(
-    MyAssistant.useSync((assistant) => assistant.subscribe(chatId).pipe(ChatView.updates(MyAssistant, { after })))
+    MyAssistant.useSync((assistant) => assistant.subscribe(chatId).pipe(Timeline.changes(MyAssistant, { after })))
   )
 ```
 
-- `ChatView.updates` turns the chat's log into the chat as the user sees it: messages, blocks, `activity`,
-  `deleted`. The client folds it with `ChatView.views` (or `ChatView.apply`, from `ChatView.empty`).
+- `Timeline.changes` turns the chat's log into its timeline, the chat as the user sees it: `items` (messages and
+  blocks), `activity`, `deleted`. The client folds the changes with `Timeline.fold` (or `Timeline.apply`, from
+  `Timeline.empty`).
 - None of your own events reach the client unless the server names them:
-  `ChatView.updates(MyAssistant, { show: [OrderPlaced] })`, with `ChatView.Update([OrderPlaced])` as the RPC's success
-  schema (a handler that shows more than the schema names doesn't compile). Each one is a row typed with its event:
+  `Timeline.changes(MyAssistant, { show: [OrderPlaced] })`, with `Timeline.Change([OrderPlaced])` as the RPC's success
+  schema (a handler that shows more than the schema names doesn't compile). Each one is an item typed with its event:
   its `_tag` is the event's and `event` is the event, so
-  `Match.valueTags(message, { UserMessage, AssistantMessage, OrderPlaced: (row) => row.event })`.
-- `after` goes to `ChatView.updates`, not to `subscribe`: the view is folded from the whole log, and only the
-  updates up to `after` are skipped.
+  `Match.valueTags(item, { UserMessage, AssistantMessage, OrderPlaced: (placed) => placed.event })`.
+- `after` goes to `Timeline.changes`, not to `subscribe`: the timeline is folded from the whole log, and only the
+  changes up to `after` are skipped.
 - The client picks the `InputId`, so a retried send is stored once.
 - Check the user may use the chat before calling either.
 
@@ -326,7 +328,7 @@ const MyAssistantLive = MyAssistant.toLayer((turn) =>
 Background work reports into the chat with events of your own: a workflow's progress, a webhook. The
 definition lists their schemas. An event that comes in through `submit` starts a turn, like a message; one a
 turn appends itself never does. The model reads one as your history view maps it, and the user sees it only
-if the assistant tells them, or you `show` it in the view.
+if the assistant tells them, or you `show` it on the timeline.
 
 ```ts
 class ShipmentUpdated extends Schema.TaggedClass<ShipmentUpdated>()("ShipmentUpdated", {
