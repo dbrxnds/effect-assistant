@@ -35,6 +35,13 @@ const WaitFlag = Schema.Boolean.annotate({
 
 const endsWithMessage = Schema.decodeUnknownOption(Schema.Struct({ wait: Schema.Literal(true) }))
 
+const messageText = Schema.decodeUnknownOption(Schema.Struct({ text: Schema.String }))
+
+// A message the user reads: the call's text isn't empty.
+/** @internal */
+export const isUserMessage = (call: AssistantEvent.ToolCallPart): boolean =>
+  call.name === sendUserMessageName && Option.exists(messageText(call.params), ({ text }) => text.trim() !== "")
+
 /** @internal */
 export const isTurnEnding = (call: AssistantEvent.ToolCallPart): boolean =>
   call.name === waitToolName || (call.name === sendUserMessageName && Option.isSome(endsWithMessage(call.params)))

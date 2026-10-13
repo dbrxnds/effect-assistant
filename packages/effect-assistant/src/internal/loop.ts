@@ -18,7 +18,7 @@ import type * as Instructions from "../Instructions.ts"
 import * as History from "./history.ts"
 import * as Telemetry from "./telemetry.ts"
 import * as Toolkits from "./toolkit.ts"
-import { isTurnEnding } from "./tools.ts"
+import { isTurnEnding, isUserMessage } from "./tools.ts"
 
 /** @internal */
 export type Event =
@@ -158,6 +158,17 @@ interface Ran {
   readonly waiting: boolean
 }
 
+// The approval shows the call, not what it does: the user learns that from the assistant's message beside it.
+const unexplained = (call: AssistantEvent.ToolCallPart) =>
+  AssistantEvent.ToolResult.make({
+    callId: call.id,
+    tool: call.name,
+    ...Toolkits.failed(
+      `Not sent for approval: the user would see buttons without knowing what they approve. In one step, send them a message with send_user_message saying what ${call.name} will do (what, to whom, how many), and call ${call.name} again.`,
+      "ApprovalNeedsMessage"
+    )
+  })
+
 // Every `ToolStarted` is stored before any call runs; a call that waits for approval doesn't start.
 const runCalls = <R, S, E, R2>(
   tools: Toolkits.Tools<R>,
@@ -179,10 +190,16 @@ const runCalls = <R, S, E, R2>(
         Stream.concat(
           Stream.unwrap(
             Effect.gen(function* () {
+              const explained = pending.some(({ call }) => isUserMessage(call))
+
               const done = yield* Effect.forEach(
                 pending,
                 ({ call }, i): Effect.Effect<Event, never, R> =>
-                  waits[i] === true ? awaitApproval(call) : runCall(tools, call),
+                  waits[i] !== true
+                    ? runCall(tools, call)
+                    : explained
+                      ? awaitApproval(call)
+                      : Effect.succeed(unexplained(call)),
                 { concurrency: "unbounded" }
               )
 
