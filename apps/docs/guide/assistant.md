@@ -33,12 +33,12 @@ export const MyAssistant = Assistant.make("my-assistant", {
 
 On the definition:
 
-| Member             | What it is                                                                                                    |
-| ------------------ | ------------------------------------------------------------------------------------------------------------- |
-| `toLayer(handler)` | The handler's layer. It registers the assistant with the [engine](./engines) and provides its service.        |
-| `layerClient`      | The service only, for a process that reaches chats another one runs, like a web server in front of a cluster. |
-| `Chat`             | The key of the chat its turns run in, typed with its events: `yield* MyAssistant.Chat`.                       |
-| `Entry`            | The schema of the chat's entries, the assistant's own events included, in JSON.                               |
+| Member             | What it is                                                                                                                                                |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `toLayer(handler)` | The handler's layer. It registers the assistant with the [engine](./engines) and provides its service.                                                    |
+| `layerClient`      | The service only, for a process that reaches chats another one runs, like a web server in front of a cluster (with `AssistantEngine.layerClusterClient`). |
+| `Chat`             | The key of the chat its turns run in, typed with its events: `yield* MyAssistant.Chat`.                                                                   |
+| `Entry`            | The schema of the chat's entries, the assistant's own events included, in JSON.                                                                           |
 
 On the service, `yield* MyAssistant`:
 

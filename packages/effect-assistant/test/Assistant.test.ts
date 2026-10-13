@@ -759,4 +759,54 @@ describe("tools found on demand, and skills", () => {
       expect(text(entries)).toContain("buddy lunch")
     })
   )
+
+  it.live("leaves out a skill whose tools the loop doesn't have, from the catalog and load_skill", () =>
+    Effect.gen(function* () {
+      const model = yield* Scripted.make((request) =>
+        Scripted.hasCalled(request, "load_skill")
+          ? Scripted.reply("Done.")
+          : [Scripted.call("load_skill", { name: "Invoicing" })]
+      )
+
+      const skills = [
+        Skill.make("Parking", {
+          description: "Use when someone asks about parking.",
+          instructions: "Check parking_availability for their office.",
+          tools: [Parking]
+        }),
+        Skill.make("Invoicing", {
+          description: "Use when someone asks about an invoice.",
+          instructions: "Look it up with invoice_lookup.",
+          tools: [Invoices]
+        }),
+        Skill.make("Greeting", {
+          description: "Use when someone says hello.",
+          instructions: "Say hello back."
+        })
+      ]
+
+      const parkingOnly = withHandlers(Toolkit.make(Parking), {
+        parking_availability: ({ office }) => Effect.succeed({ office, freeSpots: 37 })
+      })
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* (yield* TestAssistant).submit(chat, say("Where is invoice 12?"))
+
+        return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
+      }).pipe(Effect.provide(memoryAssistant(withTools({ instructions, toolkit: parkingOnly, skills }), model.layer)))
+
+      const [request] = yield* model.requests
+
+      expect(request?.system).toContain("- Parking: Use when someone asks about parking.")
+      expect(request?.system).toContain("- Greeting: Use when someone says hello.")
+      expect(request?.system).not.toContain("Invoicing")
+      // load_skill knows no skill by that name.
+      expect(
+        entries.flatMap(({ event }) =>
+          Predicate.isTagged(event, "ToolResult") && event.tool === "load_skill" ? [event.outcome] : []
+        )
+      ).toEqual(["failure"])
+    })
+  )
 })

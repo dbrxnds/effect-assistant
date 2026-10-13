@@ -127,7 +127,10 @@ export interface LoopOptions<T extends Record<string, Tool.Any> = Record<never, 
   readonly instructions: string | Instructions.Resolved
   /** The loop's tools, as a native toolkit whose handlers come from the layer. */
   readonly toolkit?: Toolkit.Toolkit<T> | undefined
-  /** Playbooks, listed as a catalog in the prompt and loaded with `load_skill` when one matches. */
+  /**
+   * Playbooks, listed as a catalog in the prompt and loaded with `load_skill` when one matches. A
+   * skill made with `tools` is left out when the toolkit lacks one of them.
+   */
   readonly skills?: ReadonlyArray<Skill<RS>> | undefined
   /** The model calls allowed per brief. Defaults to 8. */
   readonly maxSteps?: number | undefined

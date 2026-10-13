@@ -8,6 +8,17 @@ import type { Skill } from "../Skill.ts"
 import * as ToolFailure from "../ToolFailure.ts"
 import * as Toolkits from "./toolkit.ts"
 
+// A skill whose tools the loop doesn't have would send the model after calls it can't make.
+/** @internal */
+export const available = <R>(
+  skills: ReadonlyArray<Skill<R>>,
+  definitions: ReadonlyArray<Tool.Any>
+): ReadonlyArray<Skill<R>> => {
+  const names = new Set(definitions.map((tool) => tool.name))
+
+  return skills.filter((skill) => (skill.tools ?? []).every((tool) => names.has(tool.name)))
+}
+
 /** @internal */
 export const toTools = <R>(skills: ReadonlyArray<Skill<R>>): Toolkits.Tools<R> => {
   if (skills.length === 0) return Toolkits.empty

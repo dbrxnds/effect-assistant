@@ -66,7 +66,8 @@ export interface LoopOptions<T extends Record<string, Tool.Any> = Record<never, 
   readonly toolkit?: Toolkit.Toolkit<T> | undefined
   /**
    * Playbooks the model can follow. The prompt lists them as a catalog, and the model loads one
-   * with `load_skill` when a task matches it.
+   * with `load_skill` when a task matches it. A skill made with `tools` is left out when the turn's
+   * tools lack one of them.
    */
   readonly skills?: ReadonlyArray<Skill<RS>> | undefined
   /** The maximum number of model calls per turn. Defaults to 16. */
@@ -387,9 +388,9 @@ export interface Assistant<
    *
    * export const MyAssistant = Assistant.make("my-assistant")
    *
-   * // Requires `ChatLog` and `Sharding`. The cluster's runners run the chats.
+   * // Requires `Sharding`. The cluster's runners run the chats, with `AssistantEngine.layerCluster`.
    * const MyAssistantClient = MyAssistant.layerClient.pipe(
-   *   Layer.provide(AssistantEngine.layerCluster)
+   *   Layer.provide(AssistantEngine.layerClusterClient)
    * )
    * ```
    */

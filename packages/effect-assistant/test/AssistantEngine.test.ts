@@ -3,8 +3,10 @@ import * as Response from "effect/ai/Response"
 import * as Tool from "effect/ai/Tool"
 import * as Toolkit from "effect/ai/Toolkit"
 import * as TestRunner from "effect/cluster/TestRunner"
+import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
@@ -85,6 +87,57 @@ describe("AssistantEngine.layerCluster", () => {
 
       expect(AssistantEvent.assistantTexts(entries)).toEqual(["Hi!"])
     }).pipe(Effect.provide(Layer.mergeAll(ChatLog.layerMemory, TestRunner.layer)))
+  )
+})
+
+describe("AssistantEngine.layerClusterClient", () => {
+  it.live("reaches a chat the cluster runs, without a ChatLog of its own", () =>
+    Effect.gen(function* () {
+      const chat = yield* ChatId.make()
+      const Greeter = Assistant.make("greeter")
+
+      const runner = Greeter.toLayer(simple({ instructions: "Greet." })).pipe(
+        Layer.provide(AssistantEngine.layerCluster),
+        Layer.provide(Scripted.layer(() => Scripted.reply("Hi!"))),
+        Layer.provide(ChatLog.layerMemory)
+      )
+
+      // Only `Sharding`: the runner keeps the log.
+      const client = Greeter.layerClient.pipe(Layer.provide(AssistantEngine.layerClusterClient))
+
+      const entries = yield* Effect.scoped(
+        Layer.build(runner).pipe(
+          Effect.andThen(
+            Effect.gen(function* () {
+              yield* (yield* Greeter).submit(chat, say("hello"))
+
+              return yield* collectUntil(Greeter, chat, (es) => turnsDone(es) >= 1)
+            }).pipe(Effect.provide(client))
+          )
+        )
+      )
+
+      expect(AssistantEvent.assistantTexts(entries)).toEqual(["Hi!"])
+    }).pipe(Effect.provide(TestRunner.layer))
+  )
+
+  it.live("refuses an assistant's handler, since it runs no chats", () =>
+    Effect.gen(function* () {
+      const Greeter = Assistant.make("greeter")
+
+      const exit = yield* Effect.scoped(
+        Layer.build(
+          Greeter.toLayer(simple({ instructions: "Greet." })).pipe(
+            Layer.provide(AssistantEngine.layerClusterClient),
+            Layer.provide(Scripted.unused)
+          )
+        )
+      ).pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "").toContain(
+        "The greeter assistant can't register with AssistantEngine.layerClusterClient"
+      )
+    }).pipe(Effect.provide(TestRunner.layer))
   )
 })
 

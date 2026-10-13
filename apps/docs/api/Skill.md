@@ -24,6 +24,11 @@ Write the description as a trigger ("Use when…"), since it's all the model see
 the skill. The instructions are text, or an Effect that is resolved each time the skill is
 loaded.
 
+`tools` lists the tools the instructions use. A loop whose toolkit lacks any of them, matched by
+name, leaves the skill out of its catalog and of `load_skill`, so a loop that gets its tools per
+user (by role, say) never offers a playbook it can't follow. A tool that only `ToolDiscovery`
+finds isn't in the toolkit, so it doesn't count. Without `tools`, every loop offers the skill.
+
 **Example** (Defining a playbook for ordering campaigns)
 
 ```ts
@@ -41,6 +46,26 @@ const MyAssistantLive = MyAssistant.toLayer((turn) =>
 )
 ```
 
+**Example** (Offering a skill only with the tools it uses)
+
+```ts
+import { Skill } from "effect-assistant"
+import * as Tool from "effect/ai/Tool"
+import * as Schema from "effect/Schema"
+
+const StartCampaign = Tool.make("start_campaign", {
+  parameters: Schema.Struct({ campaignId: Schema.String, budget: Schema.Finite }),
+  success: Schema.String
+})
+
+// Left out of a loop whose toolkit has no start_campaign, like a viewer's.
+const orderingCampaigns = Skill.make("Ordering a campaign", {
+  description: "Use when the user wants to order or start a campaign.",
+  instructions: "When you know who it should reach and the budget, call start_campaign.",
+  tools: [StartCampaign]
+})
+```
+
 ```ts
 const make: <R = never>(
   name: string,
@@ -49,6 +74,8 @@ const make: <R = never>(
     readonly description: string
     /** Text, or an Effect resolved each time the skill is loaded. */
     readonly instructions: Instructions.Instructions<R>
+    /** The tools its instructions use: a loop whose toolkit lacks one leaves the skill out. */
+    readonly tools?: ReadonlyArray<Tool.Any> | undefined
   }
 ) => Skill<R>
 ```
@@ -70,6 +97,11 @@ interface Skill<R = never> {
   readonly description: string
   /** Text, or an Effect resolved each time the skill is loaded. */
   readonly instructions: Instructions.Instructions<R>
+  /**
+   * The tools its instructions use. A loop offers the skill only when its toolkit has every one of
+   * them, matched by name. Unset, a loop always offers it.
+   */
+  readonly tools?: ReadonlyArray<Tool.Any> | undefined
 }
 ```
 

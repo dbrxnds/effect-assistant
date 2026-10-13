@@ -1,11 +1,12 @@
 /**
- * This module provides the `AssistantEngine` service, which runs assistants' chats, and its two
+ * This module provides the `AssistantEngine` service, which runs assistants' chats, and its
  * implementations.
  *
  * An assistant's `toLayer` registers the assistant with the engine, and the assistant's `submit`
  * and `subscribe` go through it. Pick one engine for the app, as with a workflow engine.
  * {@link layerMemory} runs chats in the process, for tests and single-process apps.
- * {@link layerCluster} runs each chat as a cluster entity, so a turn cut off by a crash resumes.
+ * {@link layerCluster} runs each chat as a cluster entity, so a turn cut off by a crash resumes, and
+ * {@link layerClusterClient} reaches those chats from a process that runs none.
  *
  * @since 0.1.0
  */
@@ -212,6 +213,59 @@ const Delete = Rpc.make("Delete")
 
 const chatEntity = (assistant: string) => Entity.make(`Assistant/${assistant}`, [Submit, Subscribe, Delete])
 
+type EngineClient = Omit<AssistantEngine["Service"], "register">
+
+// Entity clients are made on first use, so a process that registers no assistant can still reach its chats.
+const makeClusterClient = Effect.gen(function* () {
+  const context = yield* Effect.context<Sharding.Sharding>()
+  const clients = new Map<string, EntityClient>()
+
+  const clientOf = Effect.fnUntraced(function* (assistant: string) {
+    const known = clients.get(assistant)
+
+    if (known !== undefined) return known
+
+    const makeClient = yield* chatEntity(assistant).client.pipe(Effect.provide(context))
+
+    const client: EntityClient = {
+      submit: (chatId, input) => makeClient(chatId).Submit({ input }, { discard: true }).pipe(Effect.orDie),
+      subscribe: (chatId, after) => makeClient(chatId).Subscribe({ after }).pipe(Stream.orDie),
+      delete: (chatId) => makeClient(chatId).Delete().pipe(Effect.orDie)
+    }
+
+    clients.set(assistant, client)
+
+    return client
+  })
+
+  const engine: EngineClient = {
+    submit: Effect.fn("AssistantEngine.submit")(function* (
+      assistant: string,
+      chatId: ChatId,
+      input: AssistantEvent.Input | AssistantEvent.StoredAppEvent
+    ) {
+      const client = yield* clientOf(assistant)
+
+      yield* client.submit(chatId, input)
+    }),
+    subscribe: (assistant, chatId, after) =>
+      Stream.unwrap(
+        Effect.gen(function* () {
+          const client = yield* clientOf(assistant)
+
+          return client.subscribe(chatId, after)
+        })
+      ),
+    delete: Effect.fn("AssistantEngine.delete")(function* (assistant: string, chatId: ChatId) {
+      const client = yield* clientOf(assistant)
+
+      yield* client.delete(chatId)
+    })
+  }
+
+  return engine
+})
+
 /**
  * Layer that runs chats as cluster entities, one entity per chat, keyed by chat id.
  *
@@ -249,6 +303,7 @@ const chatEntity = (assistant: string) => Entity.make(`Assistant/${assistant}`, 
  * ```
  *
  * @see {@link layerMemory} for running chats in one process
+ * @see {@link layerClusterClient} for a process that only reaches chats the cluster runs
  *
  * @category layers
  * @since 0.1.0
@@ -258,7 +313,6 @@ export const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Shardin
   Effect.gen(function* () {
     const context = yield* Effect.context<ChatLog | Sharding.Sharding>()
     const sharding = yield* Sharding.Sharding
-    const clients = new Map<string, EntityClient>()
 
     const register = Effect.fnUntraced(function* (registration: Turns.Registration) {
       const ChatEntity = chatEntity(registration.definition.name)
@@ -295,49 +349,62 @@ export const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Shardin
       })
     })
 
-    // Made on first use, so a process that registers no assistant can still reach its chats.
-    const clientOf = Effect.fnUntraced(function* (assistant: string) {
-      const known = clients.get(assistant)
-
-      if (known !== undefined) return known
-
-      const makeClient = yield* chatEntity(assistant).client.pipe(Effect.provide(context))
-
-      const client: EntityClient = {
-        submit: (chatId, input) => makeClient(chatId).Submit({ input }, { discard: true }).pipe(Effect.orDie),
-        subscribe: (chatId, after) => makeClient(chatId).Subscribe({ after }).pipe(Stream.orDie),
-        delete: (chatId) => makeClient(chatId).Delete().pipe(Effect.orDie)
-      }
-
-      clients.set(assistant, client)
-
-      return client
-    })
+    const client = yield* makeClusterClient
 
     return AssistantEngine.of({
       register: (registration) => register(registration).pipe(Effect.provide(context)),
-      submit: Effect.fn("AssistantEngine.submit")(function* (
-        assistant: string,
-        chatId: ChatId,
-        input: AssistantEvent.Input | AssistantEvent.StoredAppEvent
-      ) {
-        const client = yield* clientOf(assistant)
+      ...client
+    })
+  })
+)
 
-        yield* client.submit(chatId, input)
-      }),
-      subscribe: (assistant, chatId, after) =>
-        Stream.unwrap(
-          Effect.gen(function* () {
-            const client = yield* clientOf(assistant)
+/**
+ * Layer that reaches chats running as cluster entities elsewhere, and runs none itself.
+ *
+ * **When to use**
+ *
+ * Use it in a process that only submits to, subscribes to, and deletes chats that the cluster's
+ * runners run with {@link layerCluster}, such as a web server that provides an assistant's
+ * `layerClient`. It needs no `ChatLog`, since the runners store the chats.
+ *
+ * **Details**
+ *
+ * The layer requires `Sharding`. An assistant's `toLayer` can't register with it: it dies, since
+ * no chats run in this process.
+ *
+ * **Example** (A web server in front of the cluster)
+ *
+ * ```ts
+ * import { Assistant, AssistantEngine } from "effect-assistant"
+ * import type * as Sharding from "effect/cluster/Sharding"
+ * import * as Layer from "effect/Layer"
+ *
+ * declare const ShardingLive: Layer.Layer<Sharding.Sharding>
+ *
+ * export const MyAssistant = Assistant.make("my-assistant")
+ *
+ * const MyAssistantClient = MyAssistant.layerClient.pipe(
+ *   Layer.provide(AssistantEngine.layerClusterClient),
+ *   Layer.provide(ShardingLive)
+ * )
+ * ```
+ *
+ * @see {@link layerCluster} for the runners that run the chats
+ *
+ * @category layers
+ * @since 0.3.0
+ */
+export const layerClusterClient: Layer.Layer<AssistantEngine, never, Sharding.Sharding> = Layer.effect(
+  AssistantEngine,
+  Effect.gen(function* () {
+    const client = yield* makeClusterClient
 
-            return client.subscribe(chatId, after)
-          })
+    return AssistantEngine.of({
+      register: (registration) =>
+        Effect.die(
+          `The ${registration.definition.name} assistant can't register with AssistantEngine.layerClusterClient, which runs no chats: provide AssistantEngine.layerCluster where its toLayer runs.`
         ),
-      delete: Effect.fn("AssistantEngine.delete")(function* (assistant: string, chatId: ChatId) {
-        const client = yield* clientOf(assistant)
-
-        yield* client.delete(chatId)
-      })
+      ...client
     })
   })
 )

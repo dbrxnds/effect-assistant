@@ -303,14 +303,12 @@ const makeTurnApi = (
     })
 
   const prepare = <T extends Record<string, Tool.Any>, RS>(options: Assistant.LoopOptions<T, RS, any>) => {
-    const skills = options.skills ?? []
+    const own = Toolkits.fromToolkitOrEmpty(options.toolkit)
+    const skills = Skills.available(options.skills ?? [], [...builtins.definitions, ...own.definitions])
 
     return {
       system: mapText(instructions(options.instructions), (text) => Skill.withCatalog(text, skills)),
-      toolkit: Toolkits.merge(
-        Toolkits.merge(builtins, Skills.toTools(skills)),
-        Toolkits.fromToolkitOrEmpty(options.toolkit)
-      ),
+      toolkit: Toolkits.merge(Toolkits.merge(builtins, Skills.toTools(skills)), own),
       view: options.history ?? identity
     }
   }

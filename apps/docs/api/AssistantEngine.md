@@ -6,13 +6,14 @@
 import { AssistantEngine } from "effect-assistant"
 ```
 
-This module provides the `AssistantEngine` service, which runs assistants' chats, and its two
+This module provides the `AssistantEngine` service, which runs assistants' chats, and its
 implementations.
 
 An assistant's `toLayer` registers the assistant with the engine, and the assistant's `submit`
 and `subscribe` go through it. Pick one engine for the app, as with a workflow engine.
 `layerMemory` runs chats in the process, for tests and single-process apps.
-`layerCluster` runs each chat as a cluster entity, so a turn cut off by a crash resumes.
+`layerCluster` runs each chat as a cluster entity, so a turn cut off by a crash resumes, and
+`layerClusterClient` reaches those chats from a process that runs none.
 
 ## Layers
 
@@ -93,6 +94,44 @@ const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Sharding.Shard
 ```
 
 <small>Since 0.1.0</small>
+
+### layerClusterClient
+
+Layer that reaches chats running as cluster entities elsewhere, and runs none itself.
+
+**When to use**
+
+Use it in a process that only submits to, subscribes to, and deletes chats that the cluster's
+runners run with `layerCluster`, such as a web server that provides an assistant's
+`layerClient`. It needs no `ChatLog`, since the runners store the chats.
+
+**Details**
+
+The layer requires `Sharding`. An assistant's `toLayer` can't register with it: it dies, since
+no chats run in this process.
+
+**Example** (A web server in front of the cluster)
+
+```ts
+import { Assistant, AssistantEngine } from "effect-assistant"
+import type * as Sharding from "effect/cluster/Sharding"
+import * as Layer from "effect/Layer"
+
+declare const ShardingLive: Layer.Layer<Sharding.Sharding>
+
+export const MyAssistant = Assistant.make("my-assistant")
+
+const MyAssistantClient = MyAssistant.layerClient.pipe(
+  Layer.provide(AssistantEngine.layerClusterClient),
+  Layer.provide(ShardingLive)
+)
+```
+
+```ts
+const layerClusterClient: Layer.Layer<AssistantEngine, never, Sharding.Sharding>
+```
+
+<small>Since 0.3.0</small>
 
 ## Services
 

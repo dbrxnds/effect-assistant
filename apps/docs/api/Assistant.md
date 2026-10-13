@@ -190,7 +190,8 @@ interface LoopOptions<T extends Record<string, Tool.Any> = Record<never, never>,
   readonly toolkit?: Toolkit.Toolkit<T> | undefined
   /**
    * Playbooks the model can follow. The prompt lists them as a catalog, and the model loads one
-   * with `load_skill` when a task matches it.
+   * with `load_skill` when a task matches it. A skill made with `tools` is left out when the turn's
+   * tools lack one of them.
    */
   readonly skills?: ReadonlyArray<Skill<RS>> | undefined
   /** The maximum number of model calls per turn. Defaults to 16. */
@@ -202,181 +203,6 @@ interface LoopOptions<T extends Record<string, Tool.Any> = Record<never, never>,
    * summary. Defaults to all entries.
    */
   readonly history?: HistoryView<Events> | undefined
-}
-
-/**
- * Represents a function that selects which of a chat's entries the model reads, and what else it
- * reads with them.
- *
- * **Details**
- *
- * The function receives the chat's entries and returns, in order, a mix of entries and
- * `Prompt.Message`s. The model reads the returned entries the same way it reads the full history,
- * and reads each prompt message unchanged.
- *
- * @category models
- * @since 0.1.0
- */
-export type HistoryView<Events = never> = (
-  entries: ReadonlyArray<Entry<Events>>
-) => ReadonlyArray<Entry<Events> | Prompt.Message>
-
-/**
- * Represents an entry in a chat's log, with the assistant's own events decoded to their types.
- *
- * @category models
- * @since 0.1.0
- */
-export interface Entry<Events = never> {
-  readonly chatId: ChatId
-  readonly seq: number
-  readonly at: number
-  readonly event: AssistantEvent.AssistantEvent | Events
-}
-
-/**
- * Represents the options accepted by `turn.replyIfOwed`.
- *
- * @category models
- * @since 0.1.0
- */
-export interface ReplyOptions {
-  /** The assistant's instructions, as passed to `turn.loop`. `Instructions.protocol` is added. */
-  readonly instructions: string | Instructions.Resolved
-  /**
-   * The message given to the model after the history. Defaults to a message saying that it
-   * hasn't replied yet and should reply now.
-   */
-  readonly nudge?: string | undefined
-}
-
-/**
- * Represents one turn, as the assistant's handler receives it.
- *
- * `Events` is the type of the app's own events that the assistant registered with its `events`
- * option.
- *
- * @category models
- * @since 0.1.0
- */
-export interface Turn<Events = never> {
-  readonly chatId: ChatId
-  /**
-   * Returns the model's history, built from the chat's entries (all of them, or those a view
-   * keeps), together with how far into the chat it reaches.
-   *
-   * Read it before every model call, as the loop does. Each step records how far its model call
-   * read, and the turn ends once it has handled what the model saw. An input that arrived after
-   * that is handled by the next turn.
-   */
-  readonly history: (view?: HistoryView<Events>) => Effect.Effect<AssistantLoop.ChatHistory>
-  /**
-   * Returns the full system prompt for the given instructions. It contains
-   * `Instructions.protocol`, the instructions, and the specialist runs that are working now.
-   */
-  readonly instructions: (instructions: string | Instructions.Resolved) => Instructions.Resolved
-  /**
-   * Runs the agent loop over the chat. The loop uses `Instructions.protocol`, the assistant's own
-   * tools, and the instructions, tools, and skills in `options`. Every step is a tool call, and
-   * the loop ends with `replyIfOwed`.
-   */
-  readonly loop: <T extends Record<string, Tool.Any> = Record<never, never>, RS = never>(
-    options: LoopOptions<T, RS, Events>
-  ) => Stream.Stream<
-    AssistantLoop.Event,
-    AiError.AiError,
-    LanguageModel.LanguageModel | TurnServices | AssistantLoop.ToolkitServices<T> | RS
-  >
-  /**
-   * Runs one more pass when the turn would otherwise end without a reply to the user's latest
-   * message. In this pass the model can only reply.
-   *
-   * The stream is empty when no reply is owed, or when an input arrived that the next turn will
-   * read. `loop` runs this pass with its own prompt and tools, so the pass reuses the cached
-   * prompt.
-   */
-  readonly replyIfOwed: (
-    options: ReplyOptions
-  ) => Stream.Stream<AssistantLoop.Event, AiError.AiError, LanguageModel.LanguageModel | TurnServices>
-}
-
-/**
- * Represents an assistant's handler, which runs a turn and returns it as a stream of the loop's
- * events.
- *
- * The handler may return the stream directly or from an Effect. `R` is the services the stream
- * requires, and `RE` is the services the Effect requires.
- *
- * @category models
- * @since 0.1.0
- */
-export type Handler<R = never, RE = R, Events = never> = (
-  turn: Turn<Events>
-) =>
-  | Stream.Stream<AssistantLoop.Event, unknown, R>
-  | Effect.Effect<Stream.Stream<AssistantLoop.Event, unknown, R>, unknown, RE>
-
-/**
- * Computes the services an assistant's handler needs beyond those its turns provide (the turn
- * services and `LanguageModel`) and its tools' handlers (which its layer requires). These are the
- * services that its build Effect must require.
- *
- * @category utility types
- * @since 0.1.0
- */
-export type HandlerServices<R> = Exclude<R, TurnServices | LanguageModel.LanguageModel | Tool.Handler<string>>
-
-const toStream = <R, RE>(
-  result:
-    | Stream.Stream<AssistantLoop.Event, unknown, R>
-    | Effect.Effect<Stream.Stream<AssistantLoop.Event, unknown, R>, unknown, RE>
-): Stream.Stream<AssistantLoop.Event, unknown, R | RE> => (Effect.isEffect(result) ? Stream.unwrap(result) : result)
-
-/**
- * Identifies an assistant's service in a context. Each assistant has its own identifier, keyed by
- * its name.
- *
- * @category models
- * @since 0.1.0
- */
-export interface Identifier<Name extends string> {
-  readonly "~effect-assistant/Assistant": Name
-}
-
-/**
- * Identifies, in a context, the chat that an assistant's turns run in.
- *
- * @category models
- * @since 0.1.0
- */
-export interface ChatIdentifier<Name extends string> {
-  readonly "~effect-assistant/Assistant/Chat": Name
-}
-
-/**
- * Represents the chat that a turn of this assistant runs in, typed with the assistant's events.
- *
- * Use `yield* MyAssistant.Chat` in the handler, in the handler's build, or in a tool that its
- * turns run. Code that doesn't know the assistant uses `CurrentChat` instead.
- *
- * @see {@link CurrentChat} for the same chat without the assistant's event types
- *
- * @category models
- * @since 0.1.0
- */
-export interface Chat<Events = never> {
-  readonly chatId: ChatId
-  /**
-   * The chat's entries so far, in order. They include the library's events and the assistant's
-   * own events, typed.
-   */
-  readonly entries: Effect.Effect<ReadonlyArray<Entry<Events>>>
-  /**
-   * Appends events after the chat's last entry and sends them to the chat's subscribers. The
-   * events can be the library's or the assistant's own, such as a summary. An event that wakes a
-   * turn is handled by the next turn.
-   */
-  append(...events: ReadonlyArray<AssistantEvent.AssistantEvent | Events>): Effect.Effect<void>
 }
 ```
 
@@ -684,9 +510,9 @@ export interface Assistant<
    *
    * export const MyAssistant = Assistant.make("my-assistant")
    *
-   * // Requires `ChatLog` and `Sharding`. The cluster's runners run the chats.
+   * // Requires `Sharding`. The cluster's runners run the chats, with `AssistantEngine.layerCluster`.
    * const MyAssistantClient = MyAssistant.layerClient.pipe(
-   *   Layer.provide(AssistantEngine.layerCluster)
+   *   Layer.provide(AssistantEngine.layerClusterClient)
    * )
    * ```
    */
@@ -1021,9 +847,9 @@ interface Assistant<
    *
    * export const MyAssistant = Assistant.make("my-assistant")
    *
-   * // Requires `ChatLog` and `Sharding`. The cluster's runners run the chats.
+   * // Requires `Sharding`. The cluster's runners run the chats, with `AssistantEngine.layerCluster`.
    * const MyAssistantClient = MyAssistant.layerClient.pipe(
-   *   Layer.provide(AssistantEngine.layerCluster)
+   *   Layer.provide(AssistantEngine.layerClusterClient)
    * )
    * ```
    */

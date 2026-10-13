@@ -162,7 +162,8 @@ CREATE TABLE chat_log (
 
 - Each chat is a cluster entity: one writer, and a turn cut off by a crash resumes.
 - A process that only serves clients provides `MyAssistant.layerClient` (the service, no handler) with
-  `AssistantEngine.layerCluster`. Its calls reach the runners that run the chats.
+  `AssistantEngine.layerClusterClient`, which needs only `Sharding`, no `ChatLog`. Its calls reach the runners
+  that run the chats.
 
 ### Your chats, and deleting them
 
@@ -293,13 +294,15 @@ turn. It decides what to tell the user, and can message or stop a run while it w
 ### Skills and big tool catalogs
 
 Both keep the prompt small. A skill is a playbook: the model sees its name and one line, and loads the steps
-with `load_skill` when a task matches. `ToolDiscovery` turns a big toolkit into two tools, `search_tools` and
+with `load_skill` when a task matches. A skill made with `tools` is offered only to a loop whose toolkit has every
+one of them. `ToolDiscovery` turns a big toolkit into two tools, `search_tools` and
 `execute_tool`, so the model finds a tool when it needs one instead of reading every definition.
 
 ```ts
 const reorder = Skill.make("reorder", {
   description: "Reordering something the user ordered before.",
-  instructions: "1. Find their last order of it. 2. Confirm quantity and address. 3. Place it."
+  instructions: "1. Find their last order of it. 2. Confirm quantity and address. 3. Place it with place_order.",
+  tools: [PlaceOrder] // left out of a loop without place_order
 })
 
 const Discovery = ToolDiscovery.make(AllOtherTools) // search_tools and execute_tool over a big toolkit
