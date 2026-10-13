@@ -1,5 +1,18 @@
 # effect-assistant
 
+## 0.5.0
+
+### Minor Changes
+
+- 641ef63: A call that needs approval is only sent for approval with a message beside it. The approval shows the call, not what it does, so a step that calls such a tool without `send_user_message` gets a failure for that call (`ApprovalNeedsMessage`) and the model sends both.
+- f3443c9: Blocks that show a tool's result: `Block.fromToolResult(tool)` in a `BlockKit` gives the tool's results a `resultId` the model reads, and the model shows one with a `tool_result` block. The server checks the id against the chat's results; the timeline sends the result with the message, and `BlockKit.toClient` gives the tool's renderer the result, decoded by its success schema.
+
+  `ToolResult.ModelView` (and the typed `ToolResult.modelView`) sets what the model reads of a tool's success; the log keeps the whole success in the `ToolResult` event's new `full` field.
+
+### Patch Changes
+
+- f41f78d: The reply pass requires a tool call. It runs when the model wrote text of its own instead of replying, and with `auto` it could do so again and end the turn as failed. Changing the tool choice re-reads the history at full price, only on those turns.
+
 ## 0.4.0
 
 ### Minor Changes
