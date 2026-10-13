@@ -17,7 +17,7 @@ import type { ChatId } from "../ChatId.ts"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import type * as AssistantLoop from "../AssistantLoop.ts"
 import * as Loop from "./loop.ts"
-import type * as BlockKit from "../BlockKit.ts"
+import * as BlockKit from "../BlockKit.ts"
 import type { CurrentChat } from "../CurrentChat.ts"
 import * as Instructions from "../Instructions.ts"
 import * as ToolApproval from "../ToolApproval.ts"
@@ -214,6 +214,7 @@ const makeTurnApi = (
 ): Assistant.Turn<any> => {
   const { definition, builtins } = registration
   const { app } = definition
+  const shownTools = BlockKit.toolNames(definition.blocks)
 
   const running = <A, E, R>(stream: Stream.Stream<A, E, R>) =>
     Stream.unwrap(Ref.set(ranLoop, true).pipe(Effect.as(stream)))
@@ -280,7 +281,10 @@ const makeTurnApi = (
             }
           }),
           // A second step, for a reply after a call it was refused.
-          maxSteps: 2
+          maxSteps: 2,
+          // The pass runs because the model wrote text of its own instead of replying, which reaches nobody: it has to
+          // call a tool now. Changing the choice costs a read of the history at full price, on these rare turns only.
+          toolChoice: "required"
           // The loop ran the approved calls; a pass that can only reply runs none.
         }).pipe(Stream.provideService(Loop.TurnApprovals, Option.none()))
       })
@@ -297,7 +301,7 @@ const makeTurnApi = (
     )
 
   const prepare = <T extends Record<string, Tool.Any>>(options: Assistant.LoopOptions<T, any>) => {
-    const own = Toolkits.fromToolkitOrEmpty(options.toolkit)
+    const own = Toolkits.showing(Toolkits.fromToolkitOrEmpty(options.toolkit), shownTools)
 
     return {
       system: instructions(options.instructions),

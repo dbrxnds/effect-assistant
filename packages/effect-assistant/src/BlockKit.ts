@@ -8,12 +8,13 @@
  *
  * @since 0.1.0
  */
+import type * as Tool from "effect/ai/Tool"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as AssistantEvent from "./AssistantEvent.ts"
-import type * as Block from "./Block.ts"
+import * as Block from "./Block.ts"
 import type * as Timeline from "./Timeline.ts"
 import { CurrentChat } from "./CurrentChat.ts"
 import * as InputId from "./InputId.ts"
@@ -40,6 +41,15 @@ export const make = <const Blocks extends ReadonlyArray<Block.Any>>(blocks: Bloc
   byKind: new Map(blocks.map((block) => [block.kind, block]))
 })
 
+/**
+ * Returns the names of the tools whose results the kit's blocks show (`Block.fromToolResult`).
+ *
+ * @category utils
+ * @since 0.5.0
+ */
+export const toolNames = (kit: BlockKit | undefined): ReadonlySet<string> =>
+  new Set((kit?.blocks ?? []).flatMap((block) => (Block.isToolResult(block) ? [block.tool.name] : [])))
+
 type KindOf<B> = B extends { readonly kind: infer K extends string } ? K : never
 
 type BlockOf<Kit extends BlockKit, K> = Extract<Kit["blocks"][number], { readonly kind: K }>
@@ -47,6 +57,13 @@ type BlockOf<Kit extends BlockKit, K> = Extract<Kit["blocks"][number], { readonl
 type PropsOf<B> = B extends { readonly props: Schema.Top } ? B["props"]["Type"] : never
 
 type AnswerOf<B> = B extends { readonly answer: infer A } ? (A extends Schema.Top ? A["Type"] : never) : never
+
+type ResultArgs<B> = B extends { readonly tool: infer T }
+  ? {
+      /** The tool's result the block shows, decoded by its success schema. */
+      readonly result: Tool.Success<T>
+    }
+  : unknown
 
 /**
  * Represents the state of a message's block.
@@ -164,12 +181,21 @@ export const closeStale = Effect.fn(function* (options: { readonly messages: num
 })
 
 /**
- * Represents what a renderer receives for one block.
+ * Represents what a renderer receives for one block. A block that shows a tool's result also gets
+ * the `result`.
  *
  * @category models
  * @since 0.1.0
  */
-export interface RenderArgs<B> {
+export type RenderArgs<B> = BlockArgs<B> & ResultArgs<B>
+
+/**
+ * Represents what every block's renderer receives.
+ *
+ * @category models
+ * @since 0.5.0
+ */
+export interface BlockArgs<B> {
   /**
    * The id of the message the block is on. A block whose button calls your API can key the work
    * on it, with the chat's id, so the work runs once per block.
@@ -256,7 +282,7 @@ export function toClient<Kit extends BlockKit, Out>(
 // arguments.
 export function toClient<Out>(
   kit: BlockKit,
-  renderers: Readonly<Record<string, (args: RenderArgs<Block.Any>) => Out>>
+  renderers: Readonly<Record<string, (args: BlockArgs<Block.Any> & { readonly result?: unknown }) => Out>>
 ): (message: Timeline.AssistantMessage, options: RenderOptions) => Out | undefined {
   return (message, options) => {
     if (message.block === undefined) return undefined
@@ -271,6 +297,12 @@ export function toClient<Out>(
 
     if (Option.isNone(props)) return undefined
 
+    const result = Block.isToolResult(block)
+      ? Schema.decodeUnknownOption(Schema.toCodecJson(block.result))(message.block.result)
+      : Option.some(undefined)
+
+    if (Option.isNone(result)) return undefined
+
     const given = message.block.answer
     const answerCodec = block.answer === undefined ? undefined : Schema.toCodecJson(block.answer)
 
@@ -281,6 +313,7 @@ export function toClient<Out>(
       messageId: message.id,
       text: message.text,
       props: props.value,
+      result: result.value,
       open: message.block.status === "open",
       answer: Option.getOrUndefined(answer),
       respond: (value) =>

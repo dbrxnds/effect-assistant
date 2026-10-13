@@ -56,10 +56,21 @@ interface State {
 
 ### RenderArgs
 
-Represents what a renderer receives for one block.
+Represents what a renderer receives for one block. A block that shows a tool's result also gets
+the `result`.
 
 ```ts
-interface RenderArgs<B> {
+type RenderArgs<B> = BlockArgs<B> & ResultArgs<B>
+```
+
+<small>Since 0.1.0</small>
+
+### BlockArgs
+
+Represents what every block's renderer receives.
+
+```ts
+interface BlockArgs<B> {
   /**
    * The id of the message the block is on. A block whose button calls your API can key the work
    * on it, with the chat's id, so the work runs once per block.
@@ -79,7 +90,7 @@ interface RenderArgs<B> {
 }
 ```
 
-<small>Since 0.1.0</small>
+<small>Since 0.5.0</small>
 
 ### Renderers
 
@@ -107,6 +118,16 @@ interface RenderOptions {
 <small>Since 0.1.0</small>
 
 ## Utils
+
+### toolNames
+
+Returns the names of the tools whose results the kit's blocks show (`Block.fromToolResult`).
+
+```ts
+const toolNames: (kit: BlockKit | undefined) => ReadonlySet<string>
+```
+
+<small>Since 0.5.0</small>
 
 ### apply
 

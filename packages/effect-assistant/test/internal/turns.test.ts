@@ -329,9 +329,10 @@ describe("turn completion", () => {
 
       expect(Predicate.isTagged(lastTurnEnd(entries)!, "TurnCompleted")).toBe(true)
       expect(AssistantEvent.assistantTexts(entries)).toEqual(["You're welcome."])
-      // The loop's prompt and tools, so the cache holds; the nudge comes after the history.
+      // The loop's prompt and tools, so the system prompt and tools stay cached; the nudge comes after the history.
       expect(request?.tools).toEqual(["send_user_message", "wait"])
-      expect(request?.toolChoice).toBe("auto")
+      // It has to call one: text of its own reaches nobody.
+      expect(request?.toolChoice).toBe("required")
       expect(request?.system.endsWith("Be brief.")).toBe(true)
       expect(Scripted.lastInput(request!)).toBe("Reply now.")
     })

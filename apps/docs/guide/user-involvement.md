@@ -54,7 +54,9 @@ it in a turn. The call waits for the user's approval
 - The chat's [timeline](./client#tool-calls-to-approve) shows the call for
   the user to approve or reject. It's only the yes or no: the assistant's
   message, sent in the same step, says what it asks them to approve. Say so
-  in the tool's description.
+  in the tool's description. A call without a message in its step isn't
+  sent for approval: it fails back to the model (`ApprovalNeedsMessage`),
+  which then sends both.
 - The user's decision is an input, like a message: built on the client with
   `ToolApproval.approve(item)` or `ToolApproval.reject(item, { reason })`,
   and submitted with the assistant's `submit`. Its id is fixed per call, so

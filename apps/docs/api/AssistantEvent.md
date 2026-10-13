@@ -262,10 +262,14 @@ const UserInput = Schema.Union([UserMessage, BlockAnswer, ApprovalDecision])
 Represents the UI shown with a message, as a block kind from the assistant's `BlockKit` and its
 props.
 
+A block that shows a tool's result (`Block.fromToolResult`) has the tool's name as its kind and
+the result's `resultId`.
+
 ```ts
 class MessageBlock extends Schema.Class<MessageBlock>("effect-assistant/MessageBlock")({
   kind: Schema.String,
-  props: Schema.Unknown
+  props: Schema.Unknown,
+  resultId: Schema.optional(Schema.String)
 })
 ```
 
@@ -377,13 +381,20 @@ It holds the tool's success or failure in its encoded (JSON) form, and which of 
 failure includes its reason when it has one, which is a `ToolFailure`'s `reason` or the
 failure's tag.
 
+When the model reads less than the whole success (a `ToolResult.modelView`, or the `resultId`
+added for a tool the assistant's blocks show), `full` holds the whole success, encoded by the
+tool's success schema.
+
 ```ts
 class ToolResult extends Schema.TaggedClass<ToolResult>()("ToolResult", {
   callId: Schema.String,
   tool: Schema.String,
   outcome: ToolOutcome,
   result: Schema.Json,
-  reason: Schema.optional(Schema.String)
+  reason: Schema.optional(Schema.String),
+  full: Schema.optional(Schema.Json),
+  /** The id the model passes in a `tool_result` block to show this result. */
+  resultId: Schema.optional(Schema.String)
 })
 ```
 

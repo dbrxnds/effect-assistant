@@ -165,6 +165,40 @@ describe("a tool with needsApproval, in a turn", () => {
     })
   )
 
+  it.live("refuses a call without a message beside it, and asks once the model explains it", () =>
+    Effect.gen(function* () {
+      // The model first calls place_order alone; told why it wasn't sent, it calls it again with a message.
+      const model = yield* Scripted.make((request) =>
+        Option.isSome(Scripted.lastResult(request, "place_order"))
+          ? [
+              Scripted.call("send_user_message", { text: "300 totes: approve to place it.", wait: false }),
+              Scripted.call("place_order", { sku: "tote", quantity: 300 })
+            ]
+          : [Scripted.call("place_order", { sku: "tote", quantity: 300 })]
+      )
+
+      const { runs, layer } = yield* orderTools
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* (yield* Ordering).submit(chat, say("Order 300 totes."))
+
+        return yield* collectUntil(Ordering, chat, (es) => turnsDone(es) >= 1)
+      }).pipe(Effect.provide(runMemory(Ordering.toLayer(looping).pipe(Layer.provide(layer)), model.layer)))
+
+      const refused = entries.flatMap(({ event }) =>
+        Predicate.isTagged(event, "ToolResult") && event.tool === "place_order" ? [event] : []
+      )
+
+      expect(refused.map(({ outcome, reason }) => ({ outcome, reason }))).toEqual([
+        { outcome: "failure", reason: "ApprovalNeedsMessage" }
+      ])
+      expect(requested(entries).map(({ tool }) => tool)).toEqual(["place_order"])
+      expect(text(entries)).toContain("approve to place it")
+      expect(yield* runs).toEqual([])
+    })
+  )
+
   it.live("runs an approved call once, with its params and key, and the model reads its result", () =>
     Effect.gen(function* () {
       const model = yield* Scripted.make(script)

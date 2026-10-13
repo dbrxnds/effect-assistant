@@ -64,7 +64,9 @@ export const Block = Schema.Struct({
   kind: Schema.String,
   props: Schema.Json,
   status: BlockStatus,
-  answer: Schema.optional(Schema.Json)
+  answer: Schema.optional(Schema.Json),
+  /** For a block that shows a tool's result (`Block.fromToolResult`): the result, as the tool's success schema encodes it. */
+  result: Schema.optional(Schema.Json)
 })
 
 /**
@@ -628,6 +630,8 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding =>
   // The items in order, and the assistant's messages as stored: their blocks change as the chat goes on.
   const items = new Map<string, AnyItem>()
   const sent = new Map<string, AssistantEvent.AssistantMessage>()
+  // The results a block can show, by id: a message shows one stored before it.
+  const results = new Map<string, Schema.Json>()
 
   const blockOf = (message: AssistantEvent.AssistantMessage): Block | undefined => {
     if (message.block === undefined) return undefined
@@ -635,8 +639,11 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding =>
     const state = blocks.get(message.id)
     const status = state === undefined || state.open ? "open" : state.answer === undefined ? "closed" : "answered"
     const block: Block = { kind: message.block.kind, props: toJson(message.block.props), status }
+    const { resultId } = message.block
+    const result = resultId === undefined ? undefined : results.get(resultId)
+    const shown = result === undefined ? block : { ...block, result }
 
-    return state?.answer === undefined ? block : { ...block, answer: toJson(state.answer.value) }
+    return state?.answer === undefined ? shown : { ...shown, answer: toJson(state.answer.value) }
   }
 
   const itemOf = (message: AssistantEvent.AssistantMessage, at: number): AssistantMessage => {
@@ -693,7 +700,13 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding =>
         },
         ModelOutput: () => [],
         ToolStarted: () => [],
-        ToolResult: () => [],
+        ToolResult: (result) => {
+          if (result.resultId !== undefined && result.outcome === "success") {
+            results.set(result.resultId, result.full ?? result.result)
+          }
+
+          return []
+        },
         TurnStarted: () => [],
         TurnCompleted: () => [],
         SpecialistStarted: () => [],

@@ -6,6 +6,7 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import { AssistantToolCall } from "../AssistantToolCall.ts"
+import * as Block from "../Block.ts"
 import type * as BlockKit from "../BlockKit.ts"
 import { CurrentChat } from "../CurrentChat.ts"
 import * as ToolFailure from "../ToolFailure.ts"
@@ -33,6 +34,13 @@ const WaitFlag = Schema.Boolean.annotate({
 })
 
 const endsWithMessage = Schema.decodeUnknownOption(Schema.Struct({ wait: Schema.Literal(true) }))
+
+const messageText = Schema.decodeUnknownOption(Schema.Struct({ text: Schema.String }))
+
+// A message the user reads: the call's text isn't empty.
+/** @internal */
+export const isUserMessage = (call: AssistantEvent.ToolCallPart): boolean =>
+  call.name === sendUserMessageName && Option.exists(messageText(call.params), ({ text }) => text.trim() !== "")
 
 /** @internal */
 export const isTurnEnding = (call: AssistantEvent.ToolCallPart): boolean =>
@@ -76,9 +84,56 @@ const plainTools = Effect.gen(function* () {
   return yield* Effect.provideContext(PlainTools, yield* plainHandlers)
 })
 
+/** @internal */
+export const toolResultKind = "tool_result"
+
+const ToolResultRef = Schema.Struct({
+  resultId: Schema.String.annotate({ description: "The resultId of the tool result to show." })
+})
+
+const decodeRef = Schema.decodeUnknownOption(ToolResultRef)
+
+// The latest successful result with that id, of a tool the kit shows.
+const shownResult = Effect.fnUntraced(function* (resultId: string, shown: ReadonlySet<string>) {
+  const entries = yield* (yield* CurrentChat).entries
+
+  const result = entries
+    .flatMap(({ event }) =>
+      AssistantEvent.isLibraryEvent(event) && Predicate.isTagged(event, "ToolResult") && event.resultId === resultId
+        ? [event]
+        : []
+    )
+    .at(-1)
+
+  if (result === undefined || result.outcome === "failure") {
+    return yield* ToolFailure.fail(
+      `No tool result ${resultId} to show: pass the resultId of a result you got in this chat.`,
+      { reason: "ResultNotFound" }
+    )
+  }
+
+  if (!shown.has(result.tool)) {
+    return yield* ToolFailure.fail(`${result.tool} results can't be shown.`, { reason: "ResultNotShown" })
+  }
+
+  return result
+})
+
 const blockTools = Effect.fnUntraced(function* (kit: BlockKit.BlockKit) {
-  const catalog = kit.blocks.map((block) => `- ${block.kind}: ${block.description}`).join("\n")
-  const kinds = kit.blocks.map((block) => block.kind)
+  const asked = kit.blocks.filter((block) => !Block.isToolResult(block))
+  const shown = new Set(kit.blocks.flatMap((block) => (Block.isToolResult(block) ? [block.tool.name] : [])))
+
+  const catalog = [
+    ...asked.map((block) => `- ${block.kind}: ${block.description}`),
+    ...(shown.size === 0
+      ? []
+      : [
+          `- ${toolResultKind}: a tool's result, shown the way the app draws it (found items as cards, a download as a button). Results you can show have a resultId: pass it as the props. From: ${[...shown].join(", ")}.`
+        ])
+  ].join("\n")
+
+  const kinds = [...asked.map((block) => block.kind), ...(shown.size === 0 ? [] : [toolResultKind])]
+  const props = [...asked.map((block) => block.props), ...(shown.size === 0 ? [] : [ToolResultRef])]
 
   const BlockMessage = Tool.make(sendUserMessageName, {
     description: `${description}
@@ -92,7 +147,7 @@ ${catalog}`,
       block: Schema.optional(
         Schema.Struct({
           kind: Schema.Literals(kinds),
-          props: Schema.Union(kit.blocks.map((block) => block.props))
+          props: Schema.Union(props)
         })
       ),
       closes: Schema.optional(Schema.Array(Schema.String)).annotate({
@@ -126,9 +181,30 @@ ${catalog}`,
         return "sent"
       }
 
-      const props = kit.byKind.get(block.kind)?.props
+      if (block.kind === toolResultKind) {
+        const ref = decodeRef(block.props)
 
-      if (props === undefined || Option.isNone(Schema.decodeUnknownOption(props)(block.props))) {
+        if (Option.isNone(ref)) {
+          return yield* ToolFailure.fail(`A ${toolResultKind} block's props are { resultId }.`)
+        }
+
+        const result = yield* shownResult(ref.value.resultId, shown)
+
+        yield* append(
+          AssistantEvent.AssistantMessage.make({
+            id,
+            text,
+            block: AssistantEvent.MessageBlock.make({ kind: result.tool, props: {}, resultId: ref.value.resultId }),
+            ...closed
+          })
+        )
+
+        return `sent as message ${id}`
+      }
+
+      const schema = kit.byKind.get(block.kind)?.props
+
+      if (schema === undefined || Option.isNone(Schema.decodeUnknownOption(schema)(block.props))) {
         return yield* ToolFailure.fail(`Those props don't fit a ${block.kind} block.`)
       }
 

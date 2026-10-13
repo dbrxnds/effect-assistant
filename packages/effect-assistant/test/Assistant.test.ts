@@ -23,7 +23,8 @@ import {
   Instructions,
   Specialist,
   ToolDiscovery,
-  ToolFailure
+  ToolFailure,
+  ToolResult
 } from "../src/index.ts"
 import { toJsonText } from "../src/internal/schema.ts"
 import {
@@ -564,6 +565,131 @@ describe("UI blocks", () => {
       expect(shown(entries)).toBeUndefined()
       // The failed message's `wait` doesn't end the turn: the loop's next step reads the failure.
       expect((yield* model.requests).map((request) => request.toolChoice)).toEqual(["auto", "auto"])
+    })
+  )
+})
+
+describe("tool result blocks", () => {
+  const Item = Schema.Struct({ id: Schema.String, name: Schema.String, imageUrl: Schema.String })
+
+  const SearchItems = ToolResult.modelView(
+    Tool.make("search_items", {
+      description: "Search the catalog.",
+      parameters: Schema.Struct({ query: Schema.String }),
+      success: Schema.Struct({ items: Schema.Array(Item) })
+    }),
+    (result) => ({ items: result.items.map(({ id, name }) => ({ id, name })) })
+  )
+
+  const Blocks = BlockKit.make([Block.fromToolResult(SearchItems)])
+  const ShowAssistant = Assistant.make("show", { blocks: Blocks })
+
+  const items = [{ id: "a1", name: "Mug", imageUrl: "https://cdn.example/mug.jpg" }]
+  const search = withHandlers(Toolkit.make(SearchItems), { search_items: () => Effect.succeed({ items }) })
+
+  const ResultRead = Schema.fromJsonString(Schema.Struct({ resultId: Schema.String }))
+
+  /** Searches, then shows the result by the id it read, or by `show` when given. */
+  const showScript =
+    (show?: string): Scripted.Script =>
+    (request) => {
+      if (Option.isSome(Scripted.lastResult(request, "send_user_message"))) return Scripted.wait()
+
+      return Option.match(Scripted.result(request, "search_items"), {
+        onNone: () => [Scripted.call("search_items", { query: "mug" })],
+        onSome: (read) => [
+          Scripted.call("send_user_message", {
+            text: "Here's the mug.",
+            wait: true,
+            block: {
+              kind: "tool_result",
+              props: { resultId: show ?? Schema.decodeUnknownSync(ResultRead)(read).resultId }
+            }
+          })
+        ]
+      })
+    }
+
+  const run = (script: Scripted.Script) =>
+    Effect.gen(function* () {
+      const model = yield* Scripted.make(script)
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* (yield* ShowAssistant).submit(chat, say("Find me a mug."))
+
+        return yield* collectUntil(ShowAssistant, chat, (es) => turnsDone(es) >= 1)
+      }).pipe(
+        Effect.provide(runMemory(ShowAssistant.toLayer(withTools({ instructions, toolkit: search })), model.layer))
+      )
+
+      return { entries, requests: yield* model.requests }
+    })
+
+  const toolResults = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
+    entries.flatMap(({ event }) => (Predicate.isTagged(event, "ToolResult") ? [event] : []))
+
+  it.live("the model reads the view with a resultId; the log keeps the whole result", () =>
+    Effect.gen(function* () {
+      const { entries, requests } = yield* run(showScript())
+      const searched = toolResults(entries).find(({ tool }) => tool === "search_items")
+      const read = Scripted.result(requests.at(-1)!, "search_items")
+
+      expect(failures(entries), traceEntries(entries)).toEqual([])
+      expect(searched?.resultId).toMatch(/^r-[0-9a-f]{8}$/)
+      expect(searched?.full).toEqual({ items })
+      expect(Option.getOrThrow(read)).not.toContain("imageUrl")
+      expect(Option.getOrThrow(read)).toContain(searched!.resultId!)
+    })
+  )
+
+  it.live("shows the result: the client renders it, decoded, under the tool's name", () =>
+    Effect.gen(function* () {
+      const { entries } = yield* run(showScript())
+      const message = viewedMessages(entries).find(({ block }) => block !== undefined)
+
+      expect(message?.block?.kind).toBe("search_items")
+      expect(message?.block?.result).toEqual({ items })
+
+      const render = BlockKit.toClient(Blocks, {
+        search_items: ({ result, text }) => `${text} ${result.items.map(({ imageUrl }) => imageUrl).join()}`
+      })
+
+      expect(render(message!, { respond: () => undefined })).toBe("Here's the mug. https://cdn.example/mug.jpg")
+    })
+  )
+
+  it.live("refuses a resultId the chat has no result for, as a result the model reads", () =>
+    Effect.gen(function* () {
+      const { entries } = yield* run(showScript("r-00000000"))
+      const sent = toolResults(entries).find(({ tool }) => tool === "send_user_message")
+
+      expect(sent?.outcome).toBe("failure")
+      expect(sent?.reason).toBe("ResultNotFound")
+      expect(viewedMessages(entries).some(({ block }) => block !== undefined)).toBe(false)
+    })
+  )
+
+  it.live("a tool with a model view and no block keeps its whole result, without a resultId", () =>
+    Effect.gen(function* () {
+      const model = yield* Scripted.make((request) =>
+        Option.isSome(Scripted.result(request, "search_items"))
+          ? Scripted.reply("Found a mug.")
+          : [Scripted.call("search_items", { query: "mug" })]
+      )
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* (yield* TestAssistant).submit(chat, say("Find me a mug."))
+
+        return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
+      }).pipe(Effect.provide(memoryAssistant(withTools({ instructions, toolkit: search }), model.layer)))
+
+      const searched = toolResults(entries).find(({ tool }) => tool === "search_items")
+
+      expect(searched?.result).toEqual({ items: [{ id: "a1", name: "Mug" }] })
+      expect(searched?.full).toEqual({ items })
+      expect(searched?.resultId).toBeUndefined()
     })
   )
 })
