@@ -57,6 +57,25 @@ Effect cluster, keyed by chat id.
 It needs `Sharding`: a `SingleRunner` for one process with SQL storage, or
 `TestRunner` in tests. [Deploying](./deploying) shows the wiring.
 
+## Reaching the cluster's chats
+
+A process that only reaches chats, like a web server in front of the
+cluster's runners, provides the assistant's `layerClient` with
+`AssistantEngine.layerClusterClient`. It needs only `Sharding`: no
+`ChatLog`, since the runners keep the log. `submit`, `subscribe`, and
+`delete` go to the chat's entity, wherever it runs. It runs no chats, so an
+assistant's `toLayer` can't register with it: building one dies, saying so.
+
+```ts
+import { AssistantEngine } from "effect-assistant"
+import * as Layer from "effect/Layer"
+
+const MyAssistantClient = MyAssistant.layerClient.pipe(
+  Layer.provide(AssistantEngine.layerClusterClient),
+  Layer.provide(ShardingLive) // a runner client of the app's cluster
+)
+```
+
 ## What's durable
 
 |                               | `layerMemory`                      | `layerCluster`                    |

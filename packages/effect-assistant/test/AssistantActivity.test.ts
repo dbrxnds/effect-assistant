@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { AssistantActivity, AssistantEvent, ChatId, InputId, RunId } from "../src/index.ts"
-import { say, storedUpdate } from "./utils/fixtures.ts"
+import { say, storedUpdate, submittedUpdate } from "./utils/fixtures.ts"
 
 const { SpecialistFinished, SpecialistStarted, TurnCompleted, TurnFailed, TurnStarted } = AssistantEvent
 
@@ -101,19 +101,21 @@ describe("AssistantActivity", () => {
     expect(AssistantActivity.isWorking(stopped)).toBe(false)
   })
 
-  it("counts an app event that wakes a turn as an input, given its tag", () => {
-    const events = [
-      say("order it"),
-      TurnStarted.make({ assistant: "test" }),
-      TurnCompleted.make({ throughSeq: 2 }),
-      storedUpdate("workflow:Order", { status: "shipped" })
-    ]
+  it("counts an app event that came in through submit as an input, and not one a turn appended", () => {
+    const after = (event: AssistantEvent.StoredAppEvent) =>
+      [say("order it"), TurnStarted.make({ assistant: "test" }), TurnCompleted.make({ throughSeq: 2 }), event].map(
+        (event, i) => ({ chatId, seq: i + 1, at: (i + 1) * 1000, event })
+      )
 
-    const stored = events.map((event, i) => ({ chatId, seq: i + 1, at: (i + 1) * 1000, event }))
-
-    expect(AssistantActivity.isWorking(AssistantActivity.fromEntries(stored))).toBe(false)
-    expect(AssistantActivity.isWorking(AssistantActivity.fromEntries(stored, { wakes: new Set(["Update"]) }))).toBe(
-      true
-    )
+    expect(
+      AssistantActivity.isWorking(
+        AssistantActivity.fromEntries(after(submittedUpdate("workflow:Order", { status: "shipped" })))
+      )
+    ).toBe(true)
+    expect(
+      AssistantActivity.isWorking(
+        AssistantActivity.fromEntries(after(storedUpdate("workflow:Order", { status: "shipped" })))
+      )
+    ).toBe(false)
   })
 })

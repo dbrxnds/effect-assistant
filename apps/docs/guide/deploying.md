@@ -54,7 +54,7 @@ Your server is where users meet the assistant. Before it submits or
 subscribes for a signed-in user, it checks the chat is theirs (see
 [check access at the edge](./chats#check-access-at-the-edge)). The events
 webhooks and workflows report are submitted by your server, and never come
-from the client, and the client gets the chat's [view](./client), never its
+from the client, and the client gets the chat's [timeline](./client), never its
 log.
 
 ## One writer per chat

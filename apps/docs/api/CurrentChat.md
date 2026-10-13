@@ -41,7 +41,8 @@ class CurrentChat extends Context.Service<
     /**
      * Appends events after the chat's last entry and sends them to the chat's subscribers. The
      * events can be the library's or the assistant's own (registered with its `events` option),
-     * such as a summary. An event that wakes a turn is handled by the next turn.
+     * such as a summary. An app event appended here wakes no turn: only one that comes in through
+     * the assistant's `submit` does.
      */
     readonly append: (...events: ReadonlyArray<{ readonly _tag: string }>) => Effect.Effect<void>
   }

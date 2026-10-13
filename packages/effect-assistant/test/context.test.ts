@@ -8,7 +8,7 @@ import * as Queue from "effect/Queue"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { Assistant, ChatId, Specialist } from "../src/index.ts"
-import { runEntity, runMemory, say, update, type Update, UpdateEvent, withHandlers } from "./utils/fixtures.ts"
+import { runEntity, runMemory, say, update, Update, withHandlers } from "./utils/fixtures.ts"
 import * as Scripted from "./utils/scripted.ts"
 
 interface User {
@@ -124,7 +124,7 @@ const recording = (seen: Queue.Queue<Seen>) =>
     })
   })
 
-const Helper = Assistant.make("helper", { specialists: [Clerk], events: [UpdateEvent] })
+const Helper = Assistant.make("helper", { specialists: [Clerk], events: [Update] })
 
 const handlers = (seen: Queue.Queue<Seen>) =>
   Helper.toLayer(recording(seen)).pipe(Layer.provide(clerkLive(seen)), Layer.provide(ChatUsersLive))

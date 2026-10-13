@@ -72,31 +72,24 @@ const withoutRun = (activity: State, runId: RunId): State => {
 }
 
 /**
- * Represents the options for folding a chat's entries into its activity.
- *
- * @category models
- * @since 0.1.0
- */
-export interface Options {
-  /**
-   * The tags of the app's events that wake a turn (see `AppEvent`). These events count as inputs
-   * too. Defaults to none.
-   */
-  readonly wakes?: ReadonlySet<string> | undefined
-}
-
-/**
  * Returns the activity after one more entry. Fold a chat's entries in order, or use
  * {@link fromEntries}.
+ *
+ * **Details**
+ *
+ * One of the app's events counts as an input, and a turn as about to start, when it came in
+ * through the assistant's `submit`. The log marks it so (`AssistantEvent.isAppInput`), as
+ * `ChatLog.read` returns it; `subscribe` streams it decoded, without the mark, so there the turn
+ * shows from its `TurnStarted`.
  *
  * @category combinators
  * @since 0.1.0
  */
-export const apply = (activity: State, entry: AssistantEvent.AnyEntry, options?: Options): State => {
+export const apply = (activity: State, entry: AssistantEvent.AnyEntry): State => {
   const event = entry.event
 
   if (!AssistantEvent.isLibraryEvent(event)) {
-    return options?.wakes?.has(event._tag) === true ? { ...activity, queued: true, lastInputSeq: entry.seq } : activity
+    return AssistantEvent.isAppInput(event) ? { ...activity, queued: true, lastInputSeq: entry.seq } : activity
   }
 
   if (AssistantEvent.isInput(event)) {
@@ -136,8 +129,8 @@ export const apply = (activity: State, entry: AssistantEvent.AnyEntry, options?:
  * @category constructors
  * @since 0.1.0
  */
-export const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, options?: Options): State =>
-  entries.reduce((activity, entry) => apply(activity, entry, options), empty)
+export const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): State =>
+  entries.reduce((activity, entry) => apply(activity, entry), empty)
 
 /**
  * Returns whether anything is working: a turn that is running or about to start, or a specialist

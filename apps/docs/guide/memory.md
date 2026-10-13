@@ -101,7 +101,7 @@ summary, and what it says are your app's:
   tokens, to decide when the prompt is big enough to compact.
 
 ```ts
-import { AppEvent, Compaction } from "effect-assistant"
+import { Compaction } from "effect-assistant"
 import * as LanguageModel from "effect/ai/LanguageModel"
 
 class Summary extends Schema.TaggedClass<Summary>()("Summary", {
@@ -109,7 +109,7 @@ class Summary extends Schema.TaggedClass<Summary>()("Summary", {
   throughSeq: Schema.Int
 }) {}
 
-export const MyAssistant = Assistant.make("my-assistant", { events: [AppEvent.make(Summary)] })
+export const MyAssistant = Assistant.make("my-assistant", { events: [Summary] })
 
 const sinceSummary = Compaction.since(Schema.is(Summary))
 
@@ -132,6 +132,8 @@ const MyAssistantHandlers = MyAssistant.toLayer((turn) => {
 })
 ```
 
+The summary is for the model: the turn appends it, so it wakes no turn, and
+it reaches no chat client unless you `show` it (see [the chat client](./client)).
 A summary that failed to write changes nothing: the next turn reads the
 whole chat, as before. A summary starts the prompt cache over anyway, so
 it's the time to refresh anything else the chat reads once, like memory.

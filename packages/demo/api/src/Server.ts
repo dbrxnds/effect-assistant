@@ -6,7 +6,7 @@
  */
 import { AcmeRpcs } from "@acme/demo-shared/Rpc"
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
-import * as ChatView from "effect-assistant/ChatView"
+import * as Timeline from "effect-assistant/Timeline"
 import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -33,7 +33,8 @@ const layerRpcHandlers = AcmeRpcs.toLayer(
     const placing = yield* Effect.context<LiveOrders.LiveOrders | WorkflowEngine.WorkflowEngine>()
 
     return AcmeRpcs.of({
-      Subscribe: ({ chatId }) => acme.subscribe(chatId).pipe(ChatView.updates(AcmeAssistant)),
+      // No `show`: Acme's own events are for the model, so none reach the user.
+      Subscribe: ({ chatId }) => acme.subscribe(chatId).pipe(Timeline.changes(AcmeAssistant)),
       Submit: ({ chatId, input }) =>
         (Predicate.isTagged(input, "UserMessage") ? chats.titleFromMessage(chatId, input.text) : Effect.void).pipe(
           Effect.andThen(acme.submit(chatId, input))

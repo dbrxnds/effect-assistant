@@ -226,7 +226,7 @@ The assistant's `delete` goes through the engine to the chat, which:
 - stops what works in it: a turn, specialist runs, what the handler's build
   set up;
 - ends its subscribers' streams after they get the `ChatDeleted`, and a
-  client's view says `deleted: true`.
+  client's timeline says `deleted: true`.
 
 After that the chat stores nothing, also after a restart: a later input, a
 specialist's report, or a workflow's event for it is dropped, quietly (no

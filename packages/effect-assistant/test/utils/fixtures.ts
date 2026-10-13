@@ -2,6 +2,7 @@
 import type * as LanguageModel from "effect/ai/LanguageModel"
 import type * as Tool from "effect/ai/Tool"
 import type * as Toolkit from "effect/ai/Toolkit"
+import * as Prompt from "effect/ai/Prompt"
 import * as TestRunner from "effect/cluster/TestRunner"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -11,19 +12,19 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import {
-  AppEvent,
   Assistant,
   AssistantActivity,
   AssistantEngine,
   AssistantEvent,
   ChatId,
   ChatLog,
-  ChatView,
+  Timeline,
   InputId
 } from "../../src/index.ts"
+import * as AppEvents from "../../src/internal/events.ts"
 import { toJsonText } from "../../src/internal/schema.ts"
 
-/** What a workflow or a webhook reports in the tests: an app event that wakes a turn. */
+/** What a workflow or a webhook reports in the tests: an app event, which wakes a turn when submitted. */
 export class Update extends Schema.TaggedClass<Update>()("Update", {
   id: InputId.InputId,
   source: Schema.String,
@@ -34,13 +35,19 @@ export class Update extends Schema.TaggedClass<Update>()("Update", {
 export const updateText = (update: Update) =>
   `<update source="${update.source}">\nThe user hasn't seen it: tell them if it matters to them.\n${toJsonText(update.payload)}\n</update>`
 
-export const UpdateEvent = AppEvent.make(Update, { wakes: true, render: updateText })
+/** A history view in which the model reads each update as `updateText`. */
+export const readUpdates: Assistant.HistoryView<Update> = (entries) =>
+  entries.map((entry) =>
+    entry.event instanceof Update
+      ? Prompt.userMessage({ content: [Prompt.textPart({ text: updateText(entry.event) })] })
+      : entry
+  )
 
 /** The assistant most tests use: no blocks, no specialists, no events of its own. */
 export const TestAssistant = Assistant.make("test")
 
 /** Like `TestAssistant`, with updates: what background work reports. */
-export const Updating = Assistant.make("updating", { events: [UpdateEvent] })
+export const Updating = Assistant.make("updating", { events: [Update] })
 
 /** The event log, in memory. */
 export const layerStorage = ChatLog.layerMemory
@@ -120,11 +127,15 @@ export const say = (text: string) => AssistantEvent.UserMessage.make({ id: input
 export const update = (source: string, payload: Record<string, string | number>) =>
   Update.make({ id: inputId(), source, payload })
 
-/** An update as it's stored, for a test that writes the chat itself. */
+/** An update as a turn stores it, for a test that writes the chat itself. */
 export const storedUpdate = (source: string, payload: Record<string, string | number>) =>
   Schema.decodeUnknownSync(AssistantEvent.StoredAppEvent)(
     Schema.encodeSync(Schema.toCodecJson(Update))(update(source, payload))
   )
+
+/** An update as `submit` stores it: an input. */
+export const submittedUpdate = (source: string, payload: Record<string, string | number>) =>
+  AppEvents.markInput(storedUpdate(source, payload))
 
 /** One line per entry, for a failure message. */
 export const traceEntries = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
@@ -199,8 +210,6 @@ export const notWorking = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
 export const text = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
   AssistantEvent.assistantTexts(entries).join(" ").toLowerCase()
 
-/** The assistant's messages in a chat's view, as a client gets them. */
+/** The assistant's messages in a chat's timeline, as a client gets them. */
 export const viewedMessages = (entries: ReadonlyArray<AssistantEvent.AnyEntry>) =>
-  ChatView.fromEntries(entries).messages.flatMap((message) =>
-    Predicate.isTagged(message, "AssistantMessage") ? [message] : []
-  )
+  Timeline.fromEntries(entries).items.flatMap((item) => (Predicate.isTagged(item, "AssistantMessage") ? [item] : []))

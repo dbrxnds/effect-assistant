@@ -3,8 +3,10 @@ import * as Response from "effect/ai/Response"
 import * as Tool from "effect/ai/Tool"
 import * as Toolkit from "effect/ai/Toolkit"
 import * as TestRunner from "effect/cluster/TestRunner"
+import * as Cause from "effect/Cause"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
@@ -20,7 +22,16 @@ import {
   ChatLog,
   CurrentChat
 } from "../src/index.ts"
-import { collectUntil, say, simple, turnsDone, withHandlers } from "./utils/fixtures.ts"
+import {
+  collectUntil,
+  say,
+  simple,
+  storedUpdate,
+  submittedUpdate,
+  turnsDone,
+  Update,
+  withHandlers
+} from "./utils/fixtures.ts"
 import * as Scripted from "./utils/scripted.ts"
 
 const Resumer = Assistant.make("resumer")
@@ -57,6 +68,46 @@ describe("AssistantEngine.layerMemory", () => {
   )
 })
 
+describe("AssistantEngine.layerMemory, the app's own events", () => {
+  const Updates = Assistant.make("resumer-updates", { events: [Update] })
+
+  it.live("picks up one submitted before a restart, and not one a turn appended", () =>
+    Effect.gen(function* () {
+      const log = yield* ChatLog.ChatLog
+      const [submitted, appended] = yield* Effect.all([ChatId.make(), ChatId.make()])
+
+      const before = [
+        say("hi"),
+        AssistantEvent.TurnStarted.make({ assistant: "resumer-updates" }),
+        AssistantEvent.TurnCompleted.make({ throughSeq: 2 })
+      ]
+
+      // The log alone says which came in from outside a turn.
+      yield* log.append(submitted, [...before, submittedUpdate("workflow:Order", { status: "shipped" })])
+      yield* log.append(appended, [...before, storedUpdate("budget", { reached: "today" })])
+
+      const ran = yield* Ref.make<ReadonlyArray<ChatId.ChatId>>([])
+      const first = yield* Deferred.make<void>()
+
+      const handlers = Updates.toLayer((turn) =>
+        Stream.fromEffect(
+          Ref.update(ran, (chats) => [...chats, turn.chatId]).pipe(Effect.andThen(Deferred.succeed(first, undefined)))
+        ).pipe(Stream.drain)
+      )
+
+      yield* Effect.scoped(
+        Layer.build(handlers.pipe(Layer.provide(AssistantEngine.layerMemory), Layer.provide(Scripted.unused))).pipe(
+          Effect.andThen(Deferred.await(first)),
+          Effect.andThen(Effect.sleep("100 millis")),
+          Effect.timeout("5 seconds")
+        )
+      )
+
+      expect(yield* Ref.get(ran)).toEqual([submitted])
+    }).pipe(Effect.provide(ChatLog.layerMemory))
+  )
+})
+
 describe("AssistantEngine.layerCluster", () => {
   it.live("reaches a chat from a process that doesn't register the assistant", () =>
     Effect.gen(function* () {
@@ -85,6 +136,57 @@ describe("AssistantEngine.layerCluster", () => {
 
       expect(AssistantEvent.assistantTexts(entries)).toEqual(["Hi!"])
     }).pipe(Effect.provide(Layer.mergeAll(ChatLog.layerMemory, TestRunner.layer)))
+  )
+})
+
+describe("AssistantEngine.layerClusterClient", () => {
+  it.live("reaches a chat the cluster runs, without a ChatLog of its own", () =>
+    Effect.gen(function* () {
+      const chat = yield* ChatId.make()
+      const Greeter = Assistant.make("greeter")
+
+      const runner = Greeter.toLayer(simple({ instructions: "Greet." })).pipe(
+        Layer.provide(AssistantEngine.layerCluster),
+        Layer.provide(Scripted.layer(() => Scripted.reply("Hi!"))),
+        Layer.provide(ChatLog.layerMemory)
+      )
+
+      // Only `Sharding`: the runner keeps the log.
+      const client = Greeter.layerClient.pipe(Layer.provide(AssistantEngine.layerClusterClient))
+
+      const entries = yield* Effect.scoped(
+        Layer.build(runner).pipe(
+          Effect.andThen(
+            Effect.gen(function* () {
+              yield* (yield* Greeter).submit(chat, say("hello"))
+
+              return yield* collectUntil(Greeter, chat, (es) => turnsDone(es) >= 1)
+            }).pipe(Effect.provide(client))
+          )
+        )
+      )
+
+      expect(AssistantEvent.assistantTexts(entries)).toEqual(["Hi!"])
+    }).pipe(Effect.provide(TestRunner.layer))
+  )
+
+  it.live("refuses an assistant's handler, since it runs no chats", () =>
+    Effect.gen(function* () {
+      const Greeter = Assistant.make("greeter")
+
+      const exit = yield* Effect.scoped(
+        Layer.build(
+          Greeter.toLayer(simple({ instructions: "Greet." })).pipe(
+            Layer.provide(AssistantEngine.layerClusterClient),
+            Layer.provide(Scripted.unused)
+          )
+        )
+      ).pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "").toContain(
+        "The greeter assistant can't register with AssistantEngine.layerClusterClient"
+      )
+    }).pipe(Effect.provide(TestRunner.layer))
   )
 })
 

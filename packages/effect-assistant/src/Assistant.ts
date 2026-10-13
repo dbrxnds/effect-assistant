@@ -24,7 +24,6 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
-import type * as AppEvent from "./AppEvent.ts"
 import { AssistantEngine } from "./AssistantEngine.ts"
 import * as AssistantEvent from "./AssistantEvent.ts"
 import type * as AssistantLoop from "./AssistantLoop.ts"
@@ -66,7 +65,8 @@ export interface LoopOptions<T extends Record<string, Tool.Any> = Record<never, 
   readonly toolkit?: Toolkit.Toolkit<T> | undefined
   /**
    * Playbooks the model can follow. The prompt lists them as a catalog, and the model loads one
-   * with `load_skill` when a task matches it.
+   * with `load_skill` when a task matches it. A skill made with `tools` is left out when the turn's
+   * tools lack one of them.
    */
   readonly skills?: ReadonlyArray<Skill<RS>> | undefined
   /** The maximum number of model calls per turn. Defaults to 16. */
@@ -75,7 +75,8 @@ export interface LoopOptions<T extends Record<string, Tool.Any> = Record<never, 
   readonly replyNudge?: string | undefined
   /**
    * Selects which of the chat's entries the model reads, for example only those since the last
-   * summary. Defaults to all entries.
+   * summary, and maps the app's own events it should read into prompt messages. Defaults to all
+   * entries, without the app's events.
    */
   readonly history?: HistoryView<Events> | undefined
 }
@@ -86,9 +87,43 @@ export interface LoopOptions<T extends Record<string, Tool.Any> = Record<never, 
  *
  * **Details**
  *
- * The function receives the chat's entries and returns, in order, a mix of entries and
- * `Prompt.Message`s. The model reads the returned entries the same way it reads the full history,
- * and reads each prompt message unchanged.
+ * The function receives the chat's entries, the app's own events among them, and returns, in
+ * order, a mix of entries and `Prompt.Message`s. The model reads the returned entries the same way
+ * it reads the full history, and reads each prompt message unchanged, where the view put it. The
+ * model reads none of the app's events by itself: map those it should read to a message, and an
+ * app event's entry left in the result is dropped.
+ *
+ * A message stands right after the entry before it: one that came after the model's last read, or
+ * between a tool call and its result, moves after them, as an input does.
+ *
+ * **Example** (Telling the model about an order the user placed)
+ *
+ * ```ts
+ * import { Assistant, InputId } from "effect-assistant"
+ * import * as Prompt from "effect/ai/Prompt"
+ * import * as Schema from "effect/Schema"
+ *
+ * class OrderPlaced extends Schema.TaggedClass<OrderPlaced>()("OrderPlaced", {
+ *   id: InputId.InputId,
+ *   reference: Schema.String
+ * }) {}
+ *
+ * const MyAssistant = Assistant.make("my-assistant", { events: [OrderPlaced] })
+ *
+ * const withOrders: Assistant.HistoryView<OrderPlaced> = (entries) =>
+ *   entries.map((entry) =>
+ *     entry.event instanceof OrderPlaced
+ *       ? Prompt.userMessage({
+ *           content: [Prompt.textPart({ text: `The user placed order ${entry.event.reference}.` })]
+ *         })
+ *       : entry
+ *   )
+ *
+ * // An `OrderPlaced` that the API submits wakes a turn, which reads it as this note.
+ * const MyAssistantLive = MyAssistant.toLayer((turn) =>
+ *   turn.loop({ instructions: "Be brief.", history: withOrders })
+ * )
+ * ```
  *
  * @category models
  * @since 0.1.0
@@ -249,8 +284,8 @@ export interface Chat<Events = never> {
   readonly entries: Effect.Effect<ReadonlyArray<Entry<Events>>>
   /**
    * Appends events after the chat's last entry and sends them to the chat's subscribers. The
-   * events can be the library's or the assistant's own, such as a summary. An event that wakes a
-   * turn is handled by the next turn.
+   * events can be the library's or the assistant's own, such as a summary. None of them wakes a
+   * turn: only what comes in through the assistant's `submit` does.
    */
   append(...events: ReadonlyArray<AssistantEvent.AssistantEvent | Events>): Effect.Effect<void>
 }
@@ -266,8 +301,11 @@ export interface Chat<Events = never> {
 export interface Service<Events = never> {
   /**
    * Stores an input or one of the assistant's own events, then returns. Examples are a user's
-   * message or block answer, a workflow's progress, or the draft the user opened. The assistant
-   * works on events that wake a turn in the background.
+   * message or block answer, a workflow's progress, or the order the user placed. Each one is an
+   * input: storing it wakes a turn, which the assistant runs in the background. The handler decides
+   * what the turn does with it, and an app event the model should read needs a history view that
+   * maps it (see {@link HistoryView}). To store an app event without waking a turn, append it from
+   * within the chat instead (`yield* MyAssistant.Chat`).
    *
    * Fails with `GetChatError` when the app's `Chats` service reports that the chat can't be used,
    * because the app doesn't know the chat or has deleted it.
@@ -279,9 +317,10 @@ export interface Service<Events = never> {
    * A reader that already has the earlier entries passes `after` and receives only the entries
    * after that `seq`.
    *
-   * For a chat client, pipe the whole log into `ChatView.updates(MyAssistant, { after })`, which
-   * streams the chat as its user sees it. Its `after` goes there, not here: the view of a message
-   * depends on earlier entries.
+   * For a chat client, pipe the whole log into `Timeline.changes(MyAssistant, { after })`, which
+   * streams the chat's timeline, as its user sees it. Its `after` goes there, not here: a message
+   * on the timeline depends on earlier entries. The timeline shows only the app events named in its
+   * `show`, none by default (see `Timeline.changes`).
    */
   readonly subscribe: (
     chatId: ChatId,
@@ -323,8 +362,8 @@ export interface Assistant<
   readonly blocks: BlockKit.BlockKit | undefined
   /** The specialists the assistant can hand work to. */
   readonly specialists: ReadonlyArray<Specs>
-  /** The app's own events the assistant registered. */
-  readonly events: ReadonlyArray<AppEvent.Any>
+  /** The schemas of the app's own events the assistant stores. */
+  readonly events: ReadonlyArray<AssistantEvent.AppEventSchema>
   /**
    * Creates a layer that registers the assistant's handler with the engine and provides the
    * assistant's service.
@@ -387,9 +426,9 @@ export interface Assistant<
    *
    * export const MyAssistant = Assistant.make("my-assistant")
    *
-   * // Requires `ChatLog` and `Sharding`. The cluster's runners run the chats.
+   * // Requires `Sharding`. The cluster's runners run the chats, with `AssistantEngine.layerCluster`.
    * const MyAssistantClient = MyAssistant.layerClient.pipe(
-   *   Layer.provide(AssistantEngine.layerCluster)
+   *   Layer.provide(AssistantEngine.layerClusterClient)
    * )
    * ```
    */
@@ -419,27 +458,34 @@ export type Any = Assistant<any, any, any>
  */
 export const isAssistant = (u: unknown): u is Any => Predicate.hasProperty(u, TypeId)
 
-function entrySchema<E>(events: ReadonlyArray<AppEvent.Any>): Schema.Codec<Entry<E>, Schema.Json>
+function entrySchema<E>(events: ReadonlyArray<AssistantEvent.AppEventSchema>): Schema.Codec<Entry<E>, Schema.Json>
 // The overload states the decoded type: the library's events, or one of these schemas' types.
-function entrySchema(events: ReadonlyArray<AppEvent.Any>): Schema.Top {
+function entrySchema(events: ReadonlyArray<AssistantEvent.AppEventSchema>): Schema.Top {
   return Schema.toCodecJson(
     Schema.Struct({
       chatId: ChatId,
       seq: Schema.Int,
       at: Schema.Finite,
-      event: Schema.Union([AssistantEvent.AssistantEvent, ...events.map((event) => event.schema)])
+      event: Schema.Union([AssistantEvent.AssistantEvent, ...events])
     })
   )
 }
 
 /**
- * Creates an assistant definition from its name, its UI blocks, its specialists, and the app's own
- * events it stores (see `AppEvent`).
+ * Creates an assistant definition from its name, its UI blocks, its specialists, and the schemas of
+ * the app's own events it stores.
  *
  * **Details**
  *
  * The definition holds no code that runs turns. Provide a handler with its `toLayer`, then yield
  * the definition to get the assistant's {@link Service}.
+ *
+ * The definition only says which of the app's events a chat stores. What happens with one is up
+ * to the places that use it. One that comes in through the service's `submit`, from outside a
+ * turn, is an input and wakes a turn, like a user's message; one a turn appends to its chat never
+ * does. The handler decides what a turn does, a history view says how the model reads an event
+ * ({@link HistoryView}), and the chat's timeline says which its user sees
+ * (`Timeline.changes`).
  *
  * **Example** (Defining an assistant and submitting a message)
  *
@@ -466,7 +512,7 @@ function entrySchema(events: ReadonlyArray<AppEvent.Any>): Schema.Top {
 export const make = <
   const Name extends string,
   const Specs extends ReadonlyArray<Specialist.Any> = readonly [],
-  const Events extends ReadonlyArray<AppEvent.Any> = readonly []
+  const Events extends ReadonlyArray<AssistantEvent.AppEventSchema> = readonly []
 >(
   name: Name,
   options?: {
@@ -478,14 +524,14 @@ export const make = <
      */
     readonly specialists?: Specs | undefined
     /**
-     * The app's own events, each created with `AppEvent.make(schema, { wakes, render })`.
-     * `submit` and the chat's `append` store them, and the chat's `entries` read them back,
-     * decoded. Events that wake a turn are inputs, and the model reads each event that has a
-     * `render`.
+     * The schemas of the app's own events, each a tagged struct or class. `submit` and the chat's
+     * `append` store them, in their JSON form, and the chat's `entries` and `subscribe` read them
+     * back, decoded. Each needs a tag of its own that isn't one of the library's: `make` throws
+     * otherwise.
      */
     readonly events?: Events | undefined
   }
-): Assistant<Name, Specs[number], AppEvent.Type<Events[number]>> => {
+): Assistant<Name, Specs[number], Events[number]["Type"]> => {
   const events = options?.events ?? []
 
   const definition: Turns.Definition = {
@@ -495,7 +541,7 @@ export const make = <
     app: AppEvents.make(events)
   }
 
-  type OwnEvents = AppEvent.Type<Events[number]>
+  type OwnEvents = Events[number]["Type"]
 
   const Key = Context.Service<Identifier<Name>, Service<OwnEvents>>(`effect-assistant/Assistant/${name}`)
 

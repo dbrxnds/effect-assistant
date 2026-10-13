@@ -138,10 +138,14 @@ export const attachedFiles = (
  * ({@link openItems}), followed by the entries after the summary. When the chat has no summary,
  * the view returns every entry.
  *
+ * The app's other events after the summary stay entries, which the model doesn't read: map those
+ * it should read to messages after this view, as with any history view (see
+ * `Assistant.HistoryView`). A summary the handler appends wakes no turn.
+ *
  * **Example** (Compacting a long chat after each turn)
  *
  * ```ts
- * import { AppEvent, Assistant, type AssistantEvent, Compaction } from "effect-assistant"
+ * import { Assistant, type AssistantEvent, Compaction } from "effect-assistant"
  * import * as LanguageModel from "effect/ai/LanguageModel"
  * import * as Effect from "effect/Effect"
  * import * as Schema from "effect/Schema"
@@ -154,7 +158,7 @@ export const attachedFiles = (
  *
  * declare const transcript: (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => string
  *
- * export const MyAssistant = Assistant.make("my-assistant", { events: [AppEvent.make(Summary)] })
+ * export const MyAssistant = Assistant.make("my-assistant", { events: [Summary] })
  *
  * const MyAssistantLive = MyAssistant.toLayer((turn) => {
  *   const compact = Effect.gen(function* () {

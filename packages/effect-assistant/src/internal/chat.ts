@@ -101,7 +101,6 @@ export const make = Effect.fnUntraced(function* (options: {
 }) {
   const { registration, chatId } = options
   const { app } = registration.definition
-  const { wakes } = app
   const storage = yield* ChatLog
   const chats = yield* Chats.Chats
   const initial = yield* storage.read(chatId)
@@ -201,7 +200,8 @@ export const make = Effect.fnUntraced(function* (options: {
 
         if (id !== undefined && (yield* Ref.get(entries)).some(({ event }) => idOf(event) === id)) return
 
-        yield* write([input])
+        // Stored as an input: it came in from outside a turn, so it wakes one, also after a restart.
+        yield* write([AssistantEvent.isLibraryEvent(input) ? input : AppEvents.markInput(input)])
       })
     )
   })
@@ -232,7 +232,7 @@ export const make = Effect.fnUntraced(function* (options: {
 
   const drain: Effect.Effect<void> = Semaphore.withPermit(turnsLock)(
     Effect.gen(function* () {
-      while (!(yield* isDeleted) && History.needsTurn(yield* chat.entries, wakes)) {
+      while (!(yield* isDeleted) && History.needsTurn(yield* chat.entries)) {
         yield* Turns.run({ registration, handler, chat, services, checkOpen: Effect.asVoid(checkAvailable) })
       }
     })
@@ -296,7 +296,7 @@ export const make = Effect.fnUntraced(function* (options: {
       yield* inBackground(drain)
     }),
     resume: Effect.gen(function* () {
-      if (History.needsTurn(yield* chat.entries, wakes)) yield* inBackground(drain)
+      if (History.needsTurn(yield* chat.entries)) yield* inBackground(drain)
     }),
     stream: (after) =>
       Stream.unwrap(

@@ -1,7 +1,7 @@
 /**
  * End-to-end smoke test against a running demo (local, preview, or prod), with
  * the real model and the real RPC socket. It sees what the web app sees (the
- * chat's view), so it checks what the user is told. Every chat it creates is
+ * chat's timeline), so it checks what the user is told. Every chat it creates is
  * deleted at the end, so the thread list stays clean for demos.
  *
  *   pnpm --filter @acme/demo-api smoke [baseUrl]
@@ -26,7 +26,7 @@ import { CampaignDraft, OrderDraft } from "@acme/demo-shared/Blocks"
 import { AcmeRpcs } from "@acme/demo-shared/Rpc"
 import * as AssistantEvent from "effect-assistant/AssistantEvent"
 import type * as ChatId from "effect-assistant/ChatId"
-import * as ChatView from "effect-assistant/ChatView"
+import * as Timeline from "effect-assistant/Timeline"
 import * as InputId from "effect-assistant/InputId"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -48,42 +48,47 @@ const layer = RpcClient.layerProtocolSocket().pipe(
   Layer.provide(RpcSerialization.layerNdjson)
 )
 
-/** What the smoke test sees of a chat: its view after each update, as a client folds them. */
-type Views = ReadonlyArray<ChatView.View>
+/** What the smoke test sees of a chat: its timeline after each change, as a client folds them. */
+type Timelines = ReadonlyArray<Timeline.Timeline>
 
 const ChoiceProps = Schema.Struct({ options: Schema.Array(Schema.String) })
 
-const latest = (views: Views): ChatView.View => views.at(-1) ?? ChatView.empty
+const latest = (timelines: Timelines): Timeline.Timeline => timelines.at(-1) ?? Timeline.empty
 
-const sent = (view: ChatView.View): ReadonlyArray<ChatView.AssistantMessage> =>
-  view.messages.flatMap((message) => (Predicate.isTagged(message, "AssistantMessage") ? [message] : []))
+const sent = (timeline: Timeline.Timeline): ReadonlyArray<Timeline.AssistantMessage> =>
+  timeline.items.flatMap((message) => (Predicate.isTagged(message, "AssistantMessage") ? [message] : []))
 
-const messages = (views: Views): ReadonlyArray<string> => sent(latest(views)).map((message) => message.text)
+const messages = (timelines: Timelines): ReadonlyArray<string> => sent(latest(timelines)).map((message) => message.text)
 
-const blockMessages = (views: Views, kind: string): ReadonlyArray<ChatView.AssistantMessage> =>
-  sent(latest(views)).filter((message) => message.block?.kind === kind)
+const blockMessages = (timelines: Timelines, kind: string): ReadonlyArray<Timeline.AssistantMessage> =>
+  sent(latest(timelines)).filter((message) => message.block?.kind === kind)
 
-const failed = (views: Views) => latest(views).failed
+const failed = (timelines: Timelines) => latest(timelines).failed
 
-const idle = (views: Views) => views.length > 0 && ChatView.isIdle(latest(views))
+const idle = (timelines: Timelines) => timelines.length > 0 && Timeline.isIdle(latest(timelines))
 
 /** Whether the assistant said something matching `pattern`, and is done. */
-const said = (views: Views, pattern: RegExp) => idle(views) && messages(views).some((text) => pattern.test(text))
+const said = (timelines: Timelines, pattern: RegExp) =>
+  idle(timelines) && messages(timelines).some((text) => pattern.test(text))
 
 /** Whether a specialist worked, and the assistant said something after it and is done. */
-const reportedBack = (views: Views) => {
-  const from = views.findIndex((view) => view.activity.specialists.length > 0)
+const reportedBack = (timelines: Timelines) => {
+  const from = timelines.findIndex((timeline) => timeline.activity.specialists.length > 0)
 
-  return from !== -1 && idle(views) && sent(latest(views)).length > sent(views[from]!).length
+  return from !== -1 && idle(timelines) && sent(latest(timelines)).length > sent(timelines[from]!).length
 }
 
 /** One line per message, for a timeout message. */
-const trace = (views: Views) =>
-  latest(views)
-    .messages.map((message) =>
+const trace = (timelines: Timelines) =>
+  latest(timelines)
+    .items.flatMap((message) =>
       Predicate.isTagged(message, "AssistantMessage")
-        ? `  acme: ${message.text.slice(0, 120)}${message.block === undefined ? "" : ` [${message.block.kind}: ${message.block.status}]`}`
-        : `  user: ${message.text.slice(0, 120)}`
+        ? [
+            `  acme: ${message.text.slice(0, 120)}${message.block === undefined ? "" : ` [${message.block.kind}: ${message.block.status}]`}`
+          ]
+        : Predicate.isTagged(message, "UserMessage")
+          ? [`  user: ${message.text.slice(0, 120)}`]
+          : []
     )
     .join("\n")
 
@@ -110,26 +115,26 @@ const program = Effect.gen(function* () {
     Effect.ignore
   )
 
-  /** Folds a chat's view until `until` holds for the views so far. */
-  const waitFor = (chatId: ChatId.ChatId, label: string, until: (views: Views) => boolean, seconds = 90) => {
-    let seen: Views = []
+  /** Folds a chat's timeline until `until` holds for the timelines so far. */
+  const waitFor = (chatId: ChatId.ChatId, label: string, until: (timelines: Timelines) => boolean, seconds = 90) => {
+    let seen: Timelines = []
 
     return client.Subscribe({ chatId }).pipe(
       Stream.scan(
-        (): Views => [],
-        (views, update) => [...views, ChatView.apply(latest(views), update)]
+        (): Timelines => [],
+        (timelines, change) => [...timelines, Timeline.apply(latest(timelines), change)]
       ),
-      Stream.tap((views) => Effect.sync(() => (seen = views))),
-      Stream.takeUntil((views) => until(views) || failed(views)),
+      Stream.tap((timelines) => Effect.sync(() => (seen = timelines))),
+      Stream.takeUntil((timelines) => until(timelines) || failed(timelines)),
       Stream.runLast,
-      Effect.map(Option.getOrElse((): Views => [])),
+      Effect.map(Option.getOrElse((): Timelines => [])),
       Effect.timeoutOrElse({
         duration: Duration.seconds(seconds),
         orElse: () => Effect.fail(`${label}: timed out; the chat so far:\n${trace(seen)}`)
       }),
       Effect.filterOrFail(
-        (views) => !failed(views),
-        (views) => `${label}: a turn failed (the server's log says why); the chat so far:\n${trace(views)}`
+        (timelines) => !failed(timelines),
+        (timelines) => `${label}: a turn failed (the server's log says why); the chat so far:\n${trace(timelines)}`
       )
     )
   }
@@ -139,7 +144,7 @@ const program = Effect.gen(function* () {
   })
 
   /** Uses a block the way the web app does. */
-  const answer = (chatId: ChatId.ChatId, message: ChatView.AssistantMessage, value: Record<string, string | boolean>) =>
+  const answer = (chatId: ChatId.ChatId, message: Timeline.AssistantMessage, value: Record<string, string | boolean>) =>
     client.Submit({
       chatId,
       input: AssistantEvent.BlockAnswer.make({
@@ -217,7 +222,7 @@ const program = Effect.gen(function* () {
       const chatId = yield* newChat
       yield* send(chatId, "What did the Amsterdam office order recently?")
       // Working on it: the second question arrives while the first turn runs.
-      yield* waitFor(chatId, "working", (views) => latest(views).activity.working)
+      yield* waitFor(chatId, "working", (timelines) => latest(timelines).activity.working)
       yield* Effect.sleep("1500 millis")
       yield* send(chatId, "Also: what's the address of the London office?")
 
@@ -242,7 +247,7 @@ const program = Effect.gen(function* () {
 
       yield* place(chatId, "campaign", "campaign_draft")
 
-      const done = yield* waitFor(chatId, "first results", (views) => said(views, /conversion|clicks/i), 240)
+      const done = yield* waitFor(chatId, "first results", (timelines) => said(timelines, /conversion|clicks/i), 240)
 
       console.log(`     campaign > ${oneLine(messages(done).at(-1))}`)
     })
@@ -256,15 +261,15 @@ const program = Effect.gen(function* () {
       yield* place(chatId, "products", "order_draft")
 
       // The tracking number is only in the workflow's shipped step: the assistant shared it.
-      const shipped = yield* waitFor(chatId, "shipped, with tracking", (views) => said(views, /1Z/), 240)
+      const shipped = yield* waitFor(chatId, "shipped, with tracking", (timelines) => said(timelines, /1Z/), 240)
       const before = messages(shipped).length
 
       const delivered = yield* waitFor(
         chatId,
         "delivered",
-        (views) =>
-          idle(views) &&
-          messages(views)
+        (timelines) =>
+          idle(timelines) &&
+          messages(timelines)
             .slice(before)
             .some((text) => /deliver/i.test(text)),
         240

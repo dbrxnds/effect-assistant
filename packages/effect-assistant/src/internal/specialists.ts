@@ -84,11 +84,12 @@ export const runBrief = Effect.fnUntraced(
       brief: options.brief,
       history: current,
       loop: (loop) => {
-        const skills = loop.skills ?? []
+        const own = Toolkits.fromToolkitOrEmpty(loop.toolkit)
+        const skills = Skills.available(loop.skills ?? [], own.definitions)
 
         return Loop.run({
           instructions: mapText(loop.instructions, (text) => Skill.withCatalog(text, skills)),
-          toolkit: Toolkits.merge(Skills.toTools(skills), Toolkits.fromToolkitOrEmpty(loop.toolkit)),
+          toolkit: Toolkits.merge(Skills.toTools(skills), own),
           history: current,
           maxSteps: loop.maxSteps ?? 8
         })

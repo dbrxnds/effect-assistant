@@ -17,11 +17,11 @@ import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import * as Prompt from "effect/ai/Prompt"
 import * as Response from "effect/ai/Response"
 import * as Tool from "effect/ai/Tool"
 import * as Toolkit from "effect/ai/Toolkit"
 import {
-  AppEvent,
   Assistant,
   AssistantEngine,
   AssistantEvent,
@@ -178,14 +178,21 @@ describe("with a real model", () => {
 
     const Ordering = Assistant.make("contract-orders", {
       blocks: BlockKit.make([OrderDraft]),
-      events: [
-        AppEvent.make(OrderPlaced, {
-          wakes: true,
-          render: (placed) =>
-            `The user placed the order from your block: ${placed.quantity} ${placed.product}, reference ${placed.reference}.`
-        })
-      ]
+      events: [OrderPlaced]
     })
+
+    const placedOrders: Assistant.HistoryView<OrderPlaced> = (entries) =>
+      entries.map((entry) =>
+        entry.event instanceof OrderPlaced
+          ? Prompt.userMessage({
+              content: [
+                Prompt.textPart({
+                  text: `The user placed the order from your block: ${entry.event.quantity} ${entry.event.product}, reference ${entry.event.reference}.`
+                })
+              ]
+            })
+          : entry
+      )
 
     return Effect.gen(function* () {
       const chat = yield* newChat
@@ -212,7 +219,7 @@ describe("with a real model", () => {
     }).pipe(
       Effect.provide(
         runMemory(
-          Ordering.toLayer((turn) => turn.loop({ instructions })),
+          Ordering.toLayer((turn) => turn.loop({ instructions, history: placedOrders })),
           realModel
         )
       )

@@ -1,14 +1,13 @@
 import { defineConfig } from "vitepress"
 
 const modules = [
-  "AppEvent",
   "Assistant",
   "AssistantActivity",
   "AssistantEngine",
   "AssistantEvent",
   "ChatLog",
   "Chats",
-  "ChatView",
+  "Timeline",
   "CurrentChat",
   "AssistantLoop",
   "Block",

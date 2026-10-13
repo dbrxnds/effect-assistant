@@ -93,7 +93,8 @@ Effect.runPromise(program.pipe(Effect.provide(AppLive)))
    calling `send_user_message`, and ends its turn with `wait`. Tool output and the model's
    working notes stay out of the chat; the user sees only what it chose to say.
 5. **Readers follow the log.** `subscribe` streams every event, for your server and tests. Piped through
-   `ChatView.updates`, it streams what the user sees: messages, blocks, and whether something is working.
+   `Timeline.changes`, it streams the chat's timeline, what the user sees: messages, blocks, and whether something is
+   working.
 
 Because a turn is a stream, you change it with ordinary stream code: run something after the reply with
 `Stream.concat`, provide services with `Stream.provideService`. Don't buffer it: events would run ahead of the
@@ -109,7 +110,7 @@ above, and `instructions` is a prompt.
 ### A chat UI
 
 Your server is the edge between users and chats: it checks the user may use a chat, then passes calls through.
-The client gets the chat's view, never its log.
+The client gets the chat's timeline, never its log.
 
 ```ts
 const send = (chatId: ChatId.ChatId, inputId: InputId.InputId, text: string) =>
@@ -117,14 +118,20 @@ const send = (chatId: ChatId.ChatId, inputId: InputId.InputId, text: string) =>
 
 const watch = (chatId: ChatId.ChatId, after?: number) =>
   Stream.unwrap(
-    MyAssistant.useSync((assistant) => assistant.subscribe(chatId).pipe(ChatView.updates(MyAssistant, { after })))
+    MyAssistant.useSync((assistant) => assistant.subscribe(chatId).pipe(Timeline.changes(MyAssistant, { after })))
   )
 ```
 
-- `ChatView.updates` turns the chat's log into the chat as the user sees it: messages, blocks, `activity`,
-  `deleted`. The client folds it with `ChatView.apply`, from `ChatView.empty`.
-- `after` goes to `ChatView.updates`, not to `subscribe`: the view is folded from the whole log, and only the
-  updates up to `after` are skipped.
+- `Timeline.changes` turns the chat's log into its timeline, the chat as the user sees it: `items` (messages and
+  blocks), `activity`, `deleted`. The client folds the changes with `Timeline.fold` (or `Timeline.apply`, from
+  `Timeline.empty`).
+- None of your own events reach the client unless the server names them:
+  `Timeline.changes(MyAssistant, { show: [OrderPlaced] })`, with `Timeline.Change([OrderPlaced])` as the RPC's success
+  schema (a handler that shows more than the schema names doesn't compile). Each one is an item typed with its event:
+  its `_tag` is the event's and `event` is the event, so
+  `Match.valueTags(item, { UserMessage, AssistantMessage, OrderPlaced: (placed) => placed.event })`.
+- `after` goes to `Timeline.changes`, not to `subscribe`: the timeline is folded from the whole log, and only the
+  changes up to `after` are skipped.
 - The client picks the `InputId`, so a retried send is stored once.
 - Check the user may use the chat before calling either.
 
@@ -162,7 +169,8 @@ CREATE TABLE chat_log (
 
 - Each chat is a cluster entity: one writer, and a turn cut off by a crash resumes.
 - A process that only serves clients provides `MyAssistant.layerClient` (the service, no handler) with
-  `AssistantEngine.layerCluster`. Its calls reach the runners that run the chats.
+  `AssistantEngine.layerClusterClient`, which needs only `Sharding`, no `ChatLog`. Its calls reach the runners
+  that run the chats.
 
 ### Your chats, and deleting them
 
@@ -224,7 +232,7 @@ class OrderPlaced extends Schema.TaggedClass<OrderPlaced>()("OrderPlaced", {
 
 export const Shop = Assistant.make("shop", {
   blocks: BlockKit.make([OrderDraft]),
-  events: [AppEvent.make(OrderPlaced, { wakes: true })]
+  events: [OrderPlaced] // submitted by your API: it wakes a turn
 })
 
 // Your API, behind the block's button: once per block, then tell the chat.
@@ -236,6 +244,9 @@ const placeOrder = (chatId: ChatId.ChatId, messageId: string, order: typeof Orde
     )
   })
 ```
+
+The submitted `OrderPlaced` wakes a turn; the model reads it as your history view maps it (see
+[your own events](#your-own-events)).
 
 What the assistant may do by itself is a tool with final values; a question for the user is a block with an
 `answer` schema. The library doesn't run tools with Effect's `needsApproval`: a loop with one fails. See
@@ -293,13 +304,15 @@ turn. It decides what to tell the user, and can message or stop a run while it w
 ### Skills and big tool catalogs
 
 Both keep the prompt small. A skill is a playbook: the model sees its name and one line, and loads the steps
-with `load_skill` when a task matches. `ToolDiscovery` turns a big toolkit into two tools, `search_tools` and
+with `load_skill` when a task matches. A skill made with `tools` is offered only to a loop whose toolkit has every
+one of them. `ToolDiscovery` turns a big toolkit into two tools, `search_tools` and
 `execute_tool`, so the model finds a tool when it needs one instead of reading every definition.
 
 ```ts
 const reorder = Skill.make("reorder", {
   description: "Reordering something the user ordered before.",
-  instructions: "1. Find their last order of it. 2. Confirm quantity and address. 3. Place it."
+  instructions: "1. Find their last order of it. 2. Confirm quantity and address. 3. Place it with place_order.",
+  tools: [PlaceOrder] // left out of a loop without place_order
 })
 
 const Discovery = ToolDiscovery.make(AllOtherTools) // search_tools and execute_tool over a big toolkit
@@ -312,9 +325,10 @@ const MyAssistantLive = MyAssistant.toLayer((turn) =>
 
 ### Your own events
 
-Background work reports into the chat with events of your own: a workflow's progress, a webhook. An event
-with `wakes: true` starts a turn, and the model reads it as `render` says. The user sees it only if the
-assistant tells them.
+Background work reports into the chat with events of your own: a workflow's progress, a webhook. The
+definition lists their schemas. An event that comes in through `submit` starts a turn, like a message; one a
+turn appends itself never does. The model reads one as your history view maps it, and the user sees it only
+if the assistant tells them, or you `show` it on the timeline.
 
 ```ts
 class ShipmentUpdated extends Schema.TaggedClass<ShipmentUpdated>()("ShipmentUpdated", {
@@ -323,14 +337,23 @@ class ShipmentUpdated extends Schema.TaggedClass<ShipmentUpdated>()("ShipmentUpd
   status: Schema.String
 }) {}
 
-export const MyAssistant = Assistant.make("my-assistant", {
-  events: [
-    AppEvent.make(ShipmentUpdated, {
-      wakes: true, // starts a turn, like a message
-      render: (update) => `<update>Order ${update.orderId} is ${update.status}. The user hasn't seen this.</update>`
-    })
-  ]
-})
+export const MyAssistant = Assistant.make("my-assistant", { events: [ShipmentUpdated] })
+
+// What the model reads: each update as a short note.
+const shipments: Assistant.HistoryView<ShipmentUpdated> = (entries) =>
+  entries.map((entry) =>
+    entry.event instanceof ShipmentUpdated
+      ? Prompt.userMessage({
+          content: [
+            Prompt.textPart({
+              text: `<update>Order ${entry.event.orderId} is ${entry.event.status}. The user hasn't seen this.</update>`
+            })
+          ]
+        })
+      : entry
+  )
+
+const MyAssistantLive = MyAssistant.toLayer((turn) => turn.loop({ instructions, history: shipments }))
 
 // From a webhook or a workflow. The keyed id makes a redelivery harmless.
 const onShipment = (chatId: ChatId.ChatId, orderId: string, status: string) =>
@@ -350,7 +373,7 @@ turns run, uses the chat itself: its entries, and a way to add to them.
 ```ts
 class Note extends Schema.TaggedClass<Note>()("Note", { text: Schema.String }) {}
 
-export const MyAssistant = Assistant.make("my-assistant", { events: [AppEvent.make(Note)] })
+export const MyAssistant = Assistant.make("my-assistant", { events: [Note] })
 
 const NoteTools = Toolkit.make(
   Tool.make("note", {
@@ -423,7 +446,7 @@ chat. When to compact and what the summary says are yours.
 ```ts
 class Summary extends Schema.TaggedClass<Summary>()("Summary", { text: Schema.String, throughSeq: Schema.Int }) {}
 
-export const MyAssistant = Assistant.make("my-assistant", { events: [AppEvent.make(Summary)] })
+export const MyAssistant = Assistant.make("my-assistant", { events: [Summary] })
 
 const MyAssistantLive = MyAssistant.toLayer((turn) => {
   const compact = Effect.gen(function* () {

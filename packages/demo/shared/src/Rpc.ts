@@ -2,9 +2,9 @@
  * The RPCs between the browser and the API, over one WebSocket per tab at
  * `/rpc`.
  *
- * `Subscribe` streams a chat as its user sees it (`ChatView`): its messages
+ * `Subscribe` streams a chat as its user sees it (its `Timeline`): its messages
  * and their blocks, and whether Acme or a specialist is working. The web app
- * folds the updates and renders them; it never gets the assistant's own work
+ * folds the changes and renders them; it never gets the assistant's own work
  * (model output, tool calls, workflow steps).
  *
  * `PlaceOrder` and `StartCampaign` are the buttons on an order or campaign
@@ -16,7 +16,7 @@
 import * as AssistantEvent from "effect-assistant/AssistantEvent"
 import * as Chats from "effect-assistant/Chats"
 import * as ChatId from "effect-assistant/ChatId"
-import * as ChatView from "effect-assistant/ChatView"
+import * as Timeline from "effect-assistant/Timeline"
 import * as Schema from "effect/Schema"
 import * as Rpc from "effect/rpc/Rpc"
 import * as RpcGroup from "effect/rpc/RpcGroup"
@@ -24,14 +24,15 @@ import { CampaignDraft, OrderDraft } from "./Blocks.ts"
 import { ChatList } from "./ChatList.ts"
 
 /**
- * Streams a chat's view: what changed, from the start, then live.
+ * Streams a chat's timeline: what changed, from the start, then live.
  *
  * @category rpcs
  * @since 0.1.0
  */
 export const Subscribe = Rpc.make("Subscribe", {
   payload: { chatId: ChatId.ChatId },
-  success: ChatView.Update,
+  // The timeline with none of Acme's own events: the server shows none.
+  success: Timeline.Change(),
   stream: true
 })
 

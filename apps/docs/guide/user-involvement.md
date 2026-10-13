@@ -46,13 +46,14 @@ goes through the next way.
 The assistant prepares the work and shows it in a block with no `answer`
 schema. The block's button calls your API with exactly the props it shows,
 so the user commits to what they saw. Your API does the work and submits one
-of your [events](./app-events) that wakes a turn, so the assistant follows
+of your [events](./app-events), which wakes a turn, so the assistant follows
 up.
 
 **Example** (Placing an order the assistant prepared)
 
 ```ts
-import { AppEvent, Assistant, Block, BlockKit, InputId } from "effect-assistant"
+import { Assistant, Block, BlockKit, InputId } from "effect-assistant"
+import * as Prompt from "effect/ai/Prompt"
 import * as Schema from "effect/Schema"
 
 export const OrderDraft = Block.make("order_draft", {
@@ -68,13 +69,22 @@ class OrderPlaced extends Schema.TaggedClass<OrderPlaced>()("OrderPlaced", {
 
 export const Shop = Assistant.make("shop", {
   blocks: BlockKit.make([OrderDraft]),
-  events: [
-    AppEvent.make(OrderPlaced, {
-      wakes: true,
-      render: (placed) => `The user placed the order on your message ${placed.messageId}: ${placed.reference}.`
-    })
-  ]
+  events: [OrderPlaced]
 })
+
+// How the model reads it: pass it to the loop as `history`.
+const placedOrders: Assistant.HistoryView<OrderPlaced> = (entries) =>
+  entries.map((entry) =>
+    entry.event instanceof OrderPlaced
+      ? Prompt.userMessage({
+          content: [
+            Prompt.textPart({
+              text: `The user placed the order on your message ${entry.event.messageId}: ${entry.event.reference}.`
+            })
+          ]
+        })
+      : entry
+  )
 ```
 
 The model sends the block like any other:
@@ -116,14 +126,15 @@ const placeOrder = Effect.fn(function* (chatId: ChatId.ChatId, messageId: string
 ```
 
 The event's id is the order's, so it's stored once however often the button
-is clicked. The model reads it as the event's `render` says, and replies
+is clicked. Submitted, it wakes a turn; the model reads it as the history
+view maps it, and replies
 with the reference. Things may have changed since the block was shown: the
 API can refuse (over budget, say), and the user sees why on the block.
 
 The demo does this for orders and campaigns: `OrderDraft` and
 `CampaignDraft` in `packages/demo/shared/src/Blocks.ts`, `PlaceOrder` and
 `StartCampaign` in its RPCs, and `OrderPlaced` in
-`packages/demo/api/src/OrderPlaced.ts`.
+`packages/demo/shared/src/OrderPlaced.ts`.
 
 ## The user answers
 

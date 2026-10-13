@@ -14,7 +14,6 @@ or one module at a time, as Effect does:
 import * as Assistant from "effect-assistant/Assistant"
 ```
 
-- [AppEvent](./AppEvent)
 - [Assistant](./Assistant)
 - [AssistantActivity](./AssistantActivity)
 - [AssistantEngine](./AssistantEngine)
@@ -25,7 +24,6 @@ import * as Assistant from "effect-assistant/Assistant"
 - [BlockKit](./BlockKit)
 - [ChatId](./ChatId)
 - [ChatLog](./ChatLog)
-- [ChatView](./ChatView)
 - [Chats](./Chats)
 - [Compaction](./Compaction)
 - [CurrentChat](./CurrentChat)
@@ -35,5 +33,6 @@ import * as Assistant from "effect-assistant/Assistant"
 - [RunId](./RunId)
 - [Skill](./Skill)
 - [Specialist](./Specialist)
+- [Timeline](./Timeline)
 - [ToolDiscovery](./ToolDiscovery)
 - [ToolFailure](./ToolFailure)

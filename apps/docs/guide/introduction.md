@@ -31,7 +31,7 @@ nothing the model writes reaches you unless it chooses to send it.
 | [`Assistant`](/api/Assistant)                                      | Defines an assistant: its handler, and its service (`submit`, …).       |
 | [`Chats`](/api/Chats)                                              | Which chats exist: the app's, asked before inputs and model calls.      |
 | [`CurrentChat`](/api/CurrentChat)                                  | The chat that code runs in: its id, entries, and `append`.              |
-| [`ChatView`](/api/ChatView)                                        | A chat as its user sees it: what a chat client gets.                    |
+| [`Timeline`](/api/Timeline)                                        | A chat as its user sees it: what a chat client gets.                    |
 | [`AssistantEngine`](/api/AssistantEngine)                          | Runs the chats: in the process, or one cluster entity per chat.         |
 | [`AssistantEvent`](/api/AssistantEvent), [`ChatLog`](/api/ChatLog) | The events, and the log that stores them (memory or SQL).               |
 | [`AssistantLoop`](/api/AssistantLoop)                              | The agent loop, as a stream a handler returns, changes, or replaces.    |

@@ -5,7 +5,19 @@ import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import * as Stream from "effect/Stream"
 import * as Tracer from "effect/Tracer"
-import { type Assistant, AssistantEngine, AssistantEvent, BlockKit, ChatLog, CurrentChat } from "../../src/index.ts"
+import * as Tool from "effect/ai/Tool"
+import * as Toolkit from "effect/ai/Toolkit"
+import * as Deferred from "effect/Deferred"
+import * as Schema from "effect/Schema"
+import {
+  type Assistant,
+  AssistantActivity,
+  AssistantEngine,
+  AssistantEvent,
+  BlockKit,
+  ChatLog,
+  CurrentChat
+} from "../../src/index.ts"
 import { mayHaveRunOutput, notRunOutput } from "../../src/internal/history.ts"
 import { deliveryNudge, silentTurnMessage } from "../../src/internal/turns.ts"
 import * as Uuid from "../../src/internal/uuid.ts"
@@ -14,6 +26,7 @@ import {
   layerStorage,
   memoryAssistant,
   newChat,
+  runMemory,
   say,
   simple,
   TestAssistant,
@@ -50,44 +63,11 @@ const stopsEarly: Assistant.Handler = () =>
 
 const stopsEarlyLayer = memoryAssistant(stopsEarly, Scripted.unused)
 
-/**
- * The first turn reads the history, then an update lands before it ends (like a
- * specialist's answer), and it waits without replying. The next turn replies.
- */
-const lateUpdate = () => {
-  let turns = 0
-
-  return Effect.fn(function* (turn: Assistant.Turn<Update>) {
-    turns += 1
-    yield* turn.history()
-
-    if (turns === 1) {
-      yield* CurrentChat.CurrentChat.use((chat) => chat.append(update("specialist:research", { answer: "Ontario" })))
-
-      return Stream.make(
-        AssistantEvent.ModelOutput.make({ parts: [toolCall("w1", "wait")] }),
-        AssistantEvent.ToolResult.make({
-          callId: "w1",
-          tool: "wait",
-          outcome: "success",
-          result: "waiting"
-        })
-      )
-    }
-
-    yield* CurrentChat.CurrentChat.use((chat) =>
-      chat.append(AssistantEvent.AssistantMessage.make({ id: "answer", text: "It's in Ontario." }))
-    )
-
-    return Stream.empty
-  })
-}
-
 const lastTurnEnd = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
   entries.flatMap(({ event }) => (AssistantEvent.isTurnEnd(event) ? [event] : [])).at(-1)
 
 describe("turn completion", () => {
-  it.live("records TurnFailed when client input gets no assistant message", () =>
+  it.live("records TurnFailed when the loop ends without a message for the user's input", () =>
     Effect.gen(function* () {
       const assistant = TestAssistant
       const chat = yield* newChat
@@ -100,7 +80,46 @@ describe("turn completion", () => {
       expect(Predicate.isTagged(end!, "TurnFailed")).toBe(true)
       expect(Predicate.isTagged(end!, "TurnFailed") ? end!.message : "").toBe(silentTurnMessage)
       expect(AssistantEvent.assistantTexts(entries)).toEqual([])
+    }).pipe(
+      Effect.provide(
+        memoryAssistant(
+          simple({ instructions: "Be brief." }),
+          Scripted.layer(() => Scripted.wait())
+        )
+      )
+    )
+  )
+
+  it.live("never fails a handler that ends without the loop for being silent", () =>
+    Effect.gen(function* () {
+      const assistant = TestAssistant
+      const chat = yield* newChat
+      yield* (yield* assistant).submit(chat, say("hello?"))
+      const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 1)
+
+      expect(Predicate.isTagged(lastTurnEnd(entries)!, "TurnCompleted")).toBe(true)
+      expect(AssistantEvent.assistantTexts(entries)).toEqual([])
     }).pipe(Effect.provide(layer))
+  )
+
+  it.live("ends a turn whose handler records an app event and returns without the loop, waking none", () =>
+    Effect.gen(function* () {
+      const handler = Effect.fn(function* () {
+        yield* (yield* CurrentChat.CurrentChat).append(update("budget", { reached: "today" }))
+
+        return Stream.empty
+      })
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* (yield* Updating).submit(chat, say("one more?"))
+
+        return yield* collectUntil(Updating, chat, (es) => turnsDone(es) >= 1)
+      }).pipe(Effect.provide(updatingAssistant(handler, Scripted.unused)))
+
+      expect(entries.map(({ event }) => event._tag)).toEqual(["UserMessage", "TurnStarted", "Update", "TurnCompleted"])
+      expect(AssistantActivity.isWorking(AssistantActivity.fromEntries(entries))).toBe(false)
+    })
   )
 
   it.live("still allows a silent TurnCompleted for turns woken only by an app event", () =>
@@ -205,21 +224,54 @@ describe("turn completion", () => {
 
   it.live("leaves an input that arrived after the loop's last read to the next turn, without failing this one", () =>
     Effect.gen(function* () {
-      const assistant = Updating
-      const chat = yield* newChat
-      yield* (yield* assistant).submit(chat, say("which province is Ottawa in?"))
-      const entries = yield* collectUntil(assistant, chat, (es) => turnsDone(es) >= 2)
+      const started = yield* Deferred.make<void>()
+      const submitted = yield* Deferred.make<void>()
+
+      // A call that runs until the test has submitted an update: it lands after the model's last read.
+      const Hold = Tool.make("hold", { description: "Holds.", success: Schema.String })
+
+      const HoldTools = Toolkit.make(Hold)
+
+      const handler = (turn: Assistant.Turn<Update>) =>
+        Stream.unwrap(
+          Effect.map(
+            HoldTools.toHandlers({
+              hold: () =>
+                Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(submitted)), Effect.as("held"))
+            }),
+            (handlers) =>
+              turn.loop({ instructions: "Be brief.", toolkit: HoldTools }).pipe(Stream.provideContext(handlers))
+          )
+        )
+
+      let step = 0
+
+      const model = Scripted.layer(() =>
+        ++step === 1 ? [Scripted.call("wait"), Scripted.call("hold")] : Scripted.reply("It's in Ontario.")
+      )
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* (yield* Updating).submit(chat, say("which province is Ottawa in?"))
+        yield* Deferred.await(started)
+        yield* (yield* Updating).submit(chat, update("specialist:research", { answer: "Ontario" }))
+        yield* Deferred.succeed(submitted, undefined)
+
+        return yield* collectUntil(Updating, chat, (es) => turnsDone(es) >= 2)
+      }).pipe(Effect.provide(runMemory(Updating.toLayer(handler), model)))
 
       expect(AssistantEvent.assistantTexts(entries)).toEqual(["It's in Ontario."])
       expect(entries.flatMap(({ event }) => (AssistantEvent.isTurnEnd(event) ? [event._tag] : []))).toEqual([
         "TurnCompleted",
         "TurnCompleted"
       ])
-    }).pipe(Effect.provide(updatingAssistant(lateUpdate(), Scripted.unused)))
+    })
   )
 
   it.live("leaves an input the handler only read in the entries to the next turn", () =>
     Effect.gen(function* () {
+      const read = yield* Deferred.make<void>()
+      const submitted = yield* Deferred.make<void>()
       let turns = 0
 
       // The first turn reads the history, then an update lands, and it reads the entries (like a summary would).
@@ -228,9 +280,8 @@ describe("turn completion", () => {
         yield* turn.history()
 
         if (turns === 1) {
-          yield* CurrentChat.CurrentChat.use((chat) =>
-            chat.append(update("specialist:research", { answer: "Ontario" }))
-          )
+          yield* Deferred.succeed(read, undefined)
+          yield* Deferred.await(submitted)
           yield* (yield* CurrentChat.CurrentChat).entries
 
           return waitOnly()
@@ -246,6 +297,9 @@ describe("turn completion", () => {
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
         yield* (yield* Updating).submit(chat, say("which province is Ottawa in?"))
+        yield* Deferred.await(read)
+        yield* (yield* Updating).submit(chat, update("specialist:research", { answer: "Ontario" }))
+        yield* Deferred.succeed(submitted, undefined)
 
         return yield* collectUntil(Updating, chat, (es) => turnsDone(es) >= 2)
       }).pipe(Effect.provide(updatingAssistant(handler, Scripted.unused)))

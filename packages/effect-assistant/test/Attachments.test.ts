@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
-import { AssistantEvent, ChatId, ChatView, Compaction, InputId } from "../src/index.ts"
+import { AssistantEvent, ChatId, Timeline, Compaction, InputId } from "../src/index.ts"
 import * as History from "../src/internal/history.ts"
 
 const chatId = Effect.runSync(ChatId.make())
@@ -30,7 +30,7 @@ const userTexts = (history: ReturnType<typeof History.fromEntries>) =>
 
 describe("attachments", () => {
   it("gives the model the text and a line per file, never content", () => {
-    const history = History.fromEntries(entries([withFile]), () => undefined)
+    const history = History.fromEntries(entries([withFile]))
 
     expect(userTexts(history)).toEqual([
       `Print this please\n[attached: flyer.pdf, application/pdf, 2.1 MB, id ${flyer.fileId}]`
@@ -40,7 +40,7 @@ describe("attachments", () => {
   it("leaves a message without files as it was", () => {
     const plain = AssistantEvent.UserMessage.make({ id: InputId.fromKey("b"), text: "hi" })
 
-    expect(userTexts(History.fromEntries(entries([plain]), () => undefined))).toEqual(["hi"])
+    expect(userTexts(History.fromEntries(entries([plain])))).toEqual(["hi"])
   })
 
   it("survives the log's JSON form", () => {
@@ -50,11 +50,11 @@ describe("attachments", () => {
     expect(decoded.attachments).toEqual([flyer])
   })
 
-  it("shows the files in the chat view", () => {
-    const shown = ChatView.fromEntries(entries([withFile]), { wakes: new Set(["Update"]) })
+  it("shows the files in the chat's timeline", () => {
+    const shown = Timeline.fromEntries(entries([withFile]))
 
-    expect(shown.messages).toEqual([
-      ChatView.UserMessage.make({
+    expect(shown.items).toEqual([
+      Timeline.UserMessage.make({
         id: withFile.id,
         text: "Print this please",
         attachments: [flyer],

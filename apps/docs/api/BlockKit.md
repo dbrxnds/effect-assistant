@@ -50,88 +50,6 @@ interface State {
   /** The user's answer, if they used the block. */
   readonly answer: AssistantEvent.BlockAnswer | undefined
 }
-
-/**
- * Returns the block states after one more event.
- *
- * @category utils
- * @since 0.1.0
- */
-export const apply = (
-  states: ReadonlyMap<string, State>,
-  event: { readonly _tag: string }
-): ReadonlyMap<string, State> => {
-  if (!AssistantEvent.isLibraryEvent(event)) return states
-
-  const close = (ids: ReadonlyArray<string>) => {
-    const open = ids.filter((id) => states.get(id)?.open === true)
-
-    if (open.length === 0) return states
-
-    const next = new Map(states)
-
-    for (const id of open) next.set(id, { open: false, answer: undefined })
-
-    return next
-  }
-
-  if (Predicate.isTagged(event, "BlocksClosed")) return close(event.messageIds)
-
-  if (Predicate.isTagged(event, "AssistantMessage")) {
-    const closed = close(event.closes ?? [])
-
-    return event.block === undefined ? closed : new Map(closed).set(event.id, { open: true, answer: undefined })
-  }
-
-  if (!Predicate.isTagged(event, "BlockAnswer") || states.get(event.messageId)?.open !== true) return states
-
-  return new Map(states).set(event.messageId, { open: false, answer: event })
-}
-
-/**
- * Returns the state of every message's block, by message id.
- *
- * @category utils
- * @since 0.1.0
- */
-export const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): ReadonlyMap<string, State> => {
-  let states: ReadonlyMap<string, State> = new Map()
-
-  for (const entry of entries) states = apply(states, entry.event)
-
-  return states
-}
-
-/**
- * Returns the ids of the messages whose blocks are still open after the user typed the given
- * number of messages without using them.
- *
- * **Details**
- *
- * These are the blocks {@link closeStale} closes.
- *
- * @category utils
- * @since 0.1.0
- */
-export const staleBlocks = (
-  entries: ReadonlyArray<AssistantEvent.AnyEntry>,
-  options: { readonly messages: number }
-): ReadonlyArray<string> => {
-  const open = [...fromEntries(entries)].flatMap(([id, state]) => (state.open ? [id] : []))
-
-  return open.filter((id) => {
-    const shown = entries.findIndex(
-      ({ event }) =>
-        AssistantEvent.isLibraryEvent(event) && Predicate.isTagged(event, "AssistantMessage") && event.id === id
-    )
-
-    if (shown === -1) return false
-
-    const typed = entries.slice(shown + 1).filter(({ event }) => Predicate.isTagged(event, "UserMessage")).length
-
-    return typed >= options.messages
-  })
-}
 ```
 
 <small>Since 0.1.0</small>
@@ -142,6 +60,11 @@ Represents what a renderer receives for one block.
 
 ```ts
 interface RenderArgs<B> {
+  /**
+   * The id of the message the block is on. A block whose button calls your API can key the work
+   * on it, with the chat's id, so the work runs once per block.
+   */
+  readonly messageId: string
   readonly text: string
   readonly props: PropsOf<B>
   /**
@@ -153,114 +76,6 @@ interface RenderArgs<B> {
   readonly answer: AnswerOf<B> | undefined
   /** Sends an answer. Only call it while `open`. */
   readonly respond: (answer: AnswerOf<B>) => void
-}
-
-/**
- * Represents a renderer for every kind in a kit.
- *
- * @category models
- * @since 0.1.0
- */
-export type Renderers<Kit extends BlockKit, Out> = {
-  readonly [K in KindOf<Kit["blocks"][number]>]: (args: RenderArgs<BlockOf<Kit, K>>) => Out
-}
-
-/**
- * Represents the options for rendering one message's block.
- *
- * @category models
- * @since 0.1.0
- */
-export interface RenderOptions {
-  /** Submits an answer, for example over RPC. */
-  readonly respond: (answer: AssistantEvent.BlockAnswer) => void
-}
-
-/**
- * Creates a client-side renderer for the blocks on a chat view's messages
- * (`ChatView.AssistantMessage`).
- *
- * **Details**
- *
- * The renderers are type-checked, so every kind in the kit needs one, and each receives typed
- * `props` and `answer`. A renderer's `respond` builds a `BlockAnswer` input, with the answer
- * encoded by the block's answer schema, and passes it to the `respond` option to submit.
- *
- * The returned function returns `undefined` for a message without a block, or with a block it
- * can't decode or has no renderer for.
- *
- * **Example** (Rendering blocks with React)
- *
- * ```tsx
- * import { BlockKit } from "effect-assistant"
- * import type { ReactNode } from "react"
- *
- * const Blocks = BlockKit.make([PickOne, OrderDraft])
- *
- * const renderBlock = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
- *   pick_one: ({ props, open, respond }) =>
- *     props.options.map((option) => (
- *       <button key={option} disabled={!open} onClick={() => respond({ picked: option })}>
- *         {option}
- *       </button>
- *     )),
- *   // No answer schema: the button calls the app's own API with the props the user sees.
- *   order_draft: ({ props }) => <button onClick={() => placeOrder(props)}>Place order</button>
- * })
- *
- * // For each AssistantMessage in the chat's view:
- * renderBlock(message, { respond: (answer) => submit(answer) })
- * ```
- *
- * @category constructors
- * @since 0.1.0
- */
-export function toClient<Kit extends BlockKit, Out>(
-  kit: Kit,
-  renderers: Renderers<Kit, Out>
-): (message: ChatView.AssistantMessage, options: RenderOptions) => Out | undefined
-// The overload above checks that every kind has a renderer; here each one takes any block's
-// arguments.
-export function toClient<Out>(
-  kit: BlockKit,
-  renderers: Readonly<Record<string, (args: RenderArgs<Block.Any>) => Out>>
-): (message: ChatView.AssistantMessage, options: RenderOptions) => Out | undefined {
-  return (message, options) => {
-    if (message.block === undefined) return undefined
-
-    const { kind } = message.block
-    const block = kit.byKind.get(kind)
-    const render = renderers[kind]
-
-    if (block === undefined || render === undefined) return undefined
-
-    const props = Schema.decodeUnknownOption(block.props)(message.block.props)
-
-    if (Option.isNone(props)) return undefined
-
-    const given = message.block.answer
-    const answerCodec = block.answer === undefined ? undefined : Schema.toCodecJson(block.answer)
-
-    const answer =
-      given === undefined || answerCodec === undefined ? Option.none() : Schema.decodeUnknownOption(answerCodec)(given)
-
-    return render({
-      text: message.text,
-      props: props.value,
-      open: message.block.status === "open",
-      answer: Option.getOrUndefined(answer),
-      respond: (value) =>
-        options.respond(
-          AssistantEvent.BlockAnswer.make({
-            // A block takes one answer: the same id every time, so a second click is stored once.
-            id: InputId.fromKey(`${message.id}:answer`),
-            messageId: message.id,
-            kind,
-            value: answerCodec === undefined ? value : Schema.encodeUnknownSync(answerCodec)(value)
-          })
-        )
-    })
-  }
 }
 ```
 

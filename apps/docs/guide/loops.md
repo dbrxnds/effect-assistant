@@ -104,6 +104,38 @@ const MyAssistantHandlers = MyAssistant.toLayer((turn) => turn.loop({ instructio
 Cut the entries just after a turn ended: a turn closes its tool calls before
 it ends, so every call keeps its result.
 
+### Your own events
+
+The model reads none of your [events](./app-events) by itself: the view maps
+those it should read to prompt messages, and an app event's entry it leaves
+in is dropped. A message stands where the event was, and waits like an input
+for open calls' results and for the model's next read (see
+[history order](./events#history-order)).
+
+**Example** (A short note for the model when the daily budget ran out)
+
+```ts
+import { type Assistant, Compaction } from "effect-assistant"
+import * as Prompt from "effect/ai/Prompt"
+import * as Schema from "effect/Schema"
+
+class DailyBudgetReached extends Schema.TaggedClass<DailyBudgetReached>()("DailyBudgetReached", {}) {}
+
+const note = (text: string) => Prompt.userMessage({ content: [Prompt.textPart({ text })] })
+
+const withBudgetNotes = (item: Assistant.Entry<Summary | DailyBudgetReached> | Prompt.Message) =>
+  "event" in item && item.event instanceof DailyBudgetReached
+    ? note("The user reached today's budget here; they were told, and you didn't run.")
+    : item
+
+const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
+  turn.loop({
+    instructions,
+    history: (entries) => Compaction.since(Schema.is(Summary))(entries).map(withBudgetNotes)
+  })
+)
+```
+
 ## Compaction
 
 To have a long chat read a summary instead of everything before it, use

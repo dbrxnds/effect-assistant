@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import { AssistantEvent, Block, BlockKit, ChatId, ChatView, InputId } from "../src/index.ts"
+import { AssistantEvent, Block, BlockKit, ChatId, Timeline, InputId } from "../src/index.ts"
 import { say } from "./utils/fixtures.ts"
 
 const Choose = Block.make("choose_one", {
@@ -24,14 +24,14 @@ const message = (id: string, block?: AssistantEvent.MessageBlock) =>
     ? AssistantEvent.AssistantMessage.make({ id, text: "Pick one" })
     : AssistantEvent.AssistantMessage.make({ id, text: "Pick one", block })
 
-/** A message as a client's view has it, after these events. */
+/** A message as a client's timeline has it, after these events. */
 const viewed = (id: string, events: ReadonlyArray<AssistantEvent.AssistantEvent>) =>
-  ChatView.fromEntries(
+  Timeline.fromEntries(
     events.map((event, i) =>
       AssistantEvent.Entry.make({ chatId: Effect.runSync(ChatId.make()), seq: i + 1, at: 0, event })
     )
-  ).messages.find(
-    (shown): shown is ChatView.AssistantMessage => shown.id === id && Predicate.isTagged(shown, "AssistantMessage")
+  ).items.find(
+    (shown): shown is Timeline.AssistantMessage => shown.id === id && Predicate.isTagged(shown, "AssistantMessage")
   )!
 
 const choice = (options: ReadonlyArray<string>) =>

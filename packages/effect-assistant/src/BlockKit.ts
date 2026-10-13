@@ -14,7 +14,7 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as AssistantEvent from "./AssistantEvent.ts"
 import type * as Block from "./Block.ts"
-import type * as ChatView from "./ChatView.ts"
+import type * as Timeline from "./Timeline.ts"
 import { CurrentChat } from "./CurrentChat.ts"
 import * as InputId from "./InputId.ts"
 
@@ -210,8 +210,8 @@ export interface RenderOptions {
 }
 
 /**
- * Creates a client-side renderer for the blocks on a chat view's messages
- * (`ChatView.AssistantMessage`).
+ * Creates a client-side renderer for the blocks on the assistant's messages in a chat's timeline
+ * (`Timeline.AssistantMessage`).
  *
  * **Details**
  *
@@ -241,7 +241,7 @@ export interface RenderOptions {
  *   order_draft: ({ props }) => <button onClick={() => placeOrder(props)}>Place order</button>
  * })
  *
- * // For each AssistantMessage in the chat's view:
+ * // For each AssistantMessage in the chat's timeline:
  * renderBlock(message, { respond: (answer) => submit(answer) })
  * ```
  *
@@ -251,13 +251,13 @@ export interface RenderOptions {
 export function toClient<Kit extends BlockKit, Out>(
   kit: Kit,
   renderers: Renderers<Kit, Out>
-): (message: ChatView.AssistantMessage, options: RenderOptions) => Out | undefined
+): (message: Timeline.AssistantMessage, options: RenderOptions) => Out | undefined
 // The overload above checks that every kind has a renderer; here each one takes any block's
 // arguments.
 export function toClient<Out>(
   kit: BlockKit,
   renderers: Readonly<Record<string, (args: RenderArgs<Block.Any>) => Out>>
-): (message: ChatView.AssistantMessage, options: RenderOptions) => Out | undefined {
+): (message: Timeline.AssistantMessage, options: RenderOptions) => Out | undefined {
   return (message, options) => {
     if (message.block === undefined) return undefined
 

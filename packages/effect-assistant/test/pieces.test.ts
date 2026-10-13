@@ -7,16 +7,7 @@ import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import {
-  AppEvent,
-  Assistant,
-  AssistantEvent,
-  AssistantLoop,
-  ChatId,
-  ChatLog,
-  CurrentChat,
-  InputId
-} from "../src/index.ts"
+import { Assistant, AssistantEvent, AssistantLoop, ChatId, ChatLog, CurrentChat, InputId } from "../src/index.ts"
 import { collectUntil, failures, newChat, runMemory, say, turnsDone } from "./utils/fixtures.ts"
 import * as Scripted from "./utils/scripted.ts"
 
@@ -31,9 +22,7 @@ class FileUploaded extends Schema.TaggedClass<FileUploaded>()("FileUploaded", {
   name: Schema.String
 }) {}
 
-const Compacting = Assistant.make("compacting", {
-  events: [AppEvent.make(Summary), AppEvent.make(FileUploaded, { wakes: true })]
-})
+const Compacting = Assistant.make("compacting", { events: [Summary, FileUploaded] })
 
 // Not registered with any assistant.
 const Unknown = Schema.TaggedStruct("Unknown", { n: Schema.Int })
@@ -42,9 +31,15 @@ class DraftOpened extends Schema.TaggedClass<DraftOpened>()("DraftOpened", {
   draftId: Schema.String
 }) {}
 
-const Drafting = Assistant.make("drafting", {
-  events: [AppEvent.make(DraftOpened, { render: (opened) => `The user opened draft ${opened.draftId}.` })]
-})
+const Drafting = Assistant.make("drafting", { events: [DraftOpened] })
+
+const note = (text: string) => Prompt.userMessage({ content: [Prompt.textPart({ text })] })
+
+/** The model reads an opened draft as a note, and none of the other app events. */
+const draftNotes: Assistant.HistoryView<DraftOpened> = (entries) =>
+  entries.map((entry) =>
+    entry.event instanceof DraftOpened ? note(`The user opened draft ${entry.event.draftId}.`) : entry
+  )
 
 const summary = Summary.make({ throughSeq: 1, text: "They asked about pens.", at: new Date(0) })
 
@@ -93,10 +88,15 @@ describe("the app's own events", () => {
     })
   )
 
-  it.live("an input wakes a turn, the model reads it, and it's stored once per id", () =>
+  it.live("one submitted wakes a turn, the model reads it as the view maps it, and it's stored once per id", () =>
     Effect.gen(function* () {
       const model = yield* Scripted.make(() => Scripted.reply("Got the file."))
       const upload = FileUploaded.make({ id: InputId.fromKey("upload-1"), name: "brief.pdf" })
+
+      const uploads: Assistant.HistoryView<Summary | FileUploaded> = (entries) =>
+        entries.map((entry) =>
+          entry.event instanceof FileUploaded ? note(`The user uploaded ${entry.event.name}.`) : entry
+        )
 
       const entries = yield* Effect.gen(function* () {
         const chat = yield* newChat
@@ -107,7 +107,7 @@ describe("the app's own events", () => {
       }).pipe(
         Effect.provide(
           runMemory(
-            Compacting.toLayer((turn) => turn.loop({ instructions: "Be brief." })),
+            Compacting.toLayer((turn) => turn.loop({ instructions: "Be brief.", history: uploads })),
             model.layer
           )
         )
@@ -116,33 +116,68 @@ describe("the app's own events", () => {
       const [request] = yield* model.requests
 
       expect(entries.flatMap(({ event }) => (event instanceof FileUploaded ? [event] : []))).toEqual([upload])
-      expect(Scripted.lastInput(request!)).toBe('<FileUploaded>\n{"id":"upload-1","name":"brief.pdf"}\n</FileUploaded>')
+      expect(Scripted.inputs(request!)).toEqual(["The user uploaded brief.pdf."])
     })
   )
 
-  it.live("an event that doesn't wake a turn starts none, and the next turn reads it as its render says", () =>
+  it.live("the model doesn't read one no history view maps", () =>
     Effect.gen(function* () {
-      const model = yield* Scripted.make(() => Scripted.reply("On it."))
+      const model = yield* Scripted.make(() => Scripted.reply("Got the file."))
 
-      const entries = yield* Effect.gen(function* () {
+      yield* Effect.gen(function* () {
         const chat = yield* newChat
-        yield* (yield* Drafting).submit(chat, DraftOpened.make({ draftId: "d1" }))
-        yield* (yield* Drafting).submit(chat, say("finish it"))
-
-        return yield* collectUntil(Drafting, chat, (es) => turnsDone(es) >= 1)
+        yield* (yield* Compacting).submit(chat, say("I'll upload the brief."))
+        yield* collectUntil(Compacting, chat, (es) => turnsDone(es) >= 1)
+        yield* (yield* Compacting).submit(
+          chat,
+          FileUploaded.make({ id: InputId.fromKey("upload-2"), name: "brief.pdf" })
+        )
+        yield* collectUntil(Compacting, chat, (es) => turnsDone(es) >= 2)
       }).pipe(
         Effect.provide(
           runMemory(
-            Drafting.toLayer((turn) => turn.loop({ instructions: "Be brief." })),
+            Compacting.toLayer((turn) => turn.loop({ instructions: "Be brief." })),
             model.layer
           )
         )
       )
 
-      const [request] = yield* model.requests
+      const last = (yield* model.requests).at(-1)
 
-      expect(entries.filter(({ event }) => Predicate.isTagged(event, "TurnStarted"))).toHaveLength(1)
-      expect(Scripted.inputs(request!)).toEqual(["The user opened draft d1.", "finish it"])
+      expect(Scripted.inputs(last!)).toEqual(["I'll upload the brief."])
+    })
+  )
+
+  it.live("one a turn appends wakes none, and the next turn reads it as the view maps it", () =>
+    Effect.gen(function* () {
+      const model = yield* Scripted.make(() => Scripted.reply("On it."))
+
+      const handlers = Drafting.toLayer((turn) =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            const chat = yield* Drafting.Chat
+
+            if ((yield* chat.entries).every(({ event }) => !(event instanceof DraftOpened)))
+              yield* chat.append(DraftOpened.make({ draftId: "d1" }))
+
+            return turn.loop({ instructions: "Be brief.", history: draftNotes })
+          })
+        )
+      )
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* (yield* Drafting).submit(chat, say("open my draft"))
+        yield* collectUntil(Drafting, chat, (es) => turnsDone(es) >= 1)
+        yield* (yield* Drafting).submit(chat, say("finish it"))
+
+        return yield* collectUntil(Drafting, chat, (es) => turnsDone(es) >= 2)
+      }).pipe(Effect.provide(runMemory(handlers, model.layer)))
+
+      const last = (yield* model.requests).at(-1)
+
+      expect(entries.filter(({ event }) => Predicate.isTagged(event, "TurnStarted"))).toHaveLength(2)
+      expect(Scripted.inputs(last!)).toEqual(["open my draft", "The user opened draft d1.", "finish it"])
     })
   )
 
