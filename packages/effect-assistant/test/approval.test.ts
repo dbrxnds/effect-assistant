@@ -119,8 +119,7 @@ const looping = (turn: Assistant.Turn) => turn.loop({ instructions, toolkit: Ord
 const requested = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
   entries.flatMap(({ event }) => (Predicate.isTagged(event, "ApprovalRequested") ? [event] : []))
 
-const timelineOf = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
-  Timeline.fromEntries(entries, Ordering, { approvals: { place_order: PlaceOrderParams } })
+const timelineOf = (entries: ReadonlyArray<AssistantEvent.Entry>) => Timeline.fromEntries(entries)
 
 const approvalItems = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
   timelineOf(entries).items.flatMap((item) => (Predicate.isTagged(item, "ToolApproval") ? [item] : []))
@@ -147,10 +146,9 @@ describe("a tool with needsApproval, in a turn", () => {
       expect(entries.at(-1)?.event._tag).toBe("TurnCompleted")
       expect(entries.filter(({ event }) => Predicate.isTagged(event, "ModelOutput"))).toHaveLength(1)
       expect(
-        approvalItems(entries).map(({ id, tool, params, status, reason, outcome }) => ({
+        approvalItems(entries).map(({ id, tool, status, reason, outcome }) => ({
           id,
           tool,
-          params,
           status,
           reason,
           outcome
@@ -159,7 +157,6 @@ describe("a tool with needsApproval, in a turn", () => {
         {
           id: request!.callId,
           tool: "place_order",
-          params: { sku: "tote", quantity: 300 },
           status: "pending",
           reason: undefined,
           outcome: undefined
@@ -380,10 +377,10 @@ describe("a tool with needsApproval, elsewhere", () => {
 })
 
 describe("approvals on the timeline", () => {
-  it.live("are items typed with the params the RPC's schema names, and the client builds the decision", () =>
+  it.live("are an item for every call, only the yes or no, and the client builds the decision", () =>
     Effect.gen(function* () {
       const { layer } = yield* ordering(looping)
-      const Wire = Timeline.Change({ approvals: { place_order: PlaceOrderParams } })
+      const Wire = Timeline.Change()
 
       const timeline = yield* Effect.gen(function* () {
         const chat = yield* newChat
@@ -392,7 +389,7 @@ describe("approvals on the timeline", () => {
 
         // As an RPC would: encoded with its schema, to JSON text and back.
         return yield* (yield* Ordering).subscribe(chat).pipe(
-          Timeline.changes(Ordering, { approvals: { place_order: PlaceOrderParams } }),
+          Timeline.changes(Ordering),
           Stream.map((change) =>
             Schema.decodeUnknownSync(Wire)(JSON.parse(JSON.stringify(Schema.encodeSync(Wire)(change))))
           ),
@@ -408,20 +405,20 @@ describe("approvals on the timeline", () => {
         Match.valueTags(item, {
           UserMessage: (sent) => `user: ${sent.text}`,
           AssistantMessage: (sent) => `assistant: ${sent.text}`,
-          ToolApproval: (approval) =>
-            approval.tool === "place_order" ? `approve ${approval.params.quantity} ${approval.params.sku}?` : ""
+          ToolApproval: (approval) => `${approval.status}: ${approval.tool}`
         })
       )
 
-      // The message the step sent went out while the call was set aside for approval.
+      // The assistant's message says what it asks; the item is the yes or no.
       expect(lines).toEqual([
         "user: Order 300 totes.",
         "assistant: Here's the order: approve it to place it.",
-        "approve 300 tote?"
+        "pending: place_order"
       ])
 
-      const approval = items.find((item) => Predicate.isTagged(item, "ToolApproval"))!
+      const approval = items.flatMap((item) => (Predicate.isTagged(item, "ToolApproval") ? [item] : []))[0]!
 
+      expect(Object.keys(approval).sort()).toEqual(["_tag", "at", "id", "outcome", "reason", "status", "tool"])
       expect(ToolApproval.approve(approval)).toEqual(
         AssistantEvent.ApprovalDecision.make({
           id: ToolApproval.decisionId(approval.id),
@@ -429,13 +426,6 @@ describe("approvals on the timeline", () => {
           decision: "approved"
         })
       )
-
-      // Without `approvals`, the timeline shows none.
-      const none = Schema.decodeUnknownSync(Timeline.Change())(
-        JSON.parse(JSON.stringify(Schema.encodeSync(Wire)({ ...Timeline.empty, items })))
-      )
-
-      expect(none.items.map((item) => item._tag)).toEqual(["UserMessage", "AssistantMessage"])
     })
   )
 })

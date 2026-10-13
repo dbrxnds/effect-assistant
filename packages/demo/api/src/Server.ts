@@ -4,7 +4,6 @@
  *
  * @since 0.1.0
  */
-import { Approvals } from "@acme/demo-shared/Approvals"
 import { AcmeRpcs } from "@acme/demo-shared/Rpc"
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
 import * as Timeline from "effect-assistant/Timeline"
@@ -29,9 +28,9 @@ const layerRpcHandlers = AcmeRpcs.toLayer(
     const orders = yield* LiveOrders.LiveOrders
 
     return AcmeRpcs.of({
-      // No `show`: Acme's own events are for the model, so none reach the user. Its orders and campaigns wait for
-      // the user's approval on the timeline.
-      Subscribe: ({ chatId }) => acme.subscribe(chatId).pipe(Timeline.changes(AcmeAssistant, { approvals: Approvals })),
+      // No `show`: Acme's own events are for the model, so none reach the user. Its orders and campaigns waiting for
+      // the user's approval are on the timeline anyway.
+      Subscribe: ({ chatId }) => acme.subscribe(chatId).pipe(Timeline.changes(AcmeAssistant)),
       Submit: ({ chatId, input }) =>
         (Predicate.isTagged(input, "UserMessage") ? chats.titleFromMessage(chatId, input.text) : Effect.void).pipe(
           Effect.andThen(acme.submit(chatId, input))

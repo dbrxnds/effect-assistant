@@ -5,19 +5,17 @@
  * `ApprovalDecision`. Either way the item shows where it stands, and stops
  * taking input once it's answered or decided.
  */
-import type { Approvals } from "@acme/demo-shared/Approvals"
 import { Blocks } from "@acme/demo-shared/Blocks"
 import type * as AssistantEvent from "effect-assistant/AssistantEvent"
 import * as BlockKit from "effect-assistant/BlockKit"
 import type * as ChatId from "effect-assistant/ChatId"
 import type * as Timeline from "effect-assistant/Timeline"
 import * as ToolApproval from "effect-assistant/ToolApproval"
-import * as Match from "effect/Match"
 import * as Predicate from "effect/Predicate"
 import { createContext, type ReactNode, useContext, useState } from "react"
 
-/** The items of Acme's timeline: messages, and its orders and campaigns waiting for approval. */
-export type AcmeItem = Timeline.Item<never, Timeline.ParamsOf<typeof Approvals>>
+/** The items of Acme's timeline: messages, and its calls waiting for the user's approval. */
+export type AcmeItem = Timeline.Item
 
 /** What the renderers need from the page: the chat, its items, and a way to send what the user does. */
 export interface BlockContextValue {
@@ -32,34 +30,11 @@ export const BlockContext = createContext<BlockContextValue>({
   respond: () => {}
 })
 
-/** What a block shows, one per line: what the user places. */
-function Preview(props: { readonly value: unknown }) {
-  if (!Predicate.isObject(props.value) || Array.isArray(props.value)) return null
+/** A tool's name as people read it: `start_campaign` is "start campaign". */
+const toolName = (tool: string) => tool.replaceAll("_", " ")
 
-  return (
-    <dl className="block-preview">
-      {Object.entries(props.value).map(([key, value]) => (
-        <div key={key}>
-          <dt>{key}</dt>
-          <dd>{Array.isArray(value) ? value.join(", ") : String(value)}</dd>
-        </div>
-      ))}
-    </dl>
-  )
-}
-
-type AcmeApproval = Extract<AcmeItem, { readonly _tag: "ToolApproval" }>
-
-/** The line above a call to approve: what it does, in words. */
-export const approvalTitle = (approval: AcmeApproval): string =>
-  Match.value(approval).pipe(
-    Match.when(
-      { tool: "place_order" },
-      ({ params }) => `Place ${params.quantity} × ${params.product} for ${params.office}?`
-    ),
-    Match.when({ tool: "start_campaign" }, ({ params }) => `Start ${params.campaign} for ${params.office}?`),
-    Match.exhaustive
-  )
+/** The line for a call to approve. Acme's message above it says what the call does. */
+export const approvalTitle = (approval: Timeline.ApprovalItem): string => `Approve: ${toolName(approval.tool)}?`
 
 const decided = {
   approved: "Approved",
@@ -67,8 +42,12 @@ const decided = {
   expired: "Expired"
 }
 
-/** A call Acme asks the user to approve: what it does, and Approve and Reject while it waits. */
-function ApprovalCard(props: { readonly approval: AcmeApproval }) {
+/**
+ * A call Acme asks the user to approve: Approve and Reject while it waits,
+ * then where it stands. Acme's message says what it asks; this is the yes or
+ * no.
+ */
+function ApprovalCard(props: { readonly approval: Timeline.ApprovalItem }) {
   const { respond } = useContext(BlockContext)
   const [clicked, setClicked] = useState(false)
   const { approval } = props
@@ -81,7 +60,6 @@ function ApprovalCard(props: { readonly approval: AcmeApproval }) {
 
   return (
     <div className="block-place">
-      <Preview value={approval.params} />
       <div className="block-options">
         {approval.status === "pending" ? (
           <>

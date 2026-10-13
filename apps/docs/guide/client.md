@@ -180,32 +180,16 @@ newer server than the client, say), is left out of the change.
 A call to a tool that needs the user's approval (see
 [involving the user](./user-involvement)) is an item on the timeline too, a
 [`Timeline.ApprovalItem`](/api/Timeline#approvalitem): `_tag: "ToolApproval"`,
-the call's `id`, the `tool`, its `params`, its `status` (`"pending"`,
-`"approved"`, `"rejected"`, or `"expired"`), the user's `reason` when they
-rejected it with one, the `outcome` of an approved call once it ran, and
-`at`. A change updates it in place as it's decided and run.
+the call's `id`, the `tool`'s name, its `status` (`"pending"`, `"approved"`,
+`"rejected"`, or `"expired"`), the user's `reason` when they rejected it with
+one, the `outcome` of an approved call once it ran, and `at`. A change
+updates it in place as it's decided and run.
 
-The client renders it without the tools, whose handlers are the server's:
-the RPC's schema names the tools whose calls it shows, with their
-parameters' schemas, from a module both import. The server passes the same
-ones to `changes`; a call to any other tool isn't shown.
+It's only the yes or no. The assistant's own message, sent with the call,
+tells the user what it asks them to approve, so the item carries no params,
+and the client needs nothing of the tool. Every call waiting for approval is
+on the timeline, with no option on the RPC's schema or on `changes`.
 
-```ts
-// Shared: what the user approves, by tool.
-export const Approvals = { place_order: PlaceOrderParams }
-
-export const Subscribe = Rpc.make("Subscribe", {
-  payload: { chatId: ChatId.ChatId },
-  success: Timeline.Change({ events: [DailyBudgetReached], approvals: Approvals }),
-  stream: true
-})
-
-// The server.
-Subscribe: ({ chatId }) =>
-  assistant.subscribe(chatId).pipe(Timeline.changes(MyAssistant, { show: [DailyBudgetReached], approvals: Approvals }))
-```
-
-The item's `tool` narrows its `params`, and
 [`ToolApproval.approve`](/api/ToolApproval#approve) and
 [`ToolApproval.reject`](/api/ToolApproval#reject) build the decision to
 submit, like a block's `respond` builds its answer:
@@ -214,17 +198,15 @@ submit, like a block's `respond` builds its answer:
 import { Timeline, ToolApproval } from "effect-assistant"
 import * as Match from "effect/Match"
 
-type MyItem = Timeline.Item<DailyBudgetReached, Timeline.ParamsOf<typeof Approvals>>
-
-const row = (item: MyItem) =>
+const row = (item: Timeline.Item<DailyBudgetReached>) =>
   Match.valueTags(item, {
     UserMessage: (sent) => <UserBubble key={sent.id} text={sent.text} />,
     AssistantMessage: (sent) => <AssistantBubble key={sent.id} message={sent} />,
     DailyBudgetReached: (budget) => <BudgetNotice key={budget.id} at={budget.at} />,
     ToolApproval: (approval) => (
-      <OrderToApprove
+      <ApproveOrReject
         key={approval.id}
-        order={approval.params} // place_order's params, typed
+        label={approval.tool}
         status={approval.status}
         onApprove={() => submit(ToolApproval.approve(approval))}
         onReject={(reason) => submit(ToolApproval.reject(approval, { reason }))}

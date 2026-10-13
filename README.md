@@ -217,11 +217,10 @@ const deleteChat = (chatId: ChatId.ChatId) =>
 
 Some things the assistant shouldn't do on its own, like placing an order. Make the tool with Effect's
 `needsApproval`: the model's call doesn't run, the turn ends, and the chat's timeline shows the call for the user
-to approve or reject. Their decision is an input; an approved call runs then, with the same id and idempotency
+to approve or reject, under the assistant's message saying what it asks. Their decision is an input; an approved call runs then, with the same id and idempotency
 key, and the model reads its result.
 
 ```ts
-// Shared with the client: what the user approves.
 const PlaceOrderParams = Schema.Struct({ sku: Schema.String, quantity: Schema.Int, total: Schema.Finite })
 
 const PlaceOrder = Tool.make("place_order", {
@@ -232,14 +231,8 @@ const PlaceOrder = Tool.make("place_order", {
   dependencies: [AssistantToolCall.AssistantToolCall]
 })
 
-// The RPC's schema names the calls the client shows, with their params, and the server passes the same.
-const Subscribe = Rpc.make("Subscribe", {
-  payload: { chatId: ChatId.ChatId },
-  success: Timeline.Change({ approvals: { place_order: PlaceOrderParams } }),
-  stream: true
-})
-
-// The client: an item per call, `{ _tag: "ToolApproval", id, tool, params, status, ... }`.
+// The client: an item per call on the timeline, `{ _tag: "ToolApproval", id, tool, status, ... }`, only the yes
+// or no. The assistant's message says what it asks.
 submit(ToolApproval.approve(item)) // or ToolApproval.reject(item, { reason })
 ```
 

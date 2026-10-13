@@ -10,7 +10,6 @@
  *
  * @since 0.1.0
  */
-import { PlaceOrderParams } from "@acme/demo-shared/Approvals"
 import * as Budgets from "@acme/demo-shared/Budgets"
 import * as Locations from "@acme/demo-shared/Locations"
 import * as Products from "@acme/demo-shared/Products"
@@ -186,6 +185,20 @@ export const QuoteOrder = Tool.make("quote_order", {
     leadTimeDays: Schema.Int
   }),
   failure: ToolFailure.ToolFailure
+})
+
+/**
+ * What `place_order` places: a product order, as `quote_order` returned it.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const PlaceOrderParams = Schema.Struct({
+  office: Schema.String,
+  product: Schema.String,
+  quantity: Schema.Int,
+  total: Schema.Finite.annotate({ description: "In USD, from quote_order." }),
+  remainingBudget: Schema.Finite.annotate({ description: "The office's budget left after it, from quote_order." })
 })
 
 /**

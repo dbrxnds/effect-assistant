@@ -9,11 +9,6 @@
 /**
  * @since 0.1.0
  */
-export * as Approvals from "./Approvals.ts"
-
-/**
- * @since 0.1.0
- */
 export * as Blocks from "./Blocks.ts"
 
 /**

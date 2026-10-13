@@ -12,7 +12,9 @@ A tool made with Effect's `needsApproval` doesn't run when the model calls it in
 call waits (`AssistantEvent.ApprovalRequested`), the turn ends, and the chat's timeline
 shows it to the user. Their decision, built with `approve` or `reject` and submitted
 like a message, wakes a turn: an approved call runs then, with its params and id, and a rejected
-one doesn't. A call the user moved on from expires (`expireStale`).
+one doesn't. A call the user moved on from expires (`expireStale`). On the timeline, every
+call is an item with its tool's name and where it stands: only the yes or no, since the
+assistant's message says what it asks.
 
 ## Constructors
 

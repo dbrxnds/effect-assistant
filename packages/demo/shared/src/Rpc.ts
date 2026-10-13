@@ -20,7 +20,6 @@ import * as Timeline from "effect-assistant/Timeline"
 import * as Schema from "effect/Schema"
 import * as Rpc from "effect/rpc/Rpc"
 import * as RpcGroup from "effect/rpc/RpcGroup"
-import { Approvals } from "./Approvals.ts"
 import { ChatList } from "./ChatList.ts"
 
 /**
@@ -31,8 +30,8 @@ import { ChatList } from "./ChatList.ts"
  */
 export const Subscribe = Rpc.make("Subscribe", {
   payload: { chatId: ChatId.ChatId },
-  // None of Acme's own events, and its calls the user approves, typed with their params.
-  success: Timeline.Change({ approvals: Approvals }),
+  // None of Acme's own events. Its calls waiting for the user's approval are always in it.
+  success: Timeline.Change(),
   stream: true
 })
 

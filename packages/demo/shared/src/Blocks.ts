@@ -38,7 +38,7 @@ export const TextInput = Block.make("text_input", {
 /**
  * Every block Acme can use: a choice or a short answer goes back to Acme as
  * the block's answer. Orders and campaigns are tool calls the user approves
- * (`Approvals.ts`).
+ * (`place_order` and `start_campaign`).
  *
  * @category blocks
  * @since 0.1.0

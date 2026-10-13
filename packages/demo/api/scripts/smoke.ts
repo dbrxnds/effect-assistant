@@ -21,7 +21,6 @@
  *
  * Scenarios run at the same time, in separate chats.
  */
-import type { Approvals } from "@acme/demo-shared/Approvals"
 import { AcmeRpcs } from "@acme/demo-shared/Rpc"
 import * as AssistantEvent from "effect-assistant/AssistantEvent"
 import type * as ChatId from "effect-assistant/ChatId"
@@ -49,7 +48,7 @@ const layer = RpcClient.layerProtocolSocket().pipe(
 )
 
 /** What the smoke test sees of a chat: its timeline after each change, as a client folds them. */
-type AcmeTimeline = Timeline.Timeline<never, Timeline.ParamsOf<typeof Approvals>>
+type AcmeTimeline = Timeline.Timeline
 
 type Timelines = ReadonlyArray<AcmeTimeline>
 
@@ -173,7 +172,7 @@ const program = Effect.gen(function* () {
 
     const call = pendingCalls(asked, tool)[0]!
 
-    console.log(`     ${label} > ${oneLine(JSON.stringify(call.params))} [${tool}]`)
+    console.log(`     ${label} > ${oneLine(messages(asked).at(-1))} [${tool}]`)
 
     yield* client.Submit({ chatId, input: ToolApproval.approve(call) })
   })

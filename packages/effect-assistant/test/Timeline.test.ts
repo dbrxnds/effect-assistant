@@ -189,7 +189,8 @@ describe("Timeline.fromEntries", () => {
         UserMessage: (sent) => `user: ${sent.text}`,
         AssistantMessage: (sent) => `assistant: ${sent.text}`,
         Update: (eventItem) =>
-          `${eventItem.id} at ${eventItem.at}: ${eventItem.event.source} ${eventItem.event instanceof Update}`
+          `${eventItem.id} at ${eventItem.at}: ${eventItem.event.source} ${eventItem.event instanceof Update}`,
+        ToolApproval: (approval) => `approve ${approval.tool}?`
       })
     )
 
@@ -368,7 +369,8 @@ describe("Timeline.changes", () => {
           Match.valueTags(item, {
             UserMessage: (sent) => sent.text,
             AssistantMessage: (sent) => sent.text,
-            Update: (eventItem) => `update: ${eventItem.event.payload["status"]}`
+            Update: (eventItem) => `update: ${eventItem.event.payload["status"]}`,
+            ToolApproval: (approval) => `approve ${approval.tool}?`
           })
         )
 

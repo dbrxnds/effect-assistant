@@ -5,7 +5,9 @@
  * call waits ({@link AssistantEvent.ApprovalRequested}), the turn ends, and the chat's timeline
  * shows it to the user. Their decision, built with {@link approve} or {@link reject} and submitted
  * like a message, wakes a turn: an approved call runs then, with its params and id, and a rejected
- * one doesn't. A call the user moved on from expires ({@link expireStale}).
+ * one doesn't. A call the user moved on from expires ({@link expireStale}). On the timeline, every
+ * call is an item with its tool's name and where it stands: only the yes or no, since the
+ * assistant's message says what it asks.
  *
  * @since 0.4.0
  */

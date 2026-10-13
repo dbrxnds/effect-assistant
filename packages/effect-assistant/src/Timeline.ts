@@ -2,8 +2,9 @@
  * This module provides a chat's timeline: the chat as its user sees it. A chat client receives the
  * timeline and nothing else.
  *
- * A {@link Timeline} holds the chat's items: the messages with their blocks, and the app's own
- * events it shows (each typed with its event, see {@link EventItem}). It also holds the chat's
+ * A {@link Timeline} holds the chat's items: the messages with their blocks, the app's own events
+ * it shows (each typed with its event, see {@link EventItem}), and the tool calls waiting for the
+ * user's approval ({@link ApprovalItem}). It also holds the chat's
  * {@link Activity}, and whether the last turn failed or the chat was deleted. It never contains the
  * model's output, tool calls or results, what the model read, or why a turn failed. The server
  * streams {@link Change}s by piping the assistant's `subscribe` through {@link changes}, and the
@@ -27,7 +28,6 @@ import * as Stream from "effect/Stream"
 import type * as Assistant from "./Assistant.ts"
 import * as AssistantActivity from "./AssistantActivity.ts"
 import * as AssistantEvent from "./AssistantEvent.ts"
-import type { Codec } from "./Block.ts"
 import * as BlockKit from "./BlockKit.ts"
 import { InputId } from "./InputId.ts"
 import * as AppEvents from "./internal/events.ts"
@@ -138,55 +138,38 @@ export type EventItem<E> = E extends { readonly _tag: infer Tag extends string }
   : never
 
 /**
- * Represents the schemas of the params of the tool calls a timeline shows waiting for approval, by
- * tool name. Each is the tool's `parameters` schema, shared from a module the client can import.
- *
- * @category utility types
- * @since 0.4.0
- */
-export type ApprovalSchemas = { readonly [Tool in string]: Codec }
-
-/**
- * Extracts the tool calls a timeline shows from {@link ApprovalSchemas}: a union of each tool's
- * name with the type of its params.
- *
- * @category utility types
- * @since 0.4.0
- */
-export type ParamsOf<Approvals extends ApprovalSchemas> = {
-  readonly [Tool in keyof Approvals & string]: { readonly tool: Tool; readonly params: Approvals[Tool]["Type"] }
-}[keyof Approvals & string]
-
-/**
- * Represents a tool call that waits, or waited, for the user's approval, as an item on the
- * timeline, typed with its tool's params.
+ * Schema for a tool call that waits, or waited, for the user's approval, as an item on the
+ * timeline.
  *
  * **Details**
  *
- * `id` is the call's id, which the decision is for (see `ToolApproval.approve`). `tool` is the
- * tool's name, so a check on it gives the call's `params`, decoded with the schema the timeline
- * was given for that tool. `status` is where the call stands (`ToolApproval.Status`); `reason` is
- * the user's, when they rejected it with one; `outcome` is how the approved call went, once it
- * ran. `at` is when the call started waiting, in epoch milliseconds.
+ * It is only the yes or no: the assistant's own message tells the user what it asks them to
+ * approve, so the item carries no params. `id` is the call's id, which the decision is for (see
+ * `ToolApproval.approve`), and `tool` the tool's name, for a label. `status` is where the call stands
+ * (`ToolApproval.Status`); `reason` is the user's, when they rejected it with one; `outcome` is how
+ * the approved call went, once it ran. `at` is when the call started waiting, in epoch
+ * milliseconds. A change updates the item in place as the call is decided and run.
+ *
+ * @category schemas
+ * @since 0.4.0
+ */
+export const ApprovalItem = Schema.TaggedStruct("ToolApproval", {
+  id: Schema.String,
+  tool: Schema.String,
+  status: Schema.Literals(["pending", "approved", "rejected", "expired"]),
+  reason: Schema.optional(Schema.String),
+  outcome: Schema.optional(AssistantEvent.ToolOutcome),
+  at: Schema.Finite
+})
+
+/**
+ * Represents a tool call that waits, or waited, for the user's approval, as an item on the
+ * timeline.
  *
  * @category models
  * @since 0.4.0
  */
-export type ApprovalItem<Approvals> = Approvals extends {
-  readonly tool: infer Tool extends string
-  readonly params: infer Params
-}
-  ? {
-      readonly _tag: "ToolApproval"
-      readonly id: string
-      readonly tool: Tool
-      readonly params: Params
-      readonly status: ToolApproval.Status
-      readonly reason?: string | undefined
-      readonly outcome?: AssistantEvent.ToolOutcome | undefined
-      readonly at: number
-    }
-  : never
+export type ApprovalItem = typeof ApprovalItem.Type
 
 /**
  * Represents an item in the chat's timeline: a message the user or the assistant sent, one of the
@@ -213,21 +196,7 @@ export type ApprovalItem<Approvals> = Approvals extends {
  * @category models
  * @since 0.3.0
  */
-export type Item<Events = never, Approvals = NoApprovals> =
-  | UserMessage
-  | AssistantMessage
-  | EventItem<Events>
-  | ApprovalItem<Approvals>
-
-/**
- * Represents a timeline that shows no tool calls waiting for approval.
- *
- * @category utility types
- * @since 0.4.0
- */
-export type NoApprovals = never
-
-type NoSchemas = Record<never, never>
+export type Item<Events = never> = UserMessage | AssistantMessage | EventItem<Events> | ApprovalItem
 
 /**
  * Schema for a specialist that is working for the assistant. It holds the specialist's name and
@@ -273,17 +242,16 @@ export const Activity = Schema.Struct({
 export type Activity = typeof Activity.Type
 
 /**
- * Represents a chat's timeline: the chat as its user sees it, typed with the app's events it shows
- * and the params of the tool calls it shows waiting for approval.
+ * Represents a chat's timeline: the chat as its user sees it, typed with the app's events it shows.
  * It holds the chat's items in order, what is working in it, whether the last turn failed, and
  * whether the chat was deleted. `seq` is the position in the chat's log that the timeline is up to.
  *
  * @category models
  * @since 0.3.0
  */
-export interface Timeline<Events = never, Approvals = NoApprovals> {
+export interface Timeline<Events = never> {
   readonly seq: number
-  readonly items: ReadonlyArray<Item<Events, Approvals>>
+  readonly items: ReadonlyArray<Item<Events>>
   readonly activity: Activity
   /** Whether the last turn failed with no message after it. */
   readonly failed: boolean
@@ -292,7 +260,7 @@ export interface Timeline<Events = never, Approvals = NoApprovals> {
 }
 
 /**
- * Represents a change to a chat's timeline, typed with the app's events and the approvals it shows.
+ * Represents a change to a chat's timeline, typed with the app's events it shows.
  *
  * **Details**
  *
@@ -304,9 +272,9 @@ export interface Timeline<Events = never, Approvals = NoApprovals> {
  * @category models
  * @since 0.3.0
  */
-export interface Change<Events = never, Approvals = NoApprovals> {
+export interface Change<Events = never> {
   readonly seq: number
-  readonly items: ReadonlyArray<Item<Events, Approvals>>
+  readonly items: ReadonlyArray<Item<Events>>
   readonly activity: Activity
   readonly failed: boolean
   readonly deleted: boolean
@@ -315,68 +283,13 @@ export interface Change<Events = never, Approvals = NoApprovals> {
 const eventItem = (schema: AssistantEvent.AppEventSchema) =>
   Schema.Struct({ _tag: Schema.Literal(AppEvents.tagOf(schema)), id: Schema.String, at: Schema.Finite, event: schema })
 
-const ApprovalStatus = Schema.Literals(["pending", "approved", "rejected", "expired"])
-
-const approvalItem = (tool: string, params: Codec) =>
-  Schema.TaggedStruct("ToolApproval", {
-    id: Schema.String,
-    tool: Schema.Literal(tool),
-    params,
-    status: ApprovalStatus,
-    reason: Schema.optional(Schema.String),
-    outcome: Schema.optional(AssistantEvent.ToolOutcome),
-    at: Schema.Finite
-  })
-
-/**
- * Represents the app's events and approvals a timeline's changes show, as `Change` and the
- * server's `changes` take them.
- *
- * @category models
- * @since 0.4.0
- */
-export interface Shows<
-  Events extends ReadonlyArray<AssistantEvent.AppEventSchema> = readonly [],
-  Approvals extends ApprovalSchemas = NoSchemas
-> {
-  /** The schemas of the app's events the chat's users see. Defaults to none. */
-  readonly events?: Events | undefined
-  /**
-   * The params' schemas of the tool calls the chat's users approve, by tool name. Defaults to
-   * none.
-   */
-  readonly approvals?: Approvals | undefined
-}
-
-const isEventList = (
-  shows:
-    | ReadonlyArray<AssistantEvent.AppEventSchema>
-    | Shows<ReadonlyArray<AssistantEvent.AppEventSchema>, ApprovalSchemas>
-): shows is ReadonlyArray<AssistantEvent.AppEventSchema> => Array.isArray(shows)
-
 function makeChange<const Events extends ReadonlyArray<AssistantEvent.AppEventSchema> = readonly []>(
   events?: Events
 ): Schema.Codec<Change<Events[number]["Type"]>, Schema.Json>
-function makeChange<
-  const Events extends ReadonlyArray<AssistantEvent.AppEventSchema> = readonly [],
-  const Approvals extends ApprovalSchemas = NoSchemas
->(shows: Shows<Events, Approvals>): Schema.Codec<Change<Events[number]["Type"], ParamsOf<Approvals>>, Schema.Json>
-// The overloads state the decoded type: an item per given schema, each typed with its own event or params.
-function makeChange(
-  shows:
-    | ReadonlyArray<AssistantEvent.AppEventSchema>
-    | Shows<ReadonlyArray<AssistantEvent.AppEventSchema>, ApprovalSchemas> = []
-): Schema.Top {
-  const events: ReadonlyArray<AssistantEvent.AppEventSchema> = isEventList(shows) ? shows : (shows.events ?? [])
-  const approvals: ApprovalSchemas = isEventList(shows) ? {} : (shows.approvals ?? {})
-
+// The overload states the decoded type: an item per given schema, each typed with its own event.
+function makeChange(events: ReadonlyArray<AssistantEvent.AppEventSchema> = []): Schema.Top {
   const AnyItem = Schema.toCodecJson(
-    Schema.Union([
-      UserMessage,
-      AssistantMessage,
-      ...events.map(eventItem),
-      ...Object.entries(approvals).map(([tool, params]) => approvalItem(tool, params))
-    ])
+    Schema.Union([UserMessage, AssistantMessage, ApprovalItem, ...events.map(eventItem)])
   )
 
   const decodeItem = Schema.decodeUnknownOption(AnyItem)
@@ -384,8 +297,8 @@ function makeChange(
 
   return Schema.Struct({
     seq: Schema.Int,
-    // An item for an event or a tool this schema doesn't name, or that doesn't decode (from a newer server, say), is
-    // left out rather than failing the whole change.
+    // An item for an event this schema doesn't name, or that doesn't decode (from a newer server, say), is left out
+    // rather than failing the whole change.
     items: Schema.Array(Schema.Json).pipe(
       Schema.decodeTo(
         Schema.Array(Schema.toType(AnyItem)),
@@ -402,20 +315,20 @@ function makeChange(
 }
 
 /**
- * Creates the schema for the changes to a chat's timeline, with items for the given app events and
- * the tool calls waiting for approval, in JSON.
+ * Creates the schema for the changes to a chat's timeline, with items for the given app events,
+ * in JSON.
  *
  * **Details**
  *
- * It is the success schema of the RPC that streams a chat's timeline. Name the events the chat's
- * users see and the tools whose calls they approve, the same ones the handler passes to
- * {@link changes}. Each item decodes its event, or its call's params, with the schema given for it,
- * so the client gets `Change<Events, Approvals>` typed with them and folds it with {@link fold}, no
- * definition and no tools needed. `Change()` carries neither; `Change([...])` takes only events.
+ * It is the success schema of the RPC that streams a chat's timeline: name the events the chat's
+ * users see, the same ones the handler passes to {@link changes} as `show`. Tool calls waiting for
+ * approval are always in it, as {@link ApprovalItem}s. Each item decodes its
+ * event with that event's schema, so the client gets `Change<Events>` typed with them and folds it
+ * with {@link fold}, no definition needed. `Change()` carries no app events.
  *
- * A handler whose changes show an event or approval the schema doesn't name doesn't compile.
+ * A handler whose changes show an event the schema doesn't name doesn't compile.
  *
- * **Example** (An RPC that streams a chat's timeline, with the budget notice and order approvals)
+ * **Example** (An RPC that streams a chat's timeline, with the budget notice)
  *
  * ```ts
  * import { ChatId, Timeline } from "effect-assistant"
@@ -424,12 +337,9 @@ function makeChange(
  *
  * class DailyBudgetReached extends Schema.TaggedClass<DailyBudgetReached>()("DailyBudgetReached", {}) {}
  *
- * // Shared with the client: place_order's parameters.
- * const PlaceOrderParams = Schema.Struct({ product: Schema.String, quantity: Schema.Int })
- *
  * const Subscribe = Rpc.make("Subscribe", {
  *   payload: { chatId: ChatId.ChatId },
- *   success: Timeline.Change({ events: [DailyBudgetReached], approvals: { place_order: PlaceOrderParams } }),
+ *   success: Timeline.Change([DailyBudgetReached]),
  *   stream: true
  * })
  * ```
@@ -437,17 +347,9 @@ function makeChange(
  * @category schemas
  * @since 0.3.0
  */
-export const Change: {
-  <const Events extends ReadonlyArray<AssistantEvent.AppEventSchema> = readonly []>(
-    events?: Events
-  ): Schema.Codec<Change<Events[number]["Type"]>, Schema.Json>
-  <
-    const Events extends ReadonlyArray<AssistantEvent.AppEventSchema> = readonly [],
-    const Approvals extends ApprovalSchemas = NoSchemas
-  >(
-    shows: Shows<Events, Approvals>
-  ): Schema.Codec<Change<Events[number]["Type"], ParamsOf<Approvals>>, Schema.Json>
-} = makeChange
+export const Change: <const Events extends ReadonlyArray<AssistantEvent.AppEventSchema> = readonly []>(
+  events?: Events
+) => Schema.Codec<Change<Events[number]["Type"]>, Schema.Json> = makeChange
 
 /**
  * The timeline of a chat before anything has happened in it, with no items and nothing working.
@@ -498,10 +400,7 @@ export const empty: Timeline = {
  * @category combinators
  * @since 0.1.0
  */
-export const apply = <Events, Approvals>(
-  timeline: Timeline<Events, Approvals>,
-  change: Change<Events, Approvals>
-): Timeline<Events, Approvals> => {
+export const apply = <Events>(timeline: Timeline<Events>, change: Change<Events>): Timeline<Events> => {
   const changed = new Map(change.items.map((item) => [item.id, item]))
   const known = new Set(timeline.items.map((item) => item.id))
 
@@ -539,21 +438,9 @@ export const apply = <Events, Approvals>(
  * @category combinators
  * @since 0.3.0
  */
-export const fold = <Events, Approvals, E, R>(
-  changes: Stream.Stream<Change<Events, Approvals>, E, R>
-): Stream.Stream<Timeline<Events, Approvals>, E, R> =>
-  changes.pipe(
-    Stream.scan(
-      (): Timeline<Events, Approvals> => ({
-        seq: 0,
-        items: [],
-        activity: empty.activity,
-        failed: false,
-        deleted: false
-      }),
-      apply
-    )
-  )
+export const fold = <Events, E, R>(
+  changes: Stream.Stream<Change<Events>, E, R>
+): Stream.Stream<Timeline<Events>, E, R> => changes.pipe(Stream.scan((): Timeline<Events> => empty, apply))
 
 /**
  * Returns whether nothing is working in the chat: no turn is running or about to start, and no
@@ -562,7 +449,7 @@ export const fold = <Events, Approvals, E, R>(
  * @category guards
  * @since 0.1.0
  */
-export const isIdle = <Events, Approvals>(timeline: Timeline<Events, Approvals>): boolean =>
+export const isIdle = <Events>(timeline: Timeline<Events>): boolean =>
   !timeline.activity.working && timeline.activity.specialists.length === 0
 
 interface AnyEventItem {
@@ -572,19 +459,9 @@ interface AnyEventItem {
   readonly event: { readonly _tag: string }
 }
 
-const AnyApprovalItem = Schema.TaggedStruct("ToolApproval", {
-  id: Schema.String,
-  tool: Schema.String,
-  params: Schema.Unknown,
-  status: ApprovalStatus,
-  reason: Schema.optional(Schema.String),
-  outcome: Schema.optional(AssistantEvent.ToolOutcome),
-  at: Schema.Finite
-})
+type AnyItem = UserMessage | AssistantMessage | AnyEventItem | ApprovalItem
 
-type AnyItem = UserMessage | AssistantMessage | AnyEventItem | typeof AnyApprovalItem.Type
-
-// What the fold below builds: the overloads that use it type its items with the events and approvals shown.
+// What the fold below builds: the overloads that use it type its items with the events shown.
 interface AnyChange {
   readonly seq: number
   readonly items: ReadonlyArray<AnyItem>
@@ -599,21 +476,12 @@ interface AnyChange {
  * @category models
  * @since 0.3.0
  */
-export interface ShowOptions<
-  Show extends ReadonlyArray<AssistantEvent.AppEventSchema>,
-  Approvals extends ApprovalSchemas = NoSchemas
-> {
+export interface ShowOptions<Show extends ReadonlyArray<AssistantEvent.AppEventSchema>> {
   /**
    * The schemas of the app's events the chat's users see. Each becomes an item in the timeline;
    * the app's other events are left out. Defaults to none.
    */
   readonly show?: Show | undefined
-  /**
-   * The params' schemas of the tool calls the chat's users approve, by tool name. Each call to one
-   * of these tools that waits for approval becomes an item; calls to other tools are left out.
-   * Defaults to none.
-   */
-  readonly approvals?: Approvals | undefined
 }
 
 /**
@@ -625,21 +493,17 @@ export interface ShowOptions<
 export type Shown<Events> = ReadonlyArray<AssistantEvent.AppEventSchema & { readonly Type: Events }>
 
 function snapshotWith(entries: ReadonlyArray<AssistantEvent.AnyEntry>): Change
-function snapshotWith<
-  Events,
-  const Show extends Shown<Events> = readonly [],
-  const Approvals extends ApprovalSchemas = NoSchemas
->(
+function snapshotWith<Events, const Show extends Shown<Events> = readonly []>(
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
   definition: Definition<Events>,
-  options?: ShowOptions<Show, Approvals>
-): Change<Show[number]["Type"], ParamsOf<Approvals>>
+  options?: ShowOptions<Show>
+): Change<Show[number]["Type"]>
 function snapshotWith(
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
   _definition?: Schemas,
-  options?: ShowOptions<ReadonlyArray<AssistantEvent.AppEventSchema>, ApprovalSchemas>
+  options?: ShowOptions<ReadonlyArray<AssistantEvent.AppEventSchema>>
 ): AnyChange {
-  const timeline = folding(options?.show ?? [], options?.approvals ?? {})
+  const timeline = folding(options?.show ?? [])
 
   for (const entry of entries) timeline.step(entry)
 
@@ -656,37 +520,32 @@ function snapshotWith(
  *
  * **Details**
  *
- * Only the app's events in `show`, and the calls to the tools in `approvals`, become items;
- * without them, the timeline has none.
+ * Only the app's events in `show` become items; without it, the timeline has none.
  *
  * @category constructors
  * @since 0.3.0
  */
 export const snapshot: {
   (entries: ReadonlyArray<AssistantEvent.AnyEntry>): Change
-  <Events, const Show extends Shown<Events> = readonly [], const Approvals extends ApprovalSchemas = NoSchemas>(
+  <Events, const Show extends Shown<Events> = readonly []>(
     entries: ReadonlyArray<AssistantEvent.AnyEntry>,
     definition: Definition<Events>,
-    options?: ShowOptions<Show, Approvals>
-  ): Change<Show[number]["Type"], ParamsOf<Approvals>>
+    options?: ShowOptions<Show>
+  ): Change<Show[number]["Type"]>
 } = snapshotWith
 
 function fromEntriesWith(entries: ReadonlyArray<AssistantEvent.AnyEntry>): Timeline
-function fromEntriesWith<
-  Events,
-  const Show extends Shown<Events> = readonly [],
-  const Approvals extends ApprovalSchemas = NoSchemas
->(
+function fromEntriesWith<Events, const Show extends Shown<Events> = readonly []>(
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
   definition: Definition<Events>,
-  options?: ShowOptions<Show, Approvals>
-): Timeline<Show[number]["Type"], ParamsOf<Approvals>>
+  options?: ShowOptions<Show>
+): Timeline<Show[number]["Type"]>
 function fromEntriesWith(
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
   _definition?: Schemas,
-  options?: ShowOptions<ReadonlyArray<AssistantEvent.AppEventSchema>, ApprovalSchemas>
+  options?: ShowOptions<ReadonlyArray<AssistantEvent.AppEventSchema>>
 ): AnyChange {
-  const timeline = folding(options?.show ?? [], options?.approvals ?? {})
+  const timeline = folding(options?.show ?? [])
 
   for (const entry of entries) timeline.step(entry)
 
@@ -703,8 +562,8 @@ function fromEntriesWith(
  *
  * **Details**
  *
- * Only the app's events in `show`, and the calls to the tools in `approvals`, become items, typed
- * with their schemas; without them, the timeline has none.
+ * Only the app's events in `show` become items, typed with their schemas; without it, the timeline
+ * has none.
  *
  * **Example** (Building a chat's timeline from its log)
  *
@@ -725,11 +584,11 @@ function fromEntriesWith(
  */
 export const fromEntries: {
   (entries: ReadonlyArray<AssistantEvent.AnyEntry>): Timeline
-  <Events, const Show extends Shown<Events> = readonly [], const Approvals extends ApprovalSchemas = NoSchemas>(
+  <Events, const Show extends Shown<Events> = readonly []>(
     entries: ReadonlyArray<AssistantEvent.AnyEntry>,
     definition: Definition<Events>,
-    options?: ShowOptions<Show, Approvals>
-  ): Timeline<Show[number]["Type"], ParamsOf<Approvals>>
+    options?: ShowOptions<Show>
+  ): Timeline<Show[number]["Type"]>
 } = fromEntriesWith
 
 interface Schemas {
@@ -758,11 +617,9 @@ const sameActivity = (a: Activity, b: Activity) =>
     return other !== undefined && run.specialist === other.specialist && run.since === other.since
   })
 
-const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>, approvalSchemas: ApprovalSchemas): Folding => {
+const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding => {
   const shown = new Map(show.map((schema) => [AppEvents.tagOf(schema), schema]))
   let approvals: ReadonlyMap<string, ToolApproval.State> = new Map()
-  // The params of the calls shown, decoded once, by call id.
-  const params = new Map<string, unknown>()
   let seq = 0
   let failed = false
   let deleted = false
@@ -874,27 +731,16 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>, approvalSch
         ? [event.callId]
         : []
 
-  // The items of the calls this entry changed: shown ones, whose params decode.
+  // The items of the calls this entry changed.
   const approvalItems = (event: AssistantEvent.AssistantEvent, before: ReadonlyMap<string, ToolApproval.State>) =>
     callsOf(event).flatMap((callId) => {
       const state = approvals.get(callId)
 
       if (state === undefined || state === before.get(callId)) return []
 
-      const schema = approvalSchemas[state.request.tool]
-
-      if (Predicate.isTagged(event, "ApprovalRequested") && schema !== undefined) {
-        Option.map(Schema.decodeUnknownOption(Schema.toCodecJson(schema))(state.request.params), (decoded) =>
-          params.set(callId, decoded)
-        )
-      }
-
-      if (!params.has(callId)) return []
-
-      const item = AnyApprovalItem.make({
+      const item = ApprovalItem.make({
         id: callId,
         tool: state.request.tool,
-        params: params.get(callId),
         status: state.status,
         reason: state.reason,
         outcome: state.outcome,
@@ -1002,9 +848,8 @@ export interface Definition<Events = never> {
  * @since 0.3.0
  */
 export interface ChangesOptions<
-  Show extends ReadonlyArray<AssistantEvent.AppEventSchema> = readonly [],
-  Approvals extends ApprovalSchemas = NoSchemas
-> extends ShowOptions<Show, Approvals> {
+  Show extends ReadonlyArray<AssistantEvent.AppEventSchema> = readonly []
+> extends ShowOptions<Show> {
   /**
    * The `seq` up to which the client already has the timeline. The result contains only the
    * changes after it. Defaults to `0`, every change.
@@ -1012,27 +857,21 @@ export interface ChangesOptions<
   readonly after?: number | undefined
 }
 
-function changesWith<
-  E,
-  R,
-  Events,
-  const Show extends Shown<Events> = readonly [],
-  const Approvals extends ApprovalSchemas = NoSchemas
->(
+function changesWith<E, R, Events, const Show extends Shown<Events> = readonly []>(
   entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
   definition: Definition<Events>,
-  options?: ChangesOptions<Show, Approvals>
-): Stream.Stream<Change<Show[number]["Type"], ParamsOf<Approvals>>, E, R>
+  options?: ChangesOptions<Show>
+): Stream.Stream<Change<Show[number]["Type"]>, E, R>
 function changesWith<E, R>(
   entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
   _definition: Schemas,
-  options?: ChangesOptions<ReadonlyArray<AssistantEvent.AppEventSchema>, ApprovalSchemas>
+  options?: ChangesOptions<ReadonlyArray<AssistantEvent.AppEventSchema>>
 ): Stream.Stream<AnyChange, E, R> {
   const after = options?.after ?? 0
 
   return entries.pipe(
     Stream.mapAccumArray(
-      () => folding(options?.show ?? [], options?.approvals ?? {}),
+      () => folding(options?.show ?? []),
       (timeline, chunk) => {
         const changed = chunk.flatMap((entry) => {
           const change = timeline.step(entry)
@@ -1096,15 +935,13 @@ function changesWith<E, R>(
  * @since 0.3.0
  */
 export const changes: {
-  <Events, const Show extends Shown<Events> = readonly [], const Approvals extends ApprovalSchemas = NoSchemas>(
+  <Events, const Show extends Shown<Events> = readonly []>(
     definition: Definition<Events>,
-    options?: ChangesOptions<Show, Approvals>
-  ): <E, R>(
-    entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>
-  ) => Stream.Stream<Change<Show[number]["Type"], ParamsOf<Approvals>>, E, R>
-  <E, R, Events, const Show extends Shown<Events> = readonly [], const Approvals extends ApprovalSchemas = NoSchemas>(
+    options?: ChangesOptions<Show>
+  ): <E, R>(entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>) => Stream.Stream<Change<Show[number]["Type"]>, E, R>
+  <E, R, Events, const Show extends Shown<Events> = readonly []>(
     entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
     definition: Definition<Events>,
-    options?: ChangesOptions<Show, Approvals>
-  ): Stream.Stream<Change<Show[number]["Type"], ParamsOf<Approvals>>, E, R>
+    options?: ChangesOptions<Show>
+  ): Stream.Stream<Change<Show[number]["Type"]>, E, R>
 } = dual((args) => Stream.isStream(args[0]), changesWith)

@@ -17,8 +17,6 @@ ask for reports.
   `pnpm --filter @acme/demo-api prompts:push` uploads the defaults.
 - `api/src/Tools.ts`: order history and status, offices, budgets, and the `research` specialist.
 - `shared/src/Blocks.ts`: the UI blocks, a choice or a short answer.
-- `shared/src/Approvals.ts`: the params of the calls the user approves before they run, `place_order`
-  and `start_campaign`, shared so the web app shows each call typed without the tools.
 - `api/src/Campaign.ts`: the campaign products, `start_campaign` (which waits for the user's approval,
   then starts the campaign), and the `CreateCampaign` workflow.
 - `api/src/PrintOrders.ts`: `quote_order`, which the assistant uses to tell the user the total,

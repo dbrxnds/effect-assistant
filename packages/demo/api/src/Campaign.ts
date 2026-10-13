@@ -13,7 +13,6 @@
  *
  * @since 0.1.0
  */
-import { StartCampaignParams } from "@acme/demo-shared/Approvals"
 import * as Budgets from "@acme/demo-shared/Budgets"
 import * as Locations from "@acme/demo-shared/Locations"
 import * as Orders from "@acme/demo-shared/Orders"
@@ -167,6 +166,20 @@ export const layerWorkflow = CreateCampaign.toLayer(
 export const ListCampaignProducts = Tool.make("list_campaign_products", {
   description: "Campaign products that can be ordered, with their channels and minimum budget.",
   success: Schema.Array(CampaignProduct)
+})
+
+/**
+ * What `start_campaign` starts.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const StartCampaignParams = Schema.Struct({
+  campaignId: Schema.String.annotate({ description: "From list_campaign_products." }),
+  campaign: Schema.String.annotate({ description: "The campaign product's name." }),
+  office: Schema.String.annotate({ description: "The office paying for it." }),
+  audience: Schema.String,
+  budget: Schema.Finite.annotate({ description: "In USD." })
 })
 
 /**

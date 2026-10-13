@@ -51,8 +51,10 @@ it in a turn. The call waits for the user's approval
 - The turn records it (`ApprovalRequested`) instead of running the handler,
   gives the model a placeholder result (the call waits for the user's
   approval), and ends. The step's other calls run as usual.
-- The chat's [timeline](./client#tool-calls-to-approve) shows the call, with
-  its params, for the user to approve or reject.
+- The chat's [timeline](./client#tool-calls-to-approve) shows the call for
+  the user to approve or reject. It's only the yes or no: the assistant's
+  message, sent in the same step, says what it asks them to approve. Say so
+  in the tool's description.
 - The user's decision is an input, like a message: built on the client with
   `ToolApproval.approve(item)` or `ToolApproval.reject(item, { reason })`,
   and submitted with the assistant's `submit`. Its id is fixed per call, so
@@ -81,8 +83,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
-// Shared with the client: what the user approves.
-export const PlaceOrderParams = Schema.Struct({ product: Schema.String, quantity: Schema.Int, total: Schema.Finite })
+const PlaceOrderParams = Schema.Struct({ product: Schema.String, quantity: Schema.Int, total: Schema.Finite })
 
 const PlaceOrder = Tool.make("place_order", {
   description:
