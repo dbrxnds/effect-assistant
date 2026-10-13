@@ -80,10 +80,14 @@ const reportedBack = (views: Views) => {
 /** One line per message, for a timeout message. */
 const trace = (views: Views) =>
   latest(views)
-    .messages.map((message) =>
+    .messages.flatMap((message) =>
       Predicate.isTagged(message, "AssistantMessage")
-        ? `  acme: ${message.text.slice(0, 120)}${message.block === undefined ? "" : ` [${message.block.kind}: ${message.block.status}]`}`
-        : `  user: ${message.text.slice(0, 120)}`
+        ? [
+            `  acme: ${message.text.slice(0, 120)}${message.block === undefined ? "" : ` [${message.block.kind}: ${message.block.status}]`}`
+          ]
+        : Predicate.isTagged(message, "UserMessage")
+          ? [`  user: ${message.text.slice(0, 120)}`]
+          : []
     )
     .join("\n")
 

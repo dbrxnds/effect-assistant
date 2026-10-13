@@ -6,18 +6,22 @@
  */
 import * as AnthropicClient from "@effect/ai-anthropic/AnthropicClient"
 import * as AnthropicLanguageModel from "@effect/ai-anthropic/AnthropicLanguageModel"
+import type * as Assistant from "effect-assistant/Assistant"
 import * as BlockKit from "effect-assistant/BlockKit"
 import * as Skill from "effect-assistant/Skill"
 import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Prompt from "effect/ai/Prompt"
 import * as Toolkit from "effect/ai/Toolkit"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import { AcmeAssistant } from "./AcmeAssistant.ts"
 import * as Campaign from "./Campaign.ts"
+import * as OrderPlaced from "./OrderPlaced.ts"
 import * as PrintOrders from "./PrintOrders.ts"
 import * as Prompts from "./Prompts.ts"
 import * as Tools from "./Tools.ts"
+import * as WorkflowStep from "./WorkflowStep.ts"
 
 const orderingCampaigns = Skill.make("Ordering a campaign", {
   description: "Use when the user wants to order or start a campaign.",
@@ -34,6 +38,18 @@ const AcmeTools = Toolkit.merge(Campaign.CampaignTools, PrintOrders.PrintTools, 
 
 /** Their handlers, and the lookups' for the research specialist too. */
 const layerTools = Layer.mergeAll(Campaign.layerTools, PrintOrders.layerTools, Tools.layerLookups)
+
+const note = (text: string) => Prompt.userMessage({ content: [Prompt.textPart({ text })] })
+
+/** What the model reads: the chat, with each order placed and workflow step as a note the user hasn't seen. */
+const history: Assistant.HistoryView<OrderPlaced.OrderPlaced | WorkflowStep.WorkflowStep> = (entries) =>
+  entries.map((entry) =>
+    entry.event instanceof OrderPlaced.OrderPlaced
+      ? note(OrderPlaced.render(entry.event))
+      : entry.event instanceof WorkflowStep.WorkflowStep
+        ? note(WorkflowStep.render(entry.event))
+        : entry
+  )
 
 /** The model Acme and its specialists use: `ACME_MODEL`, default `claude-sonnet-5`. */
 export const model = Config.String("ACME_MODEL").pipe(Config.withDefault("claude-sonnet-5"))
@@ -59,7 +75,8 @@ export const layer = AcmeAssistant.toLayer(
       return turn.loop({
         instructions: { ...prompt, text: `${prompt.text}\n\nToday is ${new Date().toDateString()}.` },
         toolkit: AcmeTools,
-        skills: [orderingCampaigns, orderingProducts]
+        skills: [orderingCampaigns, orderingProducts],
+        history
       })
     })
   })

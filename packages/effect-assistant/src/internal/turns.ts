@@ -1,6 +1,5 @@
 import type * as LanguageModel from "effect/ai/LanguageModel"
 import type * as Tool from "effect/ai/Tool"
-import type * as Prompt from "effect/ai/Prompt"
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -8,6 +7,7 @@ import * as Exit from "effect/Exit"
 import { identity } from "effect/Function"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
+import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
@@ -127,34 +127,6 @@ const failureMessage = (cause: Cause.Cause<unknown>): string =>
 
 const lastSeq = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, otherwise: number) => entries.at(-1)?.seq ?? otherwise
 
-const toHistory = (
-  viewed: ReadonlyArray<Assistant.Entry<any> | Prompt.Message>,
-  app: AppEvents.AppEvents
-): ReadonlyArray<Prompt.Message> => {
-  const out: Array<Prompt.Message> = []
-  let run: Array<AssistantEvent.AnyEntry> = []
-
-  const flush = () => {
-    out.push(...History.fromEntries(run, (event) => AppEvents.read(app, event)))
-    run = []
-  }
-
-  for (const item of viewed) {
-    if (isEntry(item)) run.push(item)
-    else {
-      flush()
-      out.push(item)
-    }
-  }
-
-  flush()
-
-  return out
-}
-
-const isEntry = (item: Assistant.Entry<any> | Prompt.Message): item is Assistant.Entry<any> =>
-  Predicate.hasProperty(item, "seq")
-
 // The handler's stream can end between a step's output and its tools, or while they run. An interrupted turn (a
 // shutdown) leaves its calls open instead: the next turn runs them again.
 const closeOpenCalls = Effect.fnUntraced(function* (chat: Writer, startSeq: number) {
@@ -164,7 +136,7 @@ const closeOpenCalls = Effect.fnUntraced(function* (chat: Writer, startSeq: numb
     entries.flatMap(({ event }) => (Predicate.isTagged(event, "ToolStarted") ? [event.callId] : []))
   )
 
-  const open = History.unansweredCalls(History.fromEntries(entries, () => undefined))
+  const open = History.unansweredCalls(History.fromEntries(entries))
 
   if (open.length === 0) return
 
@@ -196,13 +168,13 @@ const handledThrough = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, startSe
     startSeq
   )
 
-// Fails visibly when the user's latest input got no reply; an input that arrived after what its model read gets the
-// next turn, which replies.
-const finishTurn = Effect.fnUntraced(function* (chat: Writer, read: number, wakes: ReadonlySet<string>) {
+// A turn that ran the loop fails visibly when the user's latest input got no reply; an input that arrived after what
+// its model read gets the next turn, which replies. A handler that ended without the loop decided that itself.
+const finishTurn = Effect.fnUntraced(function* (chat: Writer, read: number, ranLoop: boolean) {
   const entries = yield* chat.entries
 
   const end =
-    History.owesReply(entries, read) && !History.unreadAfter(entries, read, wakes)
+    ranLoop && History.owesReply(entries, read) && !History.unreadAfter(entries, read)
       ? AssistantEvent.TurnFailed.make({ throughSeq: read, message: silentTurnMessage })
       : AssistantEvent.TurnCompleted.make({ throughSeq: read })
 
@@ -222,10 +194,14 @@ const makeTurnApi = (
   registration: Registration,
   chat: Writer,
   startSeq: number,
-  checkOpen: Effect.Effect<void>
+  checkOpen: Effect.Effect<void>,
+  ranLoop: Ref.Ref<boolean>
 ): Assistant.Turn<any> => {
   const { definition, builtins } = registration
   const { app } = definition
+
+  const running = <A, E, R>(stream: Stream.Stream<A, E, R>) =>
+    Stream.unwrap(Ref.set(ranLoop, true).pipe(Effect.as(stream)))
 
   // With how far into the chat it goes: the step records it on the model's output.
   // Read before every model call: a chat the app deleted meanwhile stops here.
@@ -235,7 +211,7 @@ const makeTurnApi = (
     const all = yield* chat.entries
 
     const read: AssistantLoop.ChatHistory = {
-      messages: toHistory(view(AppEvents.decodeEntries(app, all)), app),
+      messages: History.fromEntries(view(AppEvents.decodeEntries(app, all))),
       throughSeq: lastSeq(all, startSeq)
     }
 
@@ -258,7 +234,7 @@ const makeTurnApi = (
         const through = handledThrough(all, startSeq)
 
         // Something arrived after what the loop's model read: the next turn reads it with the full loop, and replies.
-        if (History.unreadAfter(all, through, app.wakes)) return Stream.empty
+        if (History.unreadAfter(all, through)) return Stream.empty
 
         const owed = History.owesReply(all, through)
         const undelivered = !owed && History.owesDelivery(all, through)
@@ -282,7 +258,7 @@ const makeTurnApi = (
 
             return {
               messages: [
-                ...toHistory(options.view(AppEvents.decodeEntries(app, entries)), app),
+                ...History.fromEntries(options.view(AppEvents.decodeEntries(app, entries))),
                 History.userText(nudge)
               ],
               throughSeq: lastSeq(entries, startSeq)
@@ -295,12 +271,14 @@ const makeTurnApi = (
     )
 
   const replyIfOwed = (options: Assistant.ReplyOptions) =>
-    replyPass({
-      instructions: instructions(options.instructions),
-      toolkit: builtins,
-      view: identity,
-      nudge: options.nudge
-    })
+    running(
+      replyPass({
+        instructions: instructions(options.instructions),
+        toolkit: builtins,
+        view: identity,
+        nudge: options.nudge
+      })
+    )
 
   const prepare = <T extends Record<string, Tool.Any>, RS>(options: Assistant.LoopOptions<T, RS, any>) => {
     const own = Toolkits.fromToolkitOrEmpty(options.toolkit)
@@ -332,7 +310,7 @@ const makeTurnApi = (
               maxSteps: options.maxSteps ?? 16
             })
 
-      return Stream.concat(loop, replyPass({ instructions: system, toolkit, view, nudge: options.replyNudge }))
+      return running(Stream.concat(loop, replyPass({ instructions: system, toolkit, view, nudge: options.replyNudge })))
     }
   }
 }
@@ -351,7 +329,7 @@ export const run = Effect.fnUntraced(
     const { chat } = options
     const before = yield* chat.entries
 
-    yield* Telemetry.agentInput(History.unhandledInputs(before, options.registration.definition.app.wakes))
+    yield* Telemetry.agentInput(History.unhandledInputs(before))
 
     const assistant = options.registration.definition.name
     const traceId = yield* Telemetry.currentTraceId
@@ -366,7 +344,8 @@ export const run = Effect.fnUntraced(
     ])
 
     const startSeq = lastSeq(started, 0)
-    const turn = makeTurnApi(options.registration, chat, startSeq, options.checkOpen)
+    const ranLoop = yield* Ref.make(false)
+    const turn = makeTurnApi(options.registration, chat, startSeq, options.checkOpen, ranLoop)
 
     const record = (event: AssistantLoop.Event) => chat.append([event])
 
@@ -383,7 +362,7 @@ export const run = Effect.fnUntraced(
         onSuccess: Effect.fnUntraced(function* () {
           const all = yield* chat.entries
 
-          yield* finishTurn(chat, handledThrough(all, startSeq), options.registration.definition.app.wakes)
+          yield* finishTurn(chat, handledThrough(all, startSeq), yield* Ref.get(ranLoop))
         }),
         onFailure: (cause) => failTurn(chat, cause)
       })

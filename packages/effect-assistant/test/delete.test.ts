@@ -18,7 +18,7 @@ import {
   say,
   turnsDone,
   update,
-  UpdateEvent,
+  Update,
   withHandlers
 } from "./utils/fixtures.ts"
 import * as Scripted from "./utils/scripted.ts"
@@ -28,7 +28,7 @@ const engines = { memory: runMemory, cluster: runEntity }
 /** A run that works until it's stopped, and says when it started and when it was interrupted. */
 const Slow = Specialist.make("slow", { description: "Takes its time." })
 
-const Deleting = Assistant.make("deleting", { specialists: [Slow], events: [UpdateEvent] })
+const Deleting = Assistant.make("deleting", { specialists: [Slow], events: [Update] })
 
 interface Signals {
   readonly started: Deferred.Deferred<void>

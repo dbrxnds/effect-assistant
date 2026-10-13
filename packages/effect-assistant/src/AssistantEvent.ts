@@ -11,8 +11,10 @@
 import * as Response from "effect/ai/Response"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
+import type * as SchemaAST from "effect/SchemaAST"
 import { ChatId } from "./ChatId.ts"
 import { InputId, make as makeInputId } from "./InputId.ts"
+import { inputKey } from "./internal/input.ts"
 import { RunId } from "./RunId.ts"
 
 /**
@@ -445,18 +447,42 @@ const libraryTags: ReadonlySet<string> = new Set(
 export const AppTag = Schema.String.pipe(Schema.brand("~effect-assistant/AppTag"))
 
 /**
+ * Represents the schema of one of the application's own events, as `Assistant.make`'s `events`
+ * takes it.
+ *
+ * **Details**
+ *
+ * It is a tagged struct or class (`Schema.TaggedStruct`, `Schema.TaggedClass`) whose `_tag` is a
+ * string literal other than the library's, and that needs no services. The log stores the event in
+ * the schema's JSON form.
+ *
+ * @category models
+ * @since 0.3.0
+ */
+export type AppEventSchema = Schema.Codec<{ readonly _tag: string }, { readonly _tag: string }> & {
+  readonly fields: { readonly _tag: { readonly ast: SchemaAST.AST } }
+}
+
+/**
  * Schema for one of the application's own events as it is stored, with its `_tag` and its fields
  * in JSON.
  *
- * An assistant made with `events: [AppEvent.make(Summary)]` decodes it to a `Summary` in
- * `CurrentChat`'s `entries` and in its `subscribe`.
+ * **Details**
+ *
+ * An assistant made with `events: [Summary]` decodes it to a `Summary` in `CurrentChat`'s
+ * `entries` and in its `subscribe`.
+ *
+ * An event that came in through the assistant's `submit`, from outside a turn, is an input, and the
+ * log marks it with a `"~effect-assistant/input": true` key (see {@link isAppInput}); one a turn
+ * appended has none. Decoding drops the key, so the app's schemas never see it.
  *
  * @category schemas
  * @since 0.1.0
  */
-export const StoredAppEvent = Schema.StructWithRest(Schema.Struct({ _tag: AppTag }), [
-  Schema.Record(Schema.String, Schema.Json)
-]).check(Schema.makeFilter((event) => !libraryTags.has(event._tag) || `${event._tag} is one of the library's events`))
+export const StoredAppEvent = Schema.StructWithRest(
+  Schema.Struct({ _tag: AppTag, [inputKey]: Schema.optionalKey(Schema.Literal(true)) }),
+  [Schema.Record(Schema.String, Schema.Json)]
+).check(Schema.makeFilter((event) => !libraryTags.has(event._tag) || `${event._tag} is one of the library's events`))
 
 /**
  * Represents one of the application's own events, as it is stored.
@@ -473,6 +499,18 @@ export type StoredAppEvent = typeof StoredAppEvent.Type
  * @since 0.1.0
  */
 export const isLibraryEvent = (event: { readonly _tag: string }): event is AssistantEvent => libraryTags.has(event._tag)
+
+/**
+ * Returns whether one of the application's events, as the log stores it, is an input: it came in
+ * through the assistant's `submit`, from outside a turn, so storing it woke a turn. An event a turn
+ * appended (`CurrentChat`'s `append`) isn't, and neither is a decoded one, which no longer has the
+ * mark.
+ *
+ * @category guards
+ * @since 0.3.0
+ */
+export const isAppInput = (event: { readonly _tag: string }): boolean =>
+  !isLibraryEvent(event) && Predicate.hasProperty(event, inputKey) && event[inputKey] === true
 
 /**
  * Represents a chat's entry with any event in it, either the library's or the application's own
@@ -518,8 +556,8 @@ export type Entry = typeof Entry.Type
  * Returns whether an event is one of the library's inputs, which are a user message, a block
  * answer, or a finished specialist run.
  *
- * The application's events that wake a turn are inputs too, but only their assistant knows which
- * (see `AppEvent`).
+ * The application's events that came in through the assistant's `submit` are inputs too (see
+ * {@link isAppInput}).
  *
  * @category guards
  * @since 0.1.0

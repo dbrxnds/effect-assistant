@@ -14,7 +14,6 @@ or one module at a time, as Effect does:
 import * as Assistant from "effect-assistant/Assistant"
 ```
 
-- [AppEvent](./AppEvent)
 - [Assistant](./Assistant)
 - [AssistantActivity](./AssistantActivity)
 - [AssistantEngine](./AssistantEngine)

@@ -1,18 +1,18 @@
 # The chat client
 
 A chat client gets the chat as its user sees it, and nothing else: the
-user's messages, the assistant's messages with their blocks, and whether the
-assistant (or one of its specialists) is working. Never the model's output,
-tool calls or results, what the model read, the app's own events, or why a
-turn failed. That's [`ChatView`](/api/ChatView).
+user's messages, the assistant's messages with their blocks, the app's own
+events you let through, and whether the assistant (or one of its specialists)
+is working. Never the model's output, tool calls or results, what the model
+read, or why a turn failed. That's [`ChatView`](/api/ChatView).
 
 The assistant's `subscribe(chatId)` (`yield* MyAssistant`) streams the chat's
 log; pipe it through
 [`ChatView.updates(MyAssistant)`](/api/ChatView#updates) to stream the view
 as [`ChatView.Update`](/api/ChatView#update)s: each one has the messages
 that are new or changed since the last (whole), and the activity now. The
-definition tells the fold which of the app's events wake a turn. The client
-folds them with [`ChatView.apply`](/api/ChatView#apply), from `ChatView.empty`.
+definition gives the fold the schemas of the app's events (see
+[your events in the view](#your-events-in-the-view)). The client folds them with [`ChatView.apply`](/api/ChatView#apply), from `ChatView.empty`.
 
 ## Over RPC
 
@@ -107,6 +107,37 @@ whether it's `open`, and the user's `answer`. See
 
 The assistant's `subscribe(chatId)` streams the whole log: every event, the
 assistant's own work included. It's for server-side code, tests, and
-debugging. Don't send it to a chat client, and don't filter it for one:
-`ChatView.updates` is that filter, and the definition tells it the
+debugging. Don't send it to a chat client: `ChatView.updates` turns it into
+what the user sees, and the definition gives it the schemas of the
 assistant's events.
+
+## Your events in the view
+
+**The view shows every app event it gets.** Each one becomes a
+`ChatView.AppEvent` row in `messages`, in the log's order between the
+messages: its `tag`, the event in its JSON form as `data`, an `id` fixed per
+entry, and `at`. So filter `subscribe` to the events your users may see
+before `ChatView.updates`: a summary for compaction, say, would reach the
+client otherwise.
+
+```ts
+import { AssistantEvent, ChatView } from "effect-assistant"
+import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
+
+const watch = (chatId: ChatId.ChatId) =>
+  assistant.subscribe(chatId).pipe(
+    Stream.filter(({ event }) => AssistantEvent.isLibraryEvent(event) || Schema.is(DailyBudgetReached)(event)),
+    ChatView.updates(MyAssistant)
+  )
+```
+
+The client reads a row back with the event's schema:
+
+```ts
+const budget = (message: ChatView.Message) =>
+  Predicate.isTagged(message, "AppEvent") ? ChatView.decodeEvent(DailyBudgetReached)(message) : Option.none()
+```
+
+`ChatView.fromEntries(entries, MyAssistant)` shows the same rows, so pass it
+only the entries the user may see too.

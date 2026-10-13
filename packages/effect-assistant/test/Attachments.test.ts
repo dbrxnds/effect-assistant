@@ -30,7 +30,7 @@ const userTexts = (history: ReturnType<typeof History.fromEntries>) =>
 
 describe("attachments", () => {
   it("gives the model the text and a line per file, never content", () => {
-    const history = History.fromEntries(entries([withFile]), () => undefined)
+    const history = History.fromEntries(entries([withFile]))
 
     expect(userTexts(history)).toEqual([
       `Print this please\n[attached: flyer.pdf, application/pdf, 2.1 MB, id ${flyer.fileId}]`
@@ -40,7 +40,7 @@ describe("attachments", () => {
   it("leaves a message without files as it was", () => {
     const plain = AssistantEvent.UserMessage.make({ id: InputId.fromKey("b"), text: "hi" })
 
-    expect(userTexts(History.fromEntries(entries([plain]), () => undefined))).toEqual(["hi"])
+    expect(userTexts(History.fromEntries(entries([plain])))).toEqual(["hi"])
   })
 
   it("survives the log's JSON form", () => {
@@ -51,7 +51,7 @@ describe("attachments", () => {
   })
 
   it("shows the files in the chat view", () => {
-    const shown = ChatView.fromEntries(entries([withFile]), { wakes: new Set(["Update"]) })
+    const shown = ChatView.fromEntries(entries([withFile]))
 
     expect(shown.messages).toEqual([
       ChatView.UserMessage.make({

@@ -21,8 +21,8 @@ them: their message and the assistant's.
 
 ## How a turn runs
 
-1. `submit` appends an input (a message, a block answer, or an [event](./app-events) that wakes a turn). If no turn is
-   running for the chat, one starts.
+1. `submit` appends an input (a message, a block answer, or one of your [events](./app-events)). If no turn is
+   running for the chat, one starts. What a turn appends itself never starts one.
 2. The handler runs the loop, usually `turn.loop(...)`. It rebuilds the
    model's history from the log, calls the model, and runs its tool calls.
    The engine records each step in the log. Then it repeats.
@@ -58,19 +58,29 @@ writes on its own never reaches the user. It's private reasoning.
 
 ## Telling the user, or keeping it internal
 
-What a workflow or a webhook reports (one of your [events](./app-events))
-goes into the model's history, never to the user. For each one, the
-assistant decides whether the user needs to know: results, questions, and
-problems get a `send_user_message`; routine progress gets just `wait`.
+What a workflow or a webhook reports (one of your [events](./app-events),
+which it submits) goes into the model's history as your history view maps it,
+and reaches the user only if you let it through to the [view](./client). For
+each one, the assistant decides whether the user needs to know: results,
+questions, and problems get a `send_user_message`; routine progress gets just
+`wait`.
 
-So an event can say what it needs rather than what to say:
+So the note the model reads for an event can say what it needs rather than
+what to say:
 
 ```ts
-const NeedsDate = AppEvent.make(DeliveryQuestion, {
-  wakes: true,
-  render: (question) =>
-    `<order reference="${question.reference}">Ask the user which delivery date works: ${question.options.join(" or ")}.</order>`
-})
+const deliveryQuestions: Assistant.HistoryView<DeliveryQuestion> = (entries) =>
+  entries.map((entry) =>
+    entry.event instanceof DeliveryQuestion
+      ? Prompt.userMessage({
+          content: [
+            Prompt.textPart({
+              text: `<order reference="${entry.event.reference}">Ask the user which delivery date works: ${entry.event.options.join(" or ")}.</order>`
+            })
+          ]
+        })
+      : entry
+  )
 ```
 
 The assistant writes the message, and can attach a [block](./blocks). Work
@@ -83,7 +93,27 @@ the user must agree to starts from a block's button, through your API (see
 reply, and nothing arrived after the loop's last read, the model gets one more
 pass in which it can only reply. If there's still no reply, the turn ends with
 `TurnFailed` ("I finished without sending a reply."). So a user's message
-always gets an answer or a visible failure.
+always gets an answer or a visible failure, from a turn that runs the loop.
+
+A handler that ends the turn without running the loop (`turn.loop` or
+`turn.replyIfOwed`) decides itself, and its turn is never failed for being
+silent. Over a daily budget, say, it records one of your events and returns
+an empty stream; the user sees that event if you let it through to the
+[view](./client):
+
+```ts
+const MyAssistantHandlers = MyAssistant.toLayer(
+  Effect.fn(function* (turn) {
+    if (yield* overBudget(turn.chatId)) {
+      yield* (yield* MyAssistant.Chat).append(DailyBudgetReached.make({}))
+
+      return Stream.empty
+    }
+
+    return turn.loop({ instructions })
+  })
+)
+```
 
 A message that arrived after the loop's last read owes nothing yet: the next
 turn reads it with the full loop, and replies. A [custom loop](./loops#end-with-replyifowed)

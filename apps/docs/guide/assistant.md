@@ -27,7 +27,7 @@ blocks. It holds no code that runs turns.
 export const MyAssistant = Assistant.make("my-assistant", {
   blocks: Blocks, // UI the assistant may put in messages: see UI blocks
   specialists: [Research], // agents it may hand work to: see Specialists
-  events: [AppEvent.make(OrderShipped, { wakes: true })] // events of your own: see Your own events
+  events: [OrderShipped] // schemas of events of your own: see Your own events
 })
 ```
 
@@ -44,12 +44,12 @@ On the service, `yield* MyAssistant`:
 
 | Member               | What it does                                                                                                             |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `submit(chatId, in)` | Stores an input and returns: a message, a block answer, or one of the app's [events](./app-events).                      |
+| `submit(chatId, in)` | Stores an input, which wakes a turn, and returns: a message, a block answer, or one of the app's [events](./app-events). |
 | `subscribe(chatId)`  | Streams the chat's whole [log](./events), for the server: stored entries first (or those after `after`), then live ones. |
 | `delete(chatId)`     | [Deletes the chat](./chats#deleting-a-chat): stops what works in it, and keeps its log.                                  |
 
 A [chat client](./client) gets `subscribe(chatId).pipe(ChatView.updates(MyAssistant))`: the chat as its
-user sees it.
+user sees it, with only the app events the user may see left in (see [the chat client](./client)).
 
 Code that runs in a chat uses the chat itself instead. `yield* MyAssistant.Chat`
 (in the handler, its build, or a tool its turns run) has the chat's id, its

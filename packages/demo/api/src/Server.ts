@@ -6,11 +6,13 @@
  */
 import { AcmeRpcs } from "@acme/demo-shared/Rpc"
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
+import * as AssistantEvent from "effect-assistant/AssistantEvent"
 import * as ChatView from "effect-assistant/ChatView"
 import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
+import * as Stream from "effect/Stream"
 import * as HttpRouter from "effect/http/HttpRouter"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import * as RpcSerialization from "effect/rpc/RpcSerialization"
@@ -33,7 +35,12 @@ const layerRpcHandlers = AcmeRpcs.toLayer(
     const placing = yield* Effect.context<LiveOrders.LiveOrders | WorkflowEngine.WorkflowEngine>()
 
     return AcmeRpcs.of({
-      Subscribe: ({ chatId }) => acme.subscribe(chatId).pipe(ChatView.updates(AcmeAssistant)),
+      // The view shows every app event it gets: Acme's are for the model, so none reach the user.
+      Subscribe: ({ chatId }) =>
+        acme.subscribe(chatId).pipe(
+          Stream.filter(({ event }) => AssistantEvent.isLibraryEvent(event)),
+          ChatView.updates(AcmeAssistant)
+        ),
       Submit: ({ chatId, input }) =>
         (Predicate.isTagged(input, "UserMessage") ? chats.titleFromMessage(chatId, input.text) : Effect.void).pipe(
           Effect.andThen(acme.submit(chatId, input))

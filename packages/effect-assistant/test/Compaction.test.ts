@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { AppEvent, Assistant, AssistantEvent, ChatId, Compaction, CurrentChat, RunId } from "../src/index.ts"
+import { Assistant, AssistantEvent, ChatId, Compaction, CurrentChat, RunId } from "../src/index.ts"
 import { collectUntil, newChat, runMemory, say, turnsDone } from "./utils/fixtures.ts"
 import * as Scripted from "./utils/scripted.ts"
 
@@ -13,7 +13,7 @@ class Summary extends Schema.TaggedClass<Summary>()("Summary", {
   throughSeq: Schema.Int
 }) {}
 
-const Compacting = Assistant.make("compaction-test", { events: [AppEvent.make(Summary)] })
+const Compacting = Assistant.make("compaction-test", { events: [Summary] })
 
 const history = Compaction.since(Schema.is(Summary))
 
@@ -91,5 +91,22 @@ describe("Compaction", () => {
     )
     // Opened after the summary: the entries after it show it themselves.
     expect(Compaction.openItems(entries, 1)).toEqual(Option.none())
+  })
+
+  it("keeps the app's other events after the summary as entries, for a view to map", () => {
+    const chatId = Effect.runSync(ChatId.make())
+
+    class Shipped extends Schema.TaggedClass<Shipped>()("Shipped", { orderId: Schema.String }) {}
+
+    const entries: ReadonlyArray<Assistant.Entry<Summary | Shipped>> = [
+      { chatId, seq: 1, at: 0, event: say("Order 300 totes.") },
+      { chatId, seq: 2, at: 0, event: Summary.make({ text: "They ordered totes.", throughSeq: 1 }) },
+      { chatId, seq: 3, at: 0, event: Shipped.make({ orderId: "o1" }) }
+    ]
+
+    const viewed = history(entries)
+
+    expect(viewed).toHaveLength(2)
+    expect(viewed[1]).toEqual(entries[2])
   })
 })

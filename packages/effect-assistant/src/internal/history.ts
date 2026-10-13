@@ -110,12 +110,17 @@ const answerText = (answer: AssistantEvent.BlockAnswer) =>
 const resultText = (result: AssistantEvent.ToolResult) =>
   `<result tool="${result.tool}" call="${result.callId}" outcome="${result.outcome}">\nThe result of a call from earlier in this chat.\n${toJsonText(result.result)}\n</result>`
 
-// In the order the model saw the entries, not the order they were stored.
+const isEntry = (item: AssistantEvent.AnyEntry | Prompt.Message): item is AssistantEvent.AnyEntry =>
+  Predicate.hasProperty(item, "seq")
+
+// In the order the model saw the entries, not the order they were stored. A message a history view put in stands
+// where it is, right after the entry before it, and waits like an input for a call's result or for the model's next
+// read; the app's own events reach the model only as such messages.
 /** @internal */
 export const fromEntries = (
-  entries: ReadonlyArray<AssistantEvent.AnyEntry>,
-  readApp: (event: { readonly _tag: string }) => string | undefined
+  items: ReadonlyArray<AssistantEvent.AnyEntry | Prompt.Message>
 ): ReadonlyArray<Prompt.Message> => {
+  const entries = items.filter(isEntry)
   const history: Array<Prompt.Message> = []
   const held: Array<Prompt.Message> = []
   const open = new Set<string>()
@@ -133,27 +138,35 @@ export const fromEntries = (
       : undefined
   }
 
-  const input = (index: number, item: Prompt.Message) => {
+  // `index` is the last entry at or before the item, and `seq` where the item stands.
+  const input = (index: number, seq: number, item: Prompt.Message) => {
     const seen = nextSeen(index)
 
-    if (open.size > 0 || (seen !== undefined && seen < entries[index]!.seq)) held.push(item)
+    if (open.size > 0 || (seen !== undefined && seen < seq)) held.push(item)
     else history.push(item)
   }
 
-  entries.forEach(({ event }, index) => {
-    if (!AssistantEvent.isLibraryEvent(event)) {
-      const text = readApp(event)
+  let index = -1
 
-      if (text !== undefined) input(index, userText(text))
+  for (const item of items) {
+    if (!isEntry(item)) {
+      input(index, (entries[index]?.seq ?? 0) + 0.5, item)
 
-      return
+      continue
     }
+
+    index += 1
+
+    const { event, seq } = item
+    const at = index
+
+    if (!AssistantEvent.isLibraryEvent(event)) continue
 
     Match.value(event).pipe(
       Match.tagsExhaustive({
         UserMessage: (message) =>
-          input(index, userText(AssistantEvent.textWithAttachments(message.text, message.attachments))),
-        BlockAnswer: (answer) => input(index, userText(answerText(answer))),
+          input(at, seq, userText(AssistantEvent.textWithAttachments(message.text, message.attachments))),
+        BlockAnswer: (answer) => input(at, seq, userText(answerText(answer))),
         ModelOutput: (output) => {
           history.push(...Prompt.fromResponseParts(output.parts).content)
 
@@ -169,7 +182,7 @@ export const fromEntries = (
         ToolResult: (result) => {
           // A view that starts after the call (since a summary, say) keeps its result as text: a tool result needs its
           // call right before it.
-          if (!called.has(result.callId)) return input(index, userText(resultText(result)))
+          if (!called.has(result.callId)) return input(at, seq, userText(resultText(result)))
 
           history.push(toolMessage(result))
           open.delete(result.callId)
@@ -180,21 +193,21 @@ export const fromEntries = (
         TurnStarted: () => undefined,
         TurnCompleted: () => undefined,
         TurnFailed: () => undefined,
-        SpecialistFinished: (finished) => input(index, userText(finishedText(entries, index, finished))),
+        SpecialistFinished: (finished) => input(at, seq, userText(finishedText(entries, at, finished))),
         // Every run starts in a call of the model's own (a spawn or a follow-up), whose result says so.
         SpecialistStarted: () => undefined,
         BlocksClosed: () => undefined,
         ChatDeleted: () => undefined
       })
     )
-  })
+  }
 
   return [...history, ...held]
 }
 
 /** @internal */
-export const isInput = (event: { readonly _tag: string }, wakes: ReadonlySet<string>): boolean =>
-  AssistantEvent.isInput(event) || (!AssistantEvent.isLibraryEvent(event) && wakes.has(event._tag))
+export const isInput = (event: { readonly _tag: string }): boolean =>
+  AssistantEvent.isInput(event) || AssistantEvent.isAppInput(event)
 
 /** @internal */
 export const handledThrough = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): number => {
@@ -206,21 +219,18 @@ export const handledThrough = (entries: ReadonlyArray<AssistantEvent.AnyEntry>):
 // A run the assistant stopped isn't an input here: it wakes nothing.
 /** @internal */
 export const unhandledInputs = (
-  entries: ReadonlyArray<AssistantEvent.AnyEntry>,
-  wakes: ReadonlySet<string>
+  entries: ReadonlyArray<AssistantEvent.AnyEntry>
 ): ReadonlyArray<{ readonly _tag: string }> => {
   const seen = handledThrough(entries)
 
   return entries.flatMap(({ event, seq }) =>
-    seq > seen && isInput(event, wakes) && !(AssistantEvent.isInput(event) && !AssistantEvent.isWaking(event))
-      ? [event]
-      : []
+    seq > seen && isInput(event) && !(AssistantEvent.isInput(event) && !AssistantEvent.isWaking(event)) ? [event] : []
   )
 }
 
 /** @internal */
-export const needsTurn = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, wakes: ReadonlySet<string>): boolean =>
-  unhandledInputs(entries, wakes).length > 0
+export const needsTurn = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): boolean =>
+  unhandledInputs(entries).length > 0
 
 // A failure the user was shown counts as a reply.
 /** @internal */
@@ -287,8 +297,5 @@ export const owesDelivery = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, th
 }
 
 /** @internal */
-export const unreadAfter = (
-  entries: ReadonlyArray<AssistantEvent.AnyEntry>,
-  throughSeq: number,
-  wakes: ReadonlySet<string>
-): boolean => entries.some(({ event, seq }) => seq > throughSeq && isInput(event, wakes))
+export const unreadAfter = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, throughSeq: number): boolean =>
+  entries.some(({ event, seq }) => seq > throughSeq && isInput(event))

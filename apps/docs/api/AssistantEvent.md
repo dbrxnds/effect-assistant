@@ -85,6 +85,25 @@ type AssistantEvent = typeof AssistantEvent.Type
 
 <small>Since 0.1.0</small>
 
+### AppEventSchema
+
+Represents the schema of one of the application's own events, as `Assistant.make`'s `events`
+takes it.
+
+**Details**
+
+It is a tagged struct or class (`Schema.TaggedStruct`, `Schema.TaggedClass`) whose `_tag` is a
+string literal other than the library's, and that needs no services. The log stores the event in
+the schema's JSON form.
+
+```ts
+type AppEventSchema = Schema.Codec<{ readonly _tag: string }, { readonly _tag: string }> & {
+  readonly fields: { readonly _tag: { readonly ast: SchemaAST.AST } }
+}
+```
+
+<small>Since 0.3.0</small>
+
 ### StoredAppEvent
 
 Represents one of the application's own events, as it is stored.
@@ -473,11 +492,17 @@ const AppTag = Schema.String.pipe(Schema.brand("~effect-assistant/AppTag"))
 Schema for one of the application's own events as it is stored, with its `_tag` and its fields
 in JSON.
 
-An assistant made with `events: [AppEvent.make(Summary)]` decodes it to a `Summary` in
-`CurrentChat`'s `entries` and in its `subscribe`.
+**Details**
+
+An assistant made with `events: [Summary]` decodes it to a `Summary` in `CurrentChat`'s
+`entries` and in its `subscribe`.
+
+An event that came in through the assistant's `submit`, from outside a turn, is an input, and the
+log marks it with a `"~effect-assistant/input": true` key (see `isAppInput`); one a turn
+appended has none. Decoding drops the key, so the app's schemas never see it.
 
 ```ts
-const StoredAppEvent = Schema.StructWithRest(Schema.Struct({ _tag: AppTag }), [ …
+const StoredAppEvent = Schema.StructWithRest( …
 ```
 
 <small>Since 0.1.0</small>
@@ -507,13 +532,26 @@ const isLibraryEvent: (event: { readonly _tag: string }) => event is AssistantEv
 
 <small>Since 0.1.0</small>
 
+### isAppInput
+
+Returns whether one of the application's events, as the log stores it, is an input: it came in
+through the assistant's `submit`, from outside a turn, so storing it woke a turn. An event a turn
+appended (`CurrentChat`'s `append`) isn't, and neither is a decoded one, which no longer has the
+mark.
+
+```ts
+const isAppInput: (event: { readonly _tag: string }) => boolean
+```
+
+<small>Since 0.3.0</small>
+
 ### isInput
 
 Returns whether an event is one of the library's inputs, which are a user message, a block
 answer, or a finished specialist run.
 
-The application's events that wake a turn are inputs too, but only their assistant knows which
-(see `AppEvent`).
+The application's events that came in through the assistant's `submit` are inputs too (see
+`isAppInput`).
 
 ```ts
 const isInput: (event: { readonly _tag: string }) => event is Input

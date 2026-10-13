@@ -156,7 +156,7 @@ export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.e
 
     // A chat owes a turn when its last turn was cut off, or an input came after.
     const resumeAll = Effect.fnUntraced(function* (registration: Turns.Registration) {
-      const { name, app } = registration.definition
+      const { name } = registration.definition
 
       for (const chatId of yield* log.unfinished) {
         const entries = yield* log.read(chatId)
@@ -164,7 +164,7 @@ export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.e
         const lastTurn = entries.findLast(({ event }) => Predicate.isTagged(event, "TurnStarted"))?.event
         const ours = Predicate.isTagged(lastTurn, "TurnStarted") && lastTurn.assistant === name
 
-        if (ours && History.needsTurn(entries, app.wakes)) yield* withChat(name, chatId, (chat) => chat.resume)
+        if (ours && History.needsTurn(entries)) yield* withChat(name, chatId, (chat) => chat.resume)
       }
     })
 

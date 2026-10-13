@@ -22,7 +22,16 @@ import {
   ChatLog,
   CurrentChat
 } from "../src/index.ts"
-import { collectUntil, say, simple, turnsDone, withHandlers } from "./utils/fixtures.ts"
+import {
+  collectUntil,
+  say,
+  simple,
+  storedUpdate,
+  submittedUpdate,
+  turnsDone,
+  Update,
+  withHandlers
+} from "./utils/fixtures.ts"
 import * as Scripted from "./utils/scripted.ts"
 
 const Resumer = Assistant.make("resumer")
@@ -55,6 +64,46 @@ describe("AssistantEngine.layerMemory", () => {
       )
 
       expect(resumed).toBe(cutOff)
+    }).pipe(Effect.provide(ChatLog.layerMemory))
+  )
+})
+
+describe("AssistantEngine.layerMemory, the app's own events", () => {
+  const Updates = Assistant.make("resumer-updates", { events: [Update] })
+
+  it.live("picks up one submitted before a restart, and not one a turn appended", () =>
+    Effect.gen(function* () {
+      const log = yield* ChatLog.ChatLog
+      const [submitted, appended] = yield* Effect.all([ChatId.make(), ChatId.make()])
+
+      const before = [
+        say("hi"),
+        AssistantEvent.TurnStarted.make({ assistant: "resumer-updates" }),
+        AssistantEvent.TurnCompleted.make({ throughSeq: 2 })
+      ]
+
+      // The log alone says which came in from outside a turn.
+      yield* log.append(submitted, [...before, submittedUpdate("workflow:Order", { status: "shipped" })])
+      yield* log.append(appended, [...before, storedUpdate("budget", { reached: "today" })])
+
+      const ran = yield* Ref.make<ReadonlyArray<ChatId.ChatId>>([])
+      const first = yield* Deferred.make<void>()
+
+      const handlers = Updates.toLayer((turn) =>
+        Stream.fromEffect(
+          Ref.update(ran, (chats) => [...chats, turn.chatId]).pipe(Effect.andThen(Deferred.succeed(first, undefined)))
+        ).pipe(Stream.drain)
+      )
+
+      yield* Effect.scoped(
+        Layer.build(handlers.pipe(Layer.provide(AssistantEngine.layerMemory), Layer.provide(Scripted.unused))).pipe(
+          Effect.andThen(Deferred.await(first)),
+          Effect.andThen(Effect.sleep("100 millis")),
+          Effect.timeout("5 seconds")
+        )
+      )
+
+      expect(yield* Ref.get(ran)).toEqual([submitted])
     }).pipe(Effect.provide(ChatLog.layerMemory))
   )
 })

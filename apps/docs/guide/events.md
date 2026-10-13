@@ -47,7 +47,8 @@ the log to the trace.
 
 The first two are **inputs**: submitting one starts a turn, or joins the
 one that is running. So is a `SpecialistFinished`, and each of your events
-registered with `wakes: true`. A chat
+that comes in through the assistant's `submit` (the log marks it, see
+`AssistantEvent.isAppInput`); one a turn appends never wakes a turn. A chat
 client may submit `UserMessage` and `BlockAnswer`
 (`AssistantEvent.UserInput`); your events come from your server, which
 submits them itself.
@@ -157,19 +158,22 @@ activity.specialists // which specialists, since when
 ```
 
 Server-side code that folds the log one entry at a time uses
-`AssistantActivity.apply`; pass `{ wakes }`, the tags of your events that
-wake a turn, so they count as inputs. A chat client gets the same from its
+`AssistantActivity.apply`. Over the log as stored (`ChatLog.read`), your
+events that came in through `submit` count as inputs; `subscribe` streams
+them decoded, without that mark, so there a turn shows from its
+`TurnStarted`. A chat client gets the same from its
 [view](./client)'s `activity`. A workflow waiting on a timer
 isn't working: the assistant took its last step, and the workflow's next
 event wakes it.
 
 ## Your own events
 
-An assistant stores events of its own in the chat, registered with
-`AppEvent.make(schema, { wakes, render })`: what background work reports,
-which wakes a turn, or the app's bookkeeping, which doesn't. Each is stored
-as itself, in its schema's JSON form, and `CurrentChat`'s `entries` and
-the assistant's `subscribe` decode it to its type. See
+An assistant stores events of its own in the chat, whose schemas it lists in
+`Assistant.make(name, { events })`: what background work reports, which it
+submits and so wakes a turn, or the app's bookkeeping, which a turn appends
+and so wakes none. Each is stored as itself, in its schema's JSON form, and
+`CurrentChat`'s `entries` and the assistant's `subscribe` decode it to its
+type. See
 [your own events](./app-events). For an RPC that streams the log to other
 server code, `MyAssistant.Entry` is the schema: it covers the assistant's
 own events too.
@@ -186,4 +190,6 @@ coherent when things arrive mid-step:
   so the model doesn't read its own reply as an answer to a message it never
   saw.
 
-Your events appear in the history as their `render` says, placed like inputs.
+Your events appear in the history only as a [history view](./loops#compaction)
+maps them to messages, which are placed like inputs: after the open calls'
+results, and after the step whose model call didn't read them.

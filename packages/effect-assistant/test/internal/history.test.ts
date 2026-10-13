@@ -1,10 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
-import type * as Prompt from "effect/ai/Prompt"
+import * as Prompt from "effect/ai/Prompt"
 import * as Response from "effect/ai/Response"
 import * as Effect from "effect/Effect"
 import { AssistantEvent, ChatId, InputId, RunId } from "../../src/index.ts"
 import * as History from "../../src/internal/history.ts"
-import { say } from "../utils/fixtures.ts"
+import { say, storedUpdate, submittedUpdate } from "../utils/fixtures.ts"
 
 const { ModelOutput, ToolResult, ToolStarted, TurnStarted } = AssistantEvent
 
@@ -33,14 +33,11 @@ const trace = (history: ReadonlyArray<Prompt.Message>) =>
     }
   })
 
-// These tests use the library's inputs only.
-const noWakes: ReadonlySet<string> = new Set()
+const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry | Prompt.Message>) => History.fromEntries(entries)
 
-const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => History.fromEntries(entries, () => undefined)
+const needsTurn = (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => History.needsTurn(entries)
 
-const needsTurn = (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => History.needsTurn(entries, noWakes)
-
-const unhandledInputs = (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => History.unhandledInputs(entries, noWakes)
+const unhandledInputs = (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => History.unhandledInputs(entries)
 
 describe("History.fromEntries", () => {
   it("puts a message that arrived while the model was writing after that step", () => {
@@ -226,5 +223,62 @@ describe("History.fromEntries, block answers and earlier results", () => {
 
     expect(history.every((message) => message.role === "user")).toBe(true)
     expect(texts(history).at(-1)).toContain('<result tool="order_history" call="a" outcome="success">')
+  })
+})
+
+describe("History.fromEntries, the app's own events", () => {
+  const note = (text: string) => Prompt.userMessage({ content: [Prompt.textPart({ text })] })
+
+  it("reads none of them by itself", () => {
+    const history = fromEntries([
+      ...entries([say("hi")]),
+      AssistantEvent.Entry.make({ chatId, seq: 2, at: 0, event: storedUpdate("workflow:Order", { status: "done" }) })
+    ])
+
+    expect(trace(history)).toEqual(["user: hi"])
+  })
+
+  it("keeps a call and its result together around a message a view put between them", () => {
+    const [ask, output, started, done] = entries([
+      say("look up the orders"),
+      ModelOutput.make({ parts: [call("a", "order_history")], seenThroughSeq: 1 }),
+      ToolStarted.make({ callId: "a", tool: "order_history" }),
+      result("a", "order_history")
+    ])
+
+    const history = fromEntries([ask!, output!, started!, note("The order shipped."), done!])
+
+    expect(trace(history)).toEqual([
+      "user: look up the orders",
+      "call: order_history",
+      "result: a",
+      "user: The order shipped."
+    ])
+    expect(History.unansweredCalls(history)).toEqual([])
+  })
+
+  it("puts a message after the step whose model call didn't read it", () => {
+    // The note stands for an event at seq 2; the step at seq 3 read through seq 1.
+    const [ask, output] = entries([say("hi"), ModelOutput.make({ parts: [call("w", "wait")], seenThroughSeq: 1 })])
+
+    const history = fromEntries([ask!, note("The order shipped."), { ...output!, seq: 3 }])
+
+    expect(trace(history)).toEqual(["user: hi", "call: wait", "user: The order shipped."])
+  })
+})
+
+describe("History.needsTurn, the app's own events", () => {
+  it("counts one that came in through submit as an input, and not one a turn appended", () => {
+    const after = (event: AssistantEvent.StoredAppEvent) => [
+      ...entries([
+        say("hi"),
+        TurnStarted.make({ assistant: "test" }),
+        AssistantEvent.TurnCompleted.make({ throughSeq: 2 })
+      ]),
+      AssistantEvent.Entry.make({ chatId, seq: 4, at: 0, event })
+    ]
+
+    expect(needsTurn(after(submittedUpdate("workflow:Order", { status: "done" })))).toBe(true)
+    expect(needsTurn(after(storedUpdate("workflow:Order", { status: "done" })))).toBe(false)
   })
 })

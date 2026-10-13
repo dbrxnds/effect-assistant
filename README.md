@@ -123,6 +123,10 @@ const watch = (chatId: ChatId.ChatId, after?: number) =>
 
 - `ChatView.updates` turns the chat's log into the chat as the user sees it: messages, blocks, `activity`,
   `deleted`. The client folds it with `ChatView.apply`, from `ChatView.empty`.
+- The view shows every one of your own events it gets, as a `ChatView.AppEvent` row between the messages. An
+  assistant with events of its own filters `subscribe` to those its users may see first, with
+  `Stream.filter(({ event }) => AssistantEvent.isLibraryEvent(event) || Schema.is(Shown)(event))`; the client reads
+  a row back with `ChatView.decodeEvent(Shown)`.
 - `after` goes to `ChatView.updates`, not to `subscribe`: the view is folded from the whole log, and only the
   updates up to `after` are skipped.
 - The client picks the `InputId`, so a retried send is stored once.
@@ -225,7 +229,7 @@ class OrderPlaced extends Schema.TaggedClass<OrderPlaced>()("OrderPlaced", {
 
 export const Shop = Assistant.make("shop", {
   blocks: BlockKit.make([OrderDraft]),
-  events: [AppEvent.make(OrderPlaced, { wakes: true })]
+  events: [OrderPlaced] // submitted by your API: it wakes a turn
 })
 
 // Your API, behind the block's button: once per block, then tell the chat.
@@ -237,6 +241,9 @@ const placeOrder = (chatId: ChatId.ChatId, messageId: string, order: typeof Orde
     )
   })
 ```
+
+The submitted `OrderPlaced` wakes a turn; the model reads it as your history view maps it (see
+[your own events](#your-own-events)).
 
 What the assistant may do by itself is a tool with final values; a question for the user is a block with an
 `answer` schema. The library doesn't run tools with Effect's `needsApproval`: a loop with one fails. See
@@ -315,9 +322,10 @@ const MyAssistantLive = MyAssistant.toLayer((turn) =>
 
 ### Your own events
 
-Background work reports into the chat with events of your own: a workflow's progress, a webhook. An event
-with `wakes: true` starts a turn, and the model reads it as `render` says. The user sees it only if the
-assistant tells them.
+Background work reports into the chat with events of your own: a workflow's progress, a webhook. The
+definition lists their schemas. An event that comes in through `submit` starts a turn, like a message; one a
+turn appends itself never does. The model reads one as your history view maps it, and the user sees it only
+if the assistant tells them, or you let it through to the view.
 
 ```ts
 class ShipmentUpdated extends Schema.TaggedClass<ShipmentUpdated>()("ShipmentUpdated", {
@@ -326,14 +334,23 @@ class ShipmentUpdated extends Schema.TaggedClass<ShipmentUpdated>()("ShipmentUpd
   status: Schema.String
 }) {}
 
-export const MyAssistant = Assistant.make("my-assistant", {
-  events: [
-    AppEvent.make(ShipmentUpdated, {
-      wakes: true, // starts a turn, like a message
-      render: (update) => `<update>Order ${update.orderId} is ${update.status}. The user hasn't seen this.</update>`
-    })
-  ]
-})
+export const MyAssistant = Assistant.make("my-assistant", { events: [ShipmentUpdated] })
+
+// What the model reads: each update as a short note.
+const shipments: Assistant.HistoryView<ShipmentUpdated> = (entries) =>
+  entries.map((entry) =>
+    entry.event instanceof ShipmentUpdated
+      ? Prompt.userMessage({
+          content: [
+            Prompt.textPart({
+              text: `<update>Order ${entry.event.orderId} is ${entry.event.status}. The user hasn't seen this.</update>`
+            })
+          ]
+        })
+      : entry
+  )
+
+const MyAssistantLive = MyAssistant.toLayer((turn) => turn.loop({ instructions, history: shipments }))
 
 // From a webhook or a workflow. The keyed id makes a redelivery harmless.
 const onShipment = (chatId: ChatId.ChatId, orderId: string, status: string) =>
@@ -353,7 +370,7 @@ turns run, uses the chat itself: its entries, and a way to add to them.
 ```ts
 class Note extends Schema.TaggedClass<Note>()("Note", { text: Schema.String }) {}
 
-export const MyAssistant = Assistant.make("my-assistant", { events: [AppEvent.make(Note)] })
+export const MyAssistant = Assistant.make("my-assistant", { events: [Note] })
 
 const NoteTools = Toolkit.make(
   Tool.make("note", {
@@ -426,7 +443,7 @@ chat. When to compact and what the summary says are yours.
 ```ts
 class Summary extends Schema.TaggedClass<Summary>()("Summary", { text: Schema.String, throughSeq: Schema.Int }) {}
 
-export const MyAssistant = Assistant.make("my-assistant", { events: [AppEvent.make(Summary)] })
+export const MyAssistant = Assistant.make("my-assistant", { events: [Summary] })
 
 const MyAssistantLive = MyAssistant.toLayer((turn) => {
   const compact = Effect.gen(function* () {

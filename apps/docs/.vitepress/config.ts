@@ -1,7 +1,6 @@
 import { defineConfig } from "vitepress"
 
 const modules = [
-  "AppEvent",
   "Assistant",
   "AssistantActivity",
   "AssistantEngine",

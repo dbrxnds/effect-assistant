@@ -6,16 +6,17 @@
  */
 import { Blocks } from "@acme/demo-shared/Blocks"
 import * as Assistant from "effect-assistant/Assistant"
-import * as OrderPlaced from "./OrderPlaced.ts"
+import { OrderPlaced } from "./OrderPlaced.ts"
 import { Research } from "./Research.ts"
-import * as WorkflowStep from "./WorkflowStep.ts"
+import { WorkflowStep } from "./WorkflowStep.ts"
 
 /**
  * Acme: `submit`, `subscribe`, and `delete` wherever the assistant
  * engine is provided. The demo has no sign-in: every thread is everyone's.
  * It hands research to the research specialist. The API tells it when the
  * user places an order from a block (`OrderPlaced`), and the workflows report
- * their steps as `WorkflowStep`s.
+ * their steps as `WorkflowStep`s. Both come in through `submit`, so each one
+ * wakes a turn; `Acme.ts` says how the model reads them.
  *
  * @category definitions
  * @since 0.1.0
@@ -23,5 +24,5 @@ import * as WorkflowStep from "./WorkflowStep.ts"
 export const AcmeAssistant = Assistant.make("acme", {
   blocks: Blocks,
   specialists: [Research],
-  events: [OrderPlaced.event, WorkflowStep.event]
+  events: [OrderPlaced, WorkflowStep]
 })

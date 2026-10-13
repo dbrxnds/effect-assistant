@@ -9,12 +9,16 @@ import { ChatView } from "effect-assistant"
 This module provides the view of a chat as its user sees it. A chat client receives this view
 and nothing else.
 
-A `View` holds the chat's messages with their blocks, the chat's
-`Activity`, and whether the last turn failed or the chat was deleted. It never contains
-the model's output, tool calls or results, what the model read, the app's own events, or why a
-turn failed. The server streams `Update`s by piping the assistant's `subscribe` through
-`updates`, and the client folds them with `apply`, starting from `empty`.
-On the server, `fromEntries` builds a whole view from a chat's log.
+A `View` holds the chat's messages with their blocks, the app's own events it was given
+(`AppEvent`), the chat's `Activity`, and whether the last turn failed or the chat
+was deleted. It never contains the model's output, tool calls or results, what the model read,
+or why a turn failed. The server streams `Update`s by piping the assistant's `subscribe`
+through `updates`, and the client folds them with `apply`, starting from
+`empty`. On the server, `fromEntries` builds a whole view from a chat's log.
+
+**The view shows every app event it gets.** Filter the entries to the events the chat's user may
+see before they reach `updates` or `fromEntries`: an event that is only for the
+assistant, like a summary of the chat, would reach the client otherwise.
 
 ## Constructors
 
@@ -38,6 +42,12 @@ Returns a chat's view, built from the entries of its log.
 Use it in server-side code, for example to return a whole chat at once. A client gets the view
 as a stream from `updates` instead.
 
+**Details**
+
+Every app event among the entries becomes an `AppEvent` row, so pass only those the user
+may see. The definition's schemas give a decoded event its JSON form; without one, the event is
+taken as it is stored, as `ChatLog.read` returns it.
+
 **Example** (Building a chat's view from its log)
 
 ```ts
@@ -51,7 +61,7 @@ const viewOf = (chatId: ChatId.ChatId) =>
 ```
 
 ```ts
-const fromEntries: (entries: ReadonlyArray<AssistantEvent.AnyEntry>, options?: Options) => View
+const fromEntries: (entries: ReadonlyArray<AssistantEvent.AnyEntry>, definition?: Definition) => View
 ```
 
 <small>Since 0.1.0</small>
@@ -117,9 +127,19 @@ type AssistantMessage = typeof AssistantMessage.Type
 
 <small>Since 0.1.0</small>
 
+### AppEvent
+
+Represents one of the app's own events, as the chat's user sees it.
+
+```ts
+type AppEvent = typeof AppEvent.Type
+```
+
+<small>Since 0.3.0</small>
+
 ### Message
 
-Represents a message in the chat.
+Represents an item in the chat.
 
 ```ts
 type Message = typeof Message.Type
@@ -167,332 +187,15 @@ type Update = typeof Update.Type
 
 <small>Since 0.1.0</small>
 
-### Options
-
-Represents the options for building a view from a chat's log.
-
-```ts
-interface Options {
-  /**
-   * The tags of the app's events that wake a turn. After such an event, the view shows a turn as
-   * about to start. Defaults to none.
-   */
-  readonly wakes?: ReadonlySet<string> | undefined
-}
-
-/**
- * Returns a chat's view, built from the entries of its log.
- *
- * **When to use**
- *
- * Use it in server-side code, for example to return a whole chat at once. A client gets the view
- * as a stream from {@link updates} instead.
- *
- * **Example** (Building a chat's view from its log)
- *
- * ```ts
- * import { type ChatId, ChatLog, ChatView } from "effect-assistant"
- * import * as Effect from "effect/Effect"
- *
- * const viewOf = (chatId: ChatId.ChatId) =>
- *   ChatLog.ChatLog.use((log) => log.read(chatId)).pipe(
- *     Effect.map((entries) => ChatView.fromEntries(entries))
- *   )
- * ```
- *
- * @see {@link updates} for a stream of changes instead of a whole view
- *
- * @category constructors
- * @since 0.1.0
- */
-export const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, options?: Options): View => {
-  const fold = folding(options?.wakes ?? new Set())
-
-  for (const entry of entries) fold.step(entry)
-
-  return fold.view
-}
-
-interface Folding {
-  readonly step: (entry: AssistantEvent.AnyEntry) => Update | undefined
-  readonly view: View
-}
-
-const activityOf = (activity: AssistantActivity.State): Activity => ({
-  working: activity.turnSince !== undefined || activity.queued,
-  specialists: [...activity.specialists.values()].map((run) => ({
-    specialist: run.specialist,
-    since: run.since
-  }))
-})
-
-const sameActivity = (a: Activity, b: Activity) =>
-  a.working === b.working &&
-  a.specialists.length === b.specialists.length &&
-  a.specialists.every((run, i) => {
-    const other = b.specialists[i]
-
-    return other !== undefined && run.specialist === other.specialist && run.since === other.since
-  })
-
-const folding = (wakes: ReadonlySet<string>): Folding => {
-  let seq = 0
-  let failed = false
-  let deleted = false
-  let activity = AssistantActivity.empty
-  let blocks: ReadonlyMap<string, BlockKit.State> = new Map()
-  // The messages in order, and the assistant's as stored: their blocks change as the chat goes on.
-  const messages = new Map<string, Message>()
-  const sent = new Map<string, AssistantEvent.AssistantMessage>()
-
-  const blockOf = (message: AssistantEvent.AssistantMessage): Block | undefined => {
-    if (message.block === undefined) return undefined
-
-    const state = blocks.get(message.id)
-    const status = state === undefined || state.open ? "open" : state.answer === undefined ? "closed" : "answered"
-    const block: Block = { kind: message.block.kind, props: toJson(message.block.props), status }
-
-    return state?.answer === undefined ? block : { ...block, answer: toJson(state.answer.value) }
-  }
-
-  const viewOf = (message: AssistantEvent.AssistantMessage, at: number): AssistantMessage => {
-    const block = blockOf(message)
-
-    return block === undefined
-      ? AssistantMessage.make({ id: message.id, text: message.text, at })
-      : AssistantMessage.make({ id: message.id, text: message.text, at, block })
-  }
-
-  const touched = (event: AssistantEvent.AssistantEvent, at: number): ReadonlyArray<string> =>
-    Match.value(event).pipe(
-      Match.tagsExhaustive({
-        UserMessage: (message) => {
-          messages.set(
-            message.id,
-            message.attachments === undefined
-              ? UserMessage.make({ id: message.id, text: message.text, at })
-              : UserMessage.make({
-                  id: message.id,
-                  text: message.text,
-                  attachments: message.attachments,
-                  at
-                })
-          )
-          failed = false
-
-          return [message.id]
-        },
-        AssistantMessage: (message) => {
-          sent.set(message.id, message)
-          messages.set(message.id, viewOf(message, at))
-          failed = false
-
-          return [message.id, ...(message.closes ?? [])]
-        },
-        BlockAnswer: (answer) => {
-          failed = false
-
-          return [answer.messageId]
-        },
-        BlocksClosed: (closed) => closed.messageIds,
-        TurnFailed: () => {
-          failed = true
-
-          return []
-        },
-        ModelOutput: () => [],
-        ToolStarted: () => [],
-        ToolResult: () => [],
-        TurnStarted: () => [],
-        TurnCompleted: () => [],
-        SpecialistStarted: () => [],
-        SpecialistFinished: () => [],
-        ChatDeleted: () => {
-          deleted = true
-
-          return []
-        }
-      })
-    )
-
-  const step = (entry: AssistantEvent.AnyEntry): Update | undefined => {
-    const before = { activity: activityOf(activity), failed, deleted }
-    const { event } = entry
-
-    seq = entry.seq
-    activity = AssistantActivity.apply(activity, entry, { wakes })
-
-    if (!AssistantEvent.isLibraryEvent(event)) {
-      const now = activityOf(activity)
-
-      return sameActivity(before.activity, now) ? undefined : { seq, messages: [], activity: now, failed, deleted }
-    }
-
-    blocks = BlockKit.apply(blocks, event)
-
-    const changed = [...new Set(touched(event, entry.at))].flatMap((id) => {
-      const message = sent.get(id)
-      const current = messages.get(id)
-
-      if (message === undefined || current === undefined) return current === undefined ? [] : [current]
-
-      const next = viewOf(message, current.at)
-      messages.set(id, next)
-
-      return [next]
-    })
-
-    const now = activityOf(activity)
-
-    return changed.length === 0 &&
-      failed === before.failed &&
-      deleted === before.deleted &&
-      sameActivity(before.activity, now)
-      ? undefined
-      : { seq, messages: changed, activity: now, failed, deleted }
-  }
-
-  return {
-    step,
-    get view() {
-      return { seq, messages: [...messages.values()], activity: activityOf(activity), failed, deleted }
-    }
-  }
-}
-
-const merge = (updates: ReadonlyArray<Update>): Update | undefined => {
-  const last = updates.at(-1)
-
-  if (last === undefined) return undefined
-
-  const messages = new Map<string, Message>()
-
-  for (const update of updates) for (const message of update.messages) messages.set(message.id, message)
-
-  return {
-    seq: last.seq,
-    messages: [...messages.values()],
-    activity: last.activity,
-    failed: last.failed,
-    deleted: last.deleted
-  }
-}
-
-/**
- * Represents an assistant's definition as {@link updates} reads it: the app's events it
- * registered, and whether each one wakes a turn. An assistant made with `Assistant.make` fits it.
- *
- * @category models
- * @since 0.1.0
- */
-export interface Definition {
-  readonly events: ReadonlyArray<{ readonly tag: string; readonly wakes: boolean }>
-}
-
-/**
- * Represents the options accepted by {@link updates}.
- *
- * @category models
- * @since 0.1.0
- */
-export interface UpdatesOptions {
-  /**
-   * The `seq` up to which the client already has the view. The result contains only the updates
-   * after it. Defaults to `0`, every update.
-   */
-  readonly after?: number | undefined
-}
-
-const wakesOf = (definition: Definition): ReadonlySet<string> =>
-  new Set(definition.events.flatMap((event) => (event.wakes ? [event.tag] : [])))
-
-/**
- * Returns the stream of view updates that a chat's entries produce, for a chat client.
- *
- * **Details**
- *
- * The entries must stream from the start of the chat's log, as `assistant.subscribe(chatId)` does
- * without `after`. The fold reads every entry, because a message's view depends on earlier
- * entries: a block is answered or closed later. `after` only skips
- * emitting the updates up to that `seq`, so a client that has the view up to a `seq` receives only
- * what changed since. Pass `after` here, not to `subscribe`: a subscription that starts after a
- * `seq` gives the fold an incomplete log, and the updates it produces are wrong.
- *
- * The definition tells the fold which of the app's events wake a turn, so the view shows a turn as
- * about to start after one. Each chunk of entries becomes one update; the stored entries, for
- * example, arrive as one chunk.
- *
- * **Example** (Streaming a chat's view to a client)
- *
- * ```ts
- * import { Assistant, type ChatId, ChatView } from "effect-assistant"
- * import * as Stream from "effect/Stream"
- *
- * const MyAssistant = Assistant.make("my-assistant")
- *
- * const watch = (chatId: ChatId.ChatId, after: number) =>
- *   Stream.unwrap(
- *     MyAssistant.useSync((assistant) =>
- *       assistant.subscribe(chatId).pipe(ChatView.updates(MyAssistant, { after }))
- *     )
- *   )
- * ```
- *
- * @see {@link apply} for folding the updates into a view on the client
- *
- * @category utils
- * @since 0.1.0
- */
-export const updates: {
-  (
-    definition: Definition,
-    options?: UpdatesOptions
-  ): <E, R>(entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>) => Stream.Stream<Update, E, R>
-  <E, R>(
-    entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
-    definition: Definition,
-    options?: UpdatesOptions
-  ): Stream.Stream<Update, E, R>
-} = dual(
-  (args) => Stream.isStream(args[0]),
-  <E, R>(
-    entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
-    definition: Definition,
-    options?: UpdatesOptions
-  ): Stream.Stream<Update, E, R> => {
-    const after = options?.after ?? 0
-    const wakes = wakesOf(definition)
-
-    return entries.pipe(
-      Stream.mapAccumArray(
-        () => folding(wakes),
-        (fold, chunk) => {
-          const changed = chunk.flatMap((entry) => {
-            const update = fold.step(entry)
-
-            return update === undefined || entry.seq <= after ? [] : [update]
-          })
-
-          const merged = merge(changed)
-
-          return [fold, merged === undefined ? [] : [merged]]
-        }
-      )
-    )
-  }
-)
-```
-
-<small>Since 0.1.0</small>
-
 ### Definition
 
-Represents an assistant's definition as `updates` reads it: the app's events it
-registered, and whether each one wakes a turn. An assistant made with `Assistant.make` fits it.
+Represents an assistant's definition as `updates` and `fromEntries` read it: the
+schemas of the app's events, which give each one's JSON form in an `AppEvent` row. An
+assistant made with `Assistant.make` fits it.
 
 ```ts
 interface Definition {
-  readonly events: ReadonlyArray<{ readonly tag: string; readonly wakes: boolean }>
+  readonly events: ReadonlyArray<AssistantEvent.AppEventSchema>
 }
 ```
 
@@ -561,12 +264,30 @@ const AssistantMessage = Schema.TaggedStruct("AssistantMessage", { …
 
 <small>Since 0.1.0</small>
 
-### Message
+### AppEvent
 
-Schema for a message in the chat, sent by either the user or the assistant.
+Schema for one of the app's own events, as the chat's user sees it: a row between the messages,
+in the order the chat stored it.
+
+**Details**
+
+`id` is fixed per entry of the chat's log. `tag` is the event's `_tag`, and `data` the event in
+its schema's JSON form, `_tag` included. Read it back with `decodeEvent`. `at` is when it
+was stored, in epoch milliseconds.
 
 ```ts
-const Message = Schema.Union([UserMessage, AssistantMessage])
+const AppEvent = Schema.TaggedStruct("AppEvent", { …
+```
+
+<small>Since 0.3.0</small>
+
+### Message
+
+Schema for an item in the chat: a message sent by either the user or the assistant, or one of
+the app's own events.
+
+```ts
+const Message = Schema.Union([UserMessage, AssistantMessage, AppEvent])
 ```
 
 <small>Since 0.1.0</small>
@@ -598,8 +319,9 @@ const Activity = Schema.Struct({ …
 
 ### View
 
-Schema for a chat as its user sees it. It holds the chat's messages, what is working in it,
-whether the last turn failed, and whether the chat was deleted. `seq` is the position in the
+Schema for a chat as its user sees it. It holds the chat's messages and the app's events it was
+given, in order, what is working in it, whether the last turn failed, and whether the chat was
+deleted. `seq` is the position in the
 chat's log that the view is up to.
 
 ```ts
@@ -638,6 +360,35 @@ const isIdle: (view: View) => boolean
 
 ## Utils
 
+### decodeEvent
+
+Returns the event in a view's `AppEvent` row, decoded with its schema, or `None` when the
+row holds another event or one that doesn't decode.
+
+**Example** (Showing a notice for one of the app's events)
+
+```ts
+import { ChatView } from "effect-assistant"
+import * as Option from "effect/Option"
+import * as Predicate from "effect/Predicate"
+import * as Schema from "effect/Schema"
+
+class DailyBudgetReached extends Schema.TaggedClass<DailyBudgetReached>()("DailyBudgetReached", {}) {}
+
+const notice = (message: ChatView.Message) =>
+  Predicate.isTagged(message, "AppEvent")
+    ? Option.map(ChatView.decodeEvent(DailyBudgetReached)(message), () => "You've reached today's budget.")
+    : Option.none()
+```
+
+```ts
+const decodeEvent: <S extends AssistantEvent.AppEventSchema>(
+  schema: S
+) => ((row: AppEvent) => Option.Option<S["Type"]>)
+```
+
+<small>Since 0.3.0</small>
+
 ### updates
 
 Returns the stream of view updates that a chat's entries produce, for a chat client.
@@ -651,22 +402,33 @@ emitting the updates up to that `seq`, so a client that has the view up to a `se
 what changed since. Pass `after` here, not to `subscribe`: a subscription that starts after a
 `seq` gives the fold an incomplete log, and the updates it produces are wrong.
 
-The definition tells the fold which of the app's events wake a turn, so the view shows a turn as
-about to start after one. Each chunk of entries becomes one update; the stored entries, for
-example, arrive as one chunk.
+Each chunk of entries becomes one update; the stored entries, for example, arrive as one chunk.
 
-**Example** (Streaming a chat's view to a client)
+**Every app event it gets is shown.** Each one becomes an `AppEvent` row between the
+messages, which the client receives. Filter the stream to the events the chat's user may see
+before this, or an event that is only for the assistant, like a summary of the chat, reaches the
+client. A view shows a turn as working once it starts, or from the user's input.
+
+**Example** (Streaming a chat's view to a client, with the one app event its user sees)
 
 ```ts
-import { Assistant, type ChatId, ChatView } from "effect-assistant"
+import { Assistant, AssistantEvent, type ChatId, ChatView } from "effect-assistant"
+import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
-const MyAssistant = Assistant.make("my-assistant")
+class Summary extends Schema.TaggedClass<Summary>()("Summary", { text: Schema.String, throughSeq: Schema.Int }) {}
+class DailyBudgetReached extends Schema.TaggedClass<DailyBudgetReached>()("DailyBudgetReached", {}) {}
+
+const MyAssistant = Assistant.make("my-assistant", { events: [Summary, DailyBudgetReached] })
 
 const watch = (chatId: ChatId.ChatId, after: number) =>
   Stream.unwrap(
     MyAssistant.useSync((assistant) =>
-      assistant.subscribe(chatId).pipe(ChatView.updates(MyAssistant, { after }))
+      assistant.subscribe(chatId).pipe(
+        // The summary is for the model: only the budget notice reaches the user.
+        Stream.filter(({ event }) => AssistantEvent.isLibraryEvent(event) || Schema.is(DailyBudgetReached)(event)),
+        ChatView.updates(MyAssistant, { after })
+      )
     )
   )
 ```

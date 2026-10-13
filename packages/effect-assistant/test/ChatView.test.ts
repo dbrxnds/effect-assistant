@@ -9,13 +9,17 @@ import { AssistantEvent, ChatId, ChatView, InputId, RunId } from "../src/index.t
 import {
   collectUntil,
   newChat,
+  readUpdates,
   say,
   storedUpdate,
+  submittedUpdate,
   turnsDone,
+  Update,
   update,
   Updating,
   updatingAssistant
 } from "./utils/fixtures.ts"
+import * as AppEvents from "../src/internal/events.ts"
 import * as Scripted from "./utils/scripted.ts"
 
 const chatId = Effect.runSync(ChatId.make())
@@ -24,7 +28,7 @@ const entries = (events: ReadonlyArray<AssistantEvent.AssistantEvent | Assistant
   events.map((event, i) => AssistantEvent.Entry.make({ chatId, seq: i + 1, at: (i + 1) * 1000, event }))
 
 const view = (events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>) =>
-  ChatView.fromEntries(entries(events), { wakes: new Set(["Update"]) })
+  ChatView.fromEntries(entries(events))
 
 const hi = AssistantEvent.UserMessage.make({ id: InputId.fromKey("hi"), text: "Order 300 totes" })
 
@@ -143,11 +147,56 @@ describe("ChatView.fromEntries", () => {
     expect(JSON.stringify(failed)).not.toContain("overloaded")
     expect(ChatView.isIdle(failed)).toBe(true)
 
-    // A workflow's update wakes a turn: working until a turn reads it. The update itself isn't shown.
-    const woken = view([storedUpdate("workflow:Order", { status: "shipped" })])
+    // A workflow's update, submitted, wakes a turn: working until a turn reads it.
+    const woken = view([submittedUpdate("workflow:Order", { status: "shipped" })])
 
     expect(woken.activity.working).toBe(true)
-    expect(woken.messages).toEqual([])
+
+    // One a turn appended wakes nothing.
+    expect(view([storedUpdate("workflow:Order", { status: "shipped" })]).activity.working).toBe(false)
+  })
+
+  it("shows every app event it gets as a row between the messages, in the log's order", () => {
+    const shipped = Update.make({
+      id: InputId.fromKey("shipped"),
+      source: "workflow:Order",
+      payload: { status: "shipped" }
+    })
+
+    const json = Schema.encodeSync(Schema.toCodecJson(Update))(shipped)
+
+    expect(JSON.stringify(json)).toBe(
+      '{"_tag":"Update","id":"shipped","source":"workflow:Order","payload":{"status":"shipped"}}'
+    )
+
+    // As `subscribe` streams it: decoded.
+    const shown = ChatView.fromEntries(
+      [
+        { chatId, seq: 1, at: 1000, event: hi },
+        { chatId, seq: 2, at: 2000, event: shipped },
+        { chatId, seq: 3, at: 3000, event: ask }
+      ],
+      Updating
+    )
+
+    expect(shown.messages.map((message) => message._tag)).toEqual(["UserMessage", "AppEvent", "AssistantMessage"])
+    expect(shown.messages[1]).toEqual(
+      ChatView.AppEvent.make({ id: "app-event:2", tag: "Update", data: json, at: 2000 })
+    )
+
+    const rows = shown.messages.flatMap((message) => (Predicate.isTagged(message, "AppEvent") ? [message] : []))
+
+    // A row reads back as its event with the event's schema; another schema reads nothing.
+    expect(rows.map(ChatView.decodeEvent(Update))).toEqual([Option.some(shipped)])
+    expect(rows.map(ChatView.decodeEvent(Schema.TaggedStruct("Other", { n: Schema.Int })))).toEqual([Option.none()])
+
+    // As the log stores it, without a definition: the stored JSON, without the input mark.
+    const stored = Schema.decodeUnknownSync(AssistantEvent.StoredAppEvent)(json)
+    const fromLog = view([hi, AppEvents.markInput(stored), ask])
+
+    expect(fromLog.messages[1]).toEqual(
+      ChatView.AppEvent.make({ id: "app-event:2", tag: "Update", data: json, at: 2000 })
+    )
   })
 
   it("says when the chat was deleted, and that nothing works in it any more, even mid-turn", () => {
@@ -208,7 +257,7 @@ describe("updates", () => {
         Scripted.lastInput(request).includes("shipped") ? Scripted.reply("It shipped.") : Scripted.reply("Hi!")
       )
 
-      const { log, folded, since } = yield* Effect.gen(function* () {
+      const { log, folded, since, filtered } = yield* Effect.gen(function* () {
         const chat = yield* newChat
         yield* (yield* Updating).submit(chat, say("hi"))
         const first = yield* collectUntil(Updating, chat, (es) => turnsDone(es) >= 1)
@@ -236,12 +285,30 @@ describe("updates", () => {
           Stream.runCollect
         )
 
-        return { log, folded, since }
-      }).pipe(Effect.provide(updatingAssistant((turn) => turn.loop({ instructions: "Be brief." }), model.layer)))
+        // What the app lets its user see: here, none of its events.
+        const filtered = yield* (yield* Updating).subscribe(chat).pipe(
+          Stream.filter(({ event }) => AssistantEvent.isLibraryEvent(event)),
+          ChatView.updates(Updating),
+          Stream.scan(() => ChatView.empty, ChatView.apply),
+          Stream.takeUntil((shown) => shown.seq >= log.at(-1)!.seq),
+          Stream.runLast,
+          Effect.map(Option.getOrThrow)
+        )
 
-      expect(folded).toEqual(ChatView.fromEntries(log, { wakes: new Set(["Update"]) }))
-      expect(folded.messages.map((message) => message.text)).toEqual(["hi", "Hi!", "It shipped."])
-      expect(since.flatMap((changes) => changes.messages.map((message) => message.text))).toEqual(["It shipped."])
+        return { log, folded, since, filtered }
+      }).pipe(
+        Effect.provide(
+          updatingAssistant((turn) => turn.loop({ instructions: "Be brief.", history: readUpdates }), model.layer)
+        )
+      )
+
+      const shown = (view: ReadonlyArray<ChatView.Message>) =>
+        view.map((message) => (Predicate.isTagged(message, "AppEvent") ? message.tag : message.text))
+
+      expect(folded).toEqual(ChatView.fromEntries(log, Updating))
+      expect(shown(folded.messages)).toEqual(["hi", "Hi!", "Update", "It shipped."])
+      expect(since.flatMap((changes) => shown(changes.messages))).toEqual(["Update", "It shipped."])
+      expect(shown(filtered.messages)).toEqual(["hi", "Hi!", "It shipped."])
     })
   )
 })

@@ -27,7 +27,12 @@ import { BlockContext, type BlockContextValue } from "./Blocks.tsx"
 import { Message, Typing } from "./Message.tsx"
 import { ThreadList } from "./ThreadList.tsx"
 
-const toThreadMessage = (message: ChatView.Message): ThreadMessageLike =>
+type Shown = ChatView.UserMessage | ChatView.AssistantMessage
+
+// The server sends none of Acme's own events, so the thread has only messages.
+const isShown = (message: ChatView.Message): message is Shown => !Predicate.isTagged(message, "AppEvent")
+
+const toThreadMessage = (message: Shown): ThreadMessageLike =>
   Predicate.isTagged(message, "UserMessage")
     ? { id: message.id, role: "user", content: message.text }
     : { id: message.id, role: "assistant", content: message.text, status: { type: "complete", reason: "stop" } }
@@ -100,8 +105,8 @@ export function AcmeChatPage() {
     if (target === chatId) openChat(demoChatId)
   }
 
-  const runtime = useExternalStoreRuntime<ChatView.Message>({
-    messages: [...state.messages],
+  const runtime = useExternalStoreRuntime<Shown>({
+    messages: state.messages.filter(isShown),
     isRunning: false,
     convertMessage: toThreadMessage,
     onNew

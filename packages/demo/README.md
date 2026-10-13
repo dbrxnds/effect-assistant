@@ -24,15 +24,18 @@ ask for reports.
   `place` (what the order block's button runs through the `PlaceOrder` RPC), and the `PrintOrder`
   workflow.
 - `api/src/OrderPlaced.ts`: what the API tells the chat when the user places an order or starts a
-  campaign, one of Acme's own events: it wakes a turn, and Acme follows up with the reference.
-- `api/src/WorkflowStep.ts`: a workflow's step, one of Acme's own events: it wakes a turn, and the
-  model reads it as a `<workflow>` update.
+  campaign, one of Acme's own events: the API submits it, so it wakes a turn, and Acme follows up with
+  the reference.
+- `api/src/WorkflowStep.ts`: a workflow's step, one of Acme's own events: the workflow submits it, so
+  it wakes a turn, and the model reads it as a `<workflow>` update (Acme's history view in
+  `api/src/Acme.ts` maps both events to notes).
 - `api/src/Steps.ts`: what the workflows share: reporting a step to the chat, and durable waits at
   demo pace.
 - `api/src/LiveOrders.ts`: orders placed through Acme, kept up to date by the workflows.
 - `api/src/Chats.ts`: the thread list. Deleting a thread deletes its chat (the assistant's `delete`).
 - `api/src/Server.ts`: `/health`, `/rpc`, and the web app. `Subscribe` streams the chat's view
-  (the assistant's `subscribe` piped through `ChatView.updates`): what the user sees, never the assistant's own work.
+  (the assistant's `subscribe`, without Acme's own events, piped through `ChatView.updates`): what the user sees, never
+  the assistant's own work.
 - `api/src/main.ts`: wires it together on Postgres (`DATABASE_URL`) or in memory.
 - `api/scripts/smoke.ts`: an end-to-end check against a running server. It deletes the chats it
   creates.

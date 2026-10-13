@@ -1,11 +1,10 @@
 /**
  * What the demo's workflows report to the chat: a step of a run, as one of
- * Acme's own events. It wakes a turn, and the model reads it as a
- * `<workflow>` update the user hasn't seen.
+ * Acme's own events. The workflow submits it, so it wakes a turn, and the
+ * model reads it as a `<workflow>` update the user hasn't seen.
  *
  * @since 0.1.0
  */
-import * as AppEvent from "effect-assistant/AppEvent"
 import * as InputId from "effect-assistant/InputId"
 import * as RunId from "effect-assistant/RunId"
 import * as Schema from "effect/Schema"
@@ -36,11 +35,3 @@ const detailsJson = Schema.encodeSync(Schema.fromJsonString(WorkflowStep.fields.
  */
 export const render = (step: WorkflowStep): string =>
   `<workflow name="${step.workflow}" run="${step.runId}" status="${step.status}">\nAn update from a run you started. The user hasn't seen it: tell them if it matters to them.\n${detailsJson(step.details)}\n</workflow>`
-
-/**
- * The step, registered with Acme: it wakes a turn.
- *
- * @category events
- * @since 0.1.0
- */
-export const event = AppEvent.make(WorkflowStep, { wakes: true, render })
