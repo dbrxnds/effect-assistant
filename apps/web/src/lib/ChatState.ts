@@ -6,27 +6,21 @@
  * the assistant's work. Every Subscribe replays the chat from the start;
  * applying an update again changes nothing.
  */
-import { AcmeAssistant } from "@acme/demo-shared/AcmeAssistant"
-import type * as Assistant from "effect-assistant/Assistant"
 import type * as ChatId from "effect-assistant/ChatId"
 import * as ChatView from "effect-assistant/ChatView"
 import * as Atom from "effect/reactivity/Atom"
 
-/** Acme's own events, which type the view's rows. The server sends none of them. */
-type AcmeEvents = Assistant.Events<typeof AcmeAssistant>
-
 /** A chat's view, and whether anything works in it: the assistant's turn, or a specialist. */
-export type ChatState = ChatView.View<AcmeEvents> & { readonly working: boolean }
+export type ChatState = ChatView.View & { readonly working: boolean }
 
-const withWorking = (view: ChatView.View<AcmeEvents>): ChatState => ({ ...view, working: !ChatView.isIdle(view) })
-
-const applyUpdate = ChatView.apply(AcmeAssistant)
+const withWorking = (view: ChatView.View): ChatState => ({ ...view, working: !ChatView.isIdle(view) })
 
 /** A chat before its first update. */
 export const initial: ChatState = withWorking(ChatView.empty)
 
 /** A chat after one more update. */
-export const apply = (state: ChatState, update: ChatView.Update): ChatState => withWorking(applyUpdate(state, update))
+export const apply = (state: ChatState, update: ChatView.Update): ChatState =>
+  withWorking(ChatView.apply(state, update))
 
 /** Messages this tab sent that the server hasn't echoed yet. */
 export const pendingSends = Atom.family((_chatId: ChatId.ChatId) => Atom.make<ReadonlyArray<ChatView.UserMessage>>([]))

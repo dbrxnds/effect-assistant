@@ -2,26 +2,25 @@
  * This module provides the view of a chat as its user sees it. A chat client receives this view
  * and nothing else.
  *
- * A {@link View} holds the chat's messages with their blocks, the assistant's own events it was
- * given (each a row typed with the assistant's events, see {@link EventRow}), the chat's
- * {@link Activity}, and whether the last turn failed or the chat was deleted. It never contains the
- * model's output, tool calls or results, what the model read, or why a turn failed. The server
- * streams {@link Update}s, which are JSON, by piping the assistant's `subscribe` through
- * {@link updates}, and the client folds them with `apply(MyAssistant)`, which decodes the events,
- * starting from {@link empty}. On the server, {@link fromEntries} builds a whole view from a
- * chat's log, and {@link snapshot} the whole view as one update.
+ * A {@link View} holds the chat's messages with their blocks, the app's own events it shows (each
+ * a row typed with its event, see {@link EventRow}), the chat's {@link Activity}, and whether the
+ * last turn failed or the chat was deleted. It never contains the model's output, tool calls or
+ * results, what the model read, or why a turn failed. The server streams {@link Update}s by piping
+ * the assistant's `subscribe` through {@link updates}, and the client folds them with
+ * {@link views} (or {@link apply}, from {@link empty}). On the server, {@link fromEntries} builds a
+ * whole view from a chat's log, and {@link snapshot} the whole view as one update.
  *
- * **The view shows every app event it gets.** Filter the entries to the events the chat's user may
- * see before they reach {@link updates}, {@link snapshot}, or {@link fromEntries}: an event that is only for the
- * assistant, like a summary of the chat, would reach the client otherwise.
+ * **Only the app events in `show` reach the view**, and none by default: an event that is only for
+ * the assistant, like a summary of the chat, stays out. The RPC's schema, `Update([...])`, names
+ * the same events and types the client's view with them.
  *
  * @since 0.1.0
  */
 import { dual } from "effect/Function"
 import * as Match from "effect/Match"
 import * as Option from "effect/Option"
-import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
+import * as SchemaTransformation from "effect/SchemaTransformation"
 import * as Stream from "effect/Stream"
 import type * as Assistant from "./Assistant.ts"
 import * as AssistantActivity from "./AssistantActivity.ts"
@@ -162,19 +161,6 @@ export type EventRow<E> = E extends { readonly _tag: infer Tag extends string }
  */
 export type Message<Events = never> = UserMessage | AssistantMessage | EventRow<Events>
 
-// On the wire an event's row holds the event in its JSON form, so an update needs no definition to
-// decode; `apply` decodes the event with the definition's schemas.
-const EncodedEventRow = Schema.Struct({
-  _tag: Schema.String,
-  id: Schema.String,
-  at: Schema.Finite,
-  event: Schema.Json
-})
-
-const EncodedMessage = Schema.Union([UserMessage, AssistantMessage, EncodedEventRow])
-
-type EncodedMessage = typeof EncodedMessage.Type
-
 /**
  * Schema for a specialist that is working for the assistant. It holds the specialist's name and
  * when it started, in epoch milliseconds.
@@ -238,41 +224,95 @@ export interface View<Events = never> {
 }
 
 /**
- * Schema for a change to a chat's view, as it goes over the wire.
+ * Represents a change to a chat's view, typed with the app's events it shows.
  *
  * **Details**
  *
  * An update holds each message that is new or changed (for example, a block answered or
- * closed), in full. It also holds the current activity, whether the last turn failed,
- * and whether the chat was deleted. `seq` is the position in the chat's log that the update is up
- * to.
- *
- * It is JSON and needs no definition, so it serves as an RPC's success schema as it is. A row for
- * one of the assistant's events holds the event in its JSON form; the client's {@link apply}
- * decodes it with the assistant's schemas.
- *
- * @category schemas
- * @since 0.1.0
- */
-export const Update = Schema.Struct({
-  seq: Schema.Int,
-  messages: Schema.Array(EncodedMessage),
-  activity: Activity,
-  failed: Schema.Boolean,
-  deleted: Schema.Boolean
-})
-
-/**
- * Represents a change to a chat's view.
+ * closed), in full, and a row for each of the shown app events that is new. It also holds the
+ * current activity, whether the last turn failed, and whether the chat was deleted. `seq` is the
+ * position in the chat's log that the update is up to.
  *
  * @category models
  * @since 0.1.0
  */
-export type Update = typeof Update.Type
+export interface Update<Events = never> {
+  readonly seq: number
+  readonly messages: ReadonlyArray<Message<Events>>
+  readonly activity: Activity
+  readonly failed: boolean
+  readonly deleted: boolean
+}
+
+const eventRow = (schema: AssistantEvent.AppEventSchema) =>
+  Schema.Struct({ _tag: Schema.Literal(AppEvents.tagOf(schema)), id: Schema.String, at: Schema.Finite, event: schema })
+
+function makeUpdate<const Events extends ReadonlyArray<AssistantEvent.AppEventSchema> = readonly []>(
+  events?: Events
+): Schema.Codec<Update<Events[number]["Type"]>, Schema.Json>
+// The overload states the decoded type: a row per given schema, each typed with its own event.
+function makeUpdate(events: ReadonlyArray<AssistantEvent.AppEventSchema> = []): Schema.Top {
+  const Item = Schema.toCodecJson(Schema.Union([UserMessage, AssistantMessage, ...events.map(eventRow)]))
+  const decodeItem = Schema.decodeUnknownOption(Item)
+  const encodeItem = Schema.encodeUnknownSync(Item)
+
+  return Schema.Struct({
+    seq: Schema.Int,
+    // A row for an event this schema doesn't name, or that doesn't decode (from a newer server, say), is left out
+    // rather than failing the whole update.
+    messages: Schema.Array(Schema.Json).pipe(
+      Schema.decodeTo(
+        Schema.Array(Schema.toType(Item)),
+        SchemaTransformation.transform<ReadonlyArray<typeof Item.Type>, ReadonlyArray<Schema.Json>>({
+          decode: (items) => items.flatMap((item) => Option.toArray(decodeItem(item))),
+          encode: (messages) => messages.map((message) => encodeItem(message))
+        })
+      )
+    ),
+    activity: Activity,
+    failed: Schema.Boolean,
+    deleted: Schema.Boolean
+  })
+}
+
+/**
+ * Creates the schema for a chat's view updates, with rows for the given app events, in JSON.
+ *
+ * **Details**
+ *
+ * It is the success schema of the RPC that streams a chat's view: name the events the chat's users
+ * see, the same ones the handler passes to {@link updates} as `show`. Each row decodes its event
+ * with that event's schema, so the client gets `Update<Events>` typed with them, and folds it with
+ * {@link apply}, no definition needed. `Update()` carries no app events.
+ *
+ * A handler whose updates show an event the schema doesn't name doesn't compile.
+ *
+ * **Example** (An RPC that streams a chat's view, with the budget notice)
+ *
+ * ```ts
+ * import { ChatId, ChatView } from "effect-assistant"
+ * import * as Rpc from "effect/rpc/Rpc"
+ * import * as Schema from "effect/Schema"
+ *
+ * class DailyBudgetReached extends Schema.TaggedClass<DailyBudgetReached>()("DailyBudgetReached", {}) {}
+ *
+ * const Subscribe = Rpc.make("Subscribe", {
+ *   payload: { chatId: ChatId.ChatId },
+ *   success: ChatView.Update([DailyBudgetReached]),
+ *   stream: true
+ * })
+ * ```
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const Update: <const Events extends ReadonlyArray<AssistantEvent.AppEventSchema> = readonly []>(
+  events?: Events
+) => Schema.Codec<Update<Events[number]["Type"]>, Schema.Json> = makeUpdate
 
 /**
  * The view of a chat before anything has happened in it, with no messages and nothing working.
- * Use it as the starting point when folding updates with {@link apply}, for any assistant.
+ * Use it as the starting point when folding updates with {@link apply}.
  *
  * @category constructors
  * @since 0.1.0
@@ -285,98 +325,85 @@ export const empty: View = {
   deleted: false
 }
 
-interface DecodedRow {
-  readonly _tag: string
-  readonly id: string
-  readonly at: number
-  readonly event: { readonly _tag: string }
-}
-
-// The view as the implementations below build it: their overloads type its rows with the assistant's events.
-interface AnyView {
-  readonly seq: number
-  readonly messages: ReadonlyArray<UserMessage | AssistantMessage | DecodedRow>
-  readonly activity: Activity
-  readonly failed: boolean
-  readonly deleted: boolean
-}
-
-interface Schemas {
-  readonly events: ReadonlyArray<AssistantEvent.AppEventSchema>
-}
-
-const applyWith = (definition: Schemas): ((view: AnyView, update: Update) => AnyView) => {
-  const decoders = new Map(
-    definition.events.map((schema) => [AppEvents.tagOf(schema), Schema.decodeUnknownOption(Schema.toCodecJson(schema))])
-  )
-
-  // A row whose event the definition doesn't know, or that doesn't decode, is left out: the view goes on without it.
-  const decoded = (message: EncodedMessage): ReadonlyArray<UserMessage | AssistantMessage | DecodedRow> => {
-    if (Predicate.isTagged(message, "UserMessage") || Predicate.isTagged(message, "AssistantMessage")) return [message]
-
-    const decode = decoders.get(message._tag)
-
-    return decode === undefined
-      ? []
-      : Option.toArray(Option.map(decode(message.event), (event) => ({ ...message, event })))
-  }
-
-  return (view, update) => {
-    const messages = update.messages.flatMap(decoded)
-    const changed = new Map(messages.map((message) => [message.id, message]))
-    const known = new Set(view.messages.map((message) => message.id))
-
-    return {
-      seq: Math.max(view.seq, update.seq),
-      messages: [
-        ...view.messages.map((message) => changed.get(message.id) ?? message),
-        ...messages.filter((message) => !known.has(message.id))
-      ],
-      activity: update.activity,
-      failed: update.failed,
-      deleted: update.deleted
-    }
-  }
-}
-
-function typedApply<Events>(definition: Definition<Events>): (view: View<Events>, update: Update) => View<Events>
-function typedApply(definition: Schemas): (view: AnyView, update: Update) => AnyView {
-  return applyWith(definition)
-}
-
 /**
- * Returns a function that applies an update to a view, decoding the rows of the assistant's events
- * with its schemas.
+ * Returns the view after applying an update.
  *
  * **Details**
  *
  * Each message in the update replaces the message with the same id, in place, and new messages
- * are added after the rest. The update's activity, `failed`, and `deleted` replace the view's.
- * Applying an update twice changes nothing, so a client that resubscribes from the start can fold
- * again and get the same view.
+ * and rows are added after the rest. The update's activity, `failed`, and `deleted` replace the
+ * view's. Applying an update twice changes nothing, so a client that resubscribes from the start
+ * can fold again and get the same view.
  *
- * A row for one of the assistant's events becomes the event, decoded, typed with the definition's
- * events (see {@link EventRow}). A row whose tag the definition doesn't have, or whose event
- * doesn't decode, is left out.
+ * The view is typed with the update's events, as its RPC's schema decoded them (see
+ * {@link Update}). To fold a stream of updates, use {@link views}: in
+ * `Stream.scan(() => ChatView.empty, ChatView.apply)`, TypeScript fixes the state's type from
+ * `empty` before it sees the updates' events, so that form needs the view's type written out.
  *
- * **Example** (Folding a chat's updates on the client)
+ * **Example** (Folding updates into your own state)
  *
  * ```ts
- * import { Assistant, ChatView } from "effect-assistant"
- * import * as Stream from "effect/Stream"
+ * import { ChatView } from "effect-assistant"
  *
- * const MyAssistant = Assistant.make("my-assistant")
+ * interface State<Events> {
+ *   readonly view: ChatView.View<Events>
+ *   readonly unread: number
+ * }
  *
- * declare const updates: Stream.Stream<ChatView.Update>
- *
- * const views = updates.pipe(Stream.scan(() => ChatView.empty, ChatView.apply(MyAssistant)))
+ * const next = <Events>(state: State<Events>, update: ChatView.Update<Events>): State<Events> => ({
+ *   view: ChatView.apply(state.view, update),
+ *   unread: state.unread + update.messages.length
+ * })
  * ```
  *
  * @category combinators
  * @since 0.1.0
  */
-export const apply: <Events>(definition: Definition<Events>) => (view: View<Events>, update: Update) => View<Events> =
-  typedApply
+export const apply = <Events>(view: View<Events>, update: Update<Events>): View<Events> => {
+  const changed = new Map(update.messages.map((message) => [message.id, message]))
+  const known = new Set(view.messages.map((message) => message.id))
+
+  return {
+    seq: Math.max(view.seq, update.seq),
+    messages: [
+      ...view.messages.map((message) => changed.get(message.id) ?? message),
+      ...update.messages.filter((message) => !known.has(message.id))
+    ],
+    activity: update.activity,
+    failed: update.failed,
+    deleted: update.deleted
+  }
+}
+
+/**
+ * Returns the views a stream of updates folds to, from {@link empty}, typed with the updates'
+ * events.
+ *
+ * **Example** (A chat's view on the client)
+ *
+ * ```ts
+ * import { ChatId, ChatView } from "effect-assistant"
+ * import * as Rpc from "effect/rpc/Rpc"
+ * import * as RpcGroup from "effect/rpc/RpcGroup"
+ * import * as Schema from "effect/Schema"
+ * import * as Stream from "effect/Stream"
+ *
+ * class DailyBudgetReached extends Schema.TaggedClass<DailyBudgetReached>()("DailyBudgetReached", {}) {}
+ *
+ * const Rpcs = RpcGroup.make(
+ *   Rpc.make("Subscribe", { payload: { chatId: ChatId.ChatId }, success: ChatView.Update([DailyBudgetReached]), stream: true })
+ * )
+ *
+ * declare const updates: Stream.Stream<ChatView.Update<DailyBudgetReached>> // the RPC's stream
+ *
+ * const views = updates.pipe(ChatView.views) // Stream<ChatView.View<DailyBudgetReached>>
+ * ```
+ *
+ * @category combinators
+ * @since 0.3.0
+ */
+export const views = <Events, E, R>(updates: Stream.Stream<Update<Events>, E, R>): Stream.Stream<View<Events>, E, R> =>
+  updates.pipe(Stream.scan((): View<Events> => empty, apply))
 
 /**
  * Returns whether nothing is working in the chat: no turn is running or about to start, and no
@@ -388,51 +415,106 @@ export const apply: <Events>(definition: Definition<Events>) => (view: View<Even
 export const isIdle = <Events>(view: View<Events>): boolean =>
   !view.activity.working && view.activity.specialists.length === 0
 
+interface Row {
+  readonly _tag: string
+  readonly id: string
+  readonly at: number
+  readonly event: { readonly _tag: string }
+}
+
+// What the fold below builds: the overloads that use it type its rows with the events shown.
+interface AnyUpdate {
+  readonly seq: number
+  readonly messages: ReadonlyArray<UserMessage | AssistantMessage | Row>
+  readonly activity: Activity
+  readonly failed: boolean
+  readonly deleted: boolean
+}
+
 /**
- * Returns a chat's whole view as one update, built from the entries of its log.
+ * Represents the options for building a chat's view from its log.
  *
- * **When to use**
- *
- * Use it on the server for an RPC that returns a whole chat at once: the RPC's success schema is
- * {@link Update}, and the client applies it to {@link empty} with {@link apply}.
- *
- * **Details**
- *
- * Every app event among the entries becomes a row, so pass only those the user may see. The
- * definition's schemas give a decoded event its JSON form; without one, an event is taken as it is
- * stored, as `ChatLog.read` returns it.
- *
- * @category constructors
+ * @category models
  * @since 0.3.0
  */
-export const snapshot = <Events>(
-  entries: ReadonlyArray<AssistantEvent.AnyEntry>,
-  definition?: Definition<Events>
-): Update => snapshotWith(entries, definition ?? noEvents)
+export interface ShowOptions<Show extends ReadonlyArray<AssistantEvent.AppEventSchema>> {
+  /**
+   * The schemas of the app's events the chat's users see. Each becomes a row in the view; the
+   * app's other events are left out. Defaults to none.
+   */
+  readonly show?: Show | undefined
+}
 
-const snapshotWith = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, definition: Schemas): Update => {
-  const fold = folding(definition.events)
+/**
+ * Represents the schemas an assistant's view may show: some of its own events.
+ *
+ * @category utility types
+ * @since 0.3.0
+ */
+export type Shown<Events> = ReadonlyArray<AssistantEvent.AppEventSchema & { readonly Type: Events }>
+
+function snapshotWith(entries: ReadonlyArray<AssistantEvent.AnyEntry>): Update
+function snapshotWith<Events, const Show extends Shown<Events> = readonly []>(
+  entries: ReadonlyArray<AssistantEvent.AnyEntry>,
+  definition: Definition<Events>,
+  options?: ShowOptions<Show>
+): Update<Show[number]["Type"]>
+function snapshotWith(
+  entries: ReadonlyArray<AssistantEvent.AnyEntry>,
+  _definition?: Schemas,
+  options?: ShowOptions<ReadonlyArray<AssistantEvent.AppEventSchema>>
+): AnyUpdate {
+  const fold = folding(options?.show ?? [])
 
   for (const entry of entries) fold.step(entry)
 
   return fold.snapshot
 }
 
-const noEvents: Schemas = { events: [] }
+/**
+ * Returns a chat's whole view as one update, built from the entries of its log.
+ *
+ * **When to use**
+ *
+ * Use it on the server for an RPC that returns a whole chat at once: its success schema is
+ * {@link Update} with the same events as `show`, and the client applies it to {@link empty}.
+ *
+ * **Details**
+ *
+ * Only the app's events in `show` become rows; without it, the view has none.
+ *
+ * @category constructors
+ * @since 0.3.0
+ */
+export const snapshot: {
+  (entries: ReadonlyArray<AssistantEvent.AnyEntry>): Update
+  <Events, const Show extends Shown<Events> = readonly []>(
+    entries: ReadonlyArray<AssistantEvent.AnyEntry>,
+    definition: Definition<Events>,
+    options?: ShowOptions<Show>
+  ): Update<Show[number]["Type"]>
+} = snapshotWith
 
 function fromEntriesWith(entries: ReadonlyArray<AssistantEvent.AnyEntry>): View
-function fromEntriesWith<Events>(
+function fromEntriesWith<Events, const Show extends Shown<Events> = readonly []>(
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
-  definition: Definition<Events>
-): View<Events>
-function fromEntriesWith(entries: ReadonlyArray<AssistantEvent.AnyEntry>, definition?: Schemas): AnyView {
-  const schemas = definition ?? noEvents
+  definition: Definition<Events>,
+  options?: ShowOptions<Show>
+): View<Show[number]["Type"]>
+function fromEntriesWith(
+  entries: ReadonlyArray<AssistantEvent.AnyEntry>,
+  _definition?: Schemas,
+  options?: ShowOptions<ReadonlyArray<AssistantEvent.AppEventSchema>>
+): AnyUpdate {
+  const fold = folding(options?.show ?? [])
 
-  return applyWith(schemas)(empty, snapshotWith(entries, schemas))
+  for (const entry of entries) fold.step(entry)
+
+  return fold.snapshot
 }
 
 /**
- * Returns a chat's view, built from the entries of its log, typed with the assistant's events.
+ * Returns a chat's view, built from the entries of its log.
  *
  * **When to use**
  *
@@ -441,8 +523,8 @@ function fromEntriesWith(entries: ReadonlyArray<AssistantEvent.AnyEntry>, defini
  *
  * **Details**
  *
- * Every app event among the entries becomes a row, so pass only those the user may see. Without a
- * definition, the view has no rows for app events.
+ * Only the app's events in `show` become rows, typed with their schemas; without it, the view has
+ * none.
  *
  * **Example** (Building a chat's view from its log)
  *
@@ -463,12 +545,20 @@ function fromEntriesWith(entries: ReadonlyArray<AssistantEvent.AnyEntry>, defini
  */
 export const fromEntries: {
   (entries: ReadonlyArray<AssistantEvent.AnyEntry>): View
-  <Events>(entries: ReadonlyArray<AssistantEvent.AnyEntry>, definition: Definition<Events>): View<Events>
+  <Events, const Show extends Shown<Events> = readonly []>(
+    entries: ReadonlyArray<AssistantEvent.AnyEntry>,
+    definition: Definition<Events>,
+    options?: ShowOptions<Show>
+  ): View<Show[number]["Type"]>
 } = fromEntriesWith
 
+interface Schemas {
+  readonly events: ReadonlyArray<AssistantEvent.AppEventSchema>
+}
+
 interface Folding {
-  readonly step: (entry: AssistantEvent.AnyEntry) => Update | undefined
-  readonly snapshot: Update
+  readonly step: (entry: AssistantEvent.AnyEntry) => AnyUpdate | undefined
+  readonly snapshot: AnyUpdate
 }
 
 const activityOf = (activity: AssistantActivity.State): Activity => ({
@@ -488,14 +578,15 @@ const sameActivity = (a: Activity, b: Activity) =>
     return other !== undefined && run.specialist === other.specialist && run.since === other.since
   })
 
-const folding = (events: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding => {
+const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding => {
+  const shown = new Map(show.map((schema) => [AppEvents.tagOf(schema), schema]))
   let seq = 0
   let failed = false
   let deleted = false
   let activity = AssistantActivity.empty
   let blocks: ReadonlyMap<string, BlockKit.State> = new Map()
   // The messages in order, and the assistant's as stored: their blocks change as the chat goes on.
-  const messages = new Map<string, EncodedMessage>()
+  const messages = new Map<string, UserMessage | AssistantMessage | Row>()
   const sent = new Map<string, AssistantEvent.AssistantMessage>()
 
   const blockOf = (message: AssistantEvent.AssistantMessage): Block | undefined => {
@@ -568,7 +659,23 @@ const folding = (events: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding 
       })
     )
 
-  const step = (entry: AssistantEvent.AnyEntry): Update | undefined => {
+  // Decoded as `subscribe` streams it, or as the log stores it; one that doesn't decode is left out.
+  const rowOf = (entry: AssistantEvent.AnyEntry): Option.Option<Row> => {
+    const schema = shown.get(entry.event._tag)
+
+    if (schema === undefined) return Option.none()
+
+    const event = Schema.is(schema)(entry.event) ? Option.some(entry.event) : AppEvents.decodeWith(schema, entry.event)
+
+    return Option.map(event, (decoded) => ({
+      _tag: decoded._tag,
+      id: `app-event:${entry.seq}`,
+      at: entry.at,
+      event: decoded
+    }))
+  }
+
+  const step = (entry: AssistantEvent.AnyEntry): AnyUpdate | undefined => {
     const before = { activity: activityOf(activity), failed, deleted }
     const { event } = entry
 
@@ -576,16 +683,17 @@ const folding = (events: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding 
     activity = AssistantActivity.apply(activity, entry)
 
     if (!AssistantEvent.isLibraryEvent(event)) {
-      const row = EncodedEventRow.make({
-        _tag: event._tag,
-        id: `app-event:${entry.seq}`,
-        at: entry.at,
-        event: AppEvents.toJson(events, event)
+      const now = activityOf(activity)
+
+      return Option.match(rowOf(entry), {
+        onNone: () =>
+          sameActivity(before.activity, now) ? undefined : { seq, messages: [], activity: now, failed, deleted },
+        onSome: (row) => {
+          messages.set(row.id, row)
+
+          return { seq, messages: [row], activity: now, failed, deleted }
+        }
       })
-
-      messages.set(row.id, row)
-
-      return { seq, messages: [row], activity: activityOf(activity), failed, deleted }
     }
 
     blocks = BlockKit.apply(blocks, event)
@@ -620,12 +728,12 @@ const folding = (events: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding 
   }
 }
 
-const merge = (updates: ReadonlyArray<Update>): Update | undefined => {
+const merge = (updates: ReadonlyArray<AnyUpdate>): AnyUpdate | undefined => {
   const last = updates.at(-1)
 
   if (last === undefined) return undefined
 
-  const messages = new Map<string, EncodedMessage>()
+  const messages = new Map<string, UserMessage | AssistantMessage | Row>()
 
   for (const update of updates) for (const message of update.messages) messages.set(message.id, message)
 
@@ -658,12 +766,44 @@ export interface Definition<Events = never> {
  * @category models
  * @since 0.1.0
  */
-export interface UpdatesOptions {
+export interface UpdatesOptions<
+  Show extends ReadonlyArray<AssistantEvent.AppEventSchema> = readonly []
+> extends ShowOptions<Show> {
   /**
    * The `seq` up to which the client already has the view. The result contains only the updates
    * after it. Defaults to `0`, every update.
    */
   readonly after?: number | undefined
+}
+
+function updatesWith<E, R, Events, const Show extends Shown<Events> = readonly []>(
+  entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
+  definition: Definition<Events>,
+  options?: UpdatesOptions<Show>
+): Stream.Stream<Update<Show[number]["Type"]>, E, R>
+function updatesWith<E, R>(
+  entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
+  _definition: Schemas,
+  options?: UpdatesOptions<ReadonlyArray<AssistantEvent.AppEventSchema>>
+): Stream.Stream<AnyUpdate, E, R> {
+  const after = options?.after ?? 0
+
+  return entries.pipe(
+    Stream.mapAccumArray(
+      () => folding(options?.show ?? []),
+      (fold, chunk) => {
+        const changed = chunk.flatMap((entry) => {
+          const update = fold.step(entry)
+
+          return update === undefined || entry.seq <= after ? [] : [update]
+        })
+
+        const merged = merge(changed)
+
+        return [fold, merged === undefined ? [] : [merged]]
+      }
+    )
+  )
 }
 
 /**
@@ -680,15 +820,17 @@ export interface UpdatesOptions {
  *
  * Each chunk of entries becomes one update; the stored entries, for example, arrive as one chunk.
  *
- * **Every app event it gets is shown.** Each one becomes a row between the messages (see
- * {@link EventRow}), which the client receives. Filter the stream to the events the chat's user may see
- * before this, or an event that is only for the assistant, like a summary of the chat, reaches the
- * client. A view shows a turn as working once it starts, or from the user's input.
+ * **Only the app's events in `show` reach the client.** Each one becomes a row between the
+ * messages (see {@link EventRow}); the app's other events, like a summary of the chat for the
+ * model, are left out. Without `show`, none are shown. The updates are typed with the events shown,
+ * so the RPC's success schema names the same ones (`ChatView.Update([...])`), and a handler that
+ * shows one the schema doesn't name doesn't compile. A view shows a turn as working once it
+ * starts, or from the user's input.
  *
  * **Example** (Streaming a chat's view to a client, with the one app event its user sees)
  *
  * ```ts
- * import { Assistant, AssistantEvent, type ChatId, ChatView } from "effect-assistant"
+ * import { Assistant, type ChatId, ChatView } from "effect-assistant"
  * import * as Schema from "effect/Schema"
  * import * as Stream from "effect/Stream"
  *
@@ -697,14 +839,11 @@ export interface UpdatesOptions {
  *
  * const MyAssistant = Assistant.make("my-assistant", { events: [Summary, DailyBudgetReached] })
  *
+ * // The summary is for the model: only the budget notice reaches the user.
  * const watch = (chatId: ChatId.ChatId, after: number) =>
  *   Stream.unwrap(
  *     MyAssistant.useSync((assistant) =>
- *       assistant.subscribe(chatId).pipe(
- *         // The summary is for the model: only the budget notice reaches the user.
- *         Stream.filter(({ event }) => AssistantEvent.isLibraryEvent(event) || Schema.is(DailyBudgetReached)(event)),
- *         ChatView.updates(MyAssistant, { after })
- *       )
+ *       assistant.subscribe(chatId).pipe(ChatView.updates(MyAssistant, { show: [DailyBudgetReached], after }))
  *     )
  *   )
  * ```
@@ -715,39 +854,13 @@ export interface UpdatesOptions {
  * @since 0.1.0
  */
 export const updates: {
-  <Events>(
+  <Events, const Show extends Shown<Events> = readonly []>(
     definition: Definition<Events>,
-    options?: UpdatesOptions
-  ): <E, R>(entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>) => Stream.Stream<Update, E, R>
-  <E, R, Events>(
+    options?: UpdatesOptions<Show>
+  ): <E, R>(entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>) => Stream.Stream<Update<Show[number]["Type"]>, E, R>
+  <E, R, Events, const Show extends Shown<Events> = readonly []>(
     entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
     definition: Definition<Events>,
-    options?: UpdatesOptions
-  ): Stream.Stream<Update, E, R>
-} = dual(
-  (args) => Stream.isStream(args[0]),
-  <E, R>(
-    entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
-    definition: Schemas,
-    options?: UpdatesOptions
-  ): Stream.Stream<Update, E, R> => {
-    const after = options?.after ?? 0
-
-    return entries.pipe(
-      Stream.mapAccumArray(
-        () => folding(definition.events),
-        (fold, chunk) => {
-          const changed = chunk.flatMap((entry) => {
-            const update = fold.step(entry)
-
-            return update === undefined || entry.seq <= after ? [] : [update]
-          })
-
-          const merged = merge(changed)
-
-          return [fold, merged === undefined ? [] : [merged]]
-        }
-      )
-    )
-  }
-)
+    options?: UpdatesOptions<Show>
+  ): Stream.Stream<Update<Show[number]["Type"]>, E, R>
+} = dual((args) => Stream.isStream(args[0]), updatesWith)

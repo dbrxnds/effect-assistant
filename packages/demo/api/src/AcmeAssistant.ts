@@ -1,11 +1,10 @@
 /**
- * Acme, the demo's assistant: its definition. The handlers are in the API's
- * `Acme.ts`; workflows and the server use this to reach the assistant, and the
- * web app to type and decode the chat's view.
+ * Acme, the demo's assistant: its definition. The handlers are in `Acme.ts`;
+ * workflows and the server use this to reach the assistant.
  *
  * @since 0.1.0
  */
-import { Blocks } from "./Blocks.ts"
+import { Blocks } from "@acme/demo-shared/Blocks"
 import * as Assistant from "effect-assistant/Assistant"
 import { OrderPlaced } from "./OrderPlaced.ts"
 import { Research } from "./Research.ts"
@@ -17,7 +16,7 @@ import { WorkflowStep } from "./WorkflowStep.ts"
  * It hands research to the research specialist. The API tells it when the
  * user places an order from a block (`OrderPlaced`), and the workflows report
  * their steps as `WorkflowStep`s. Both come in through `submit`, so each one
- * wakes a turn; the API's `Acme.ts` says how the model reads them.
+ * wakes a turn; `Acme.ts` says how the model reads them.
  *
  * @category definitions
  * @since 0.1.0

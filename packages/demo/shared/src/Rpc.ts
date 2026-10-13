@@ -31,7 +31,8 @@ import { ChatList } from "./ChatList.ts"
  */
 export const Subscribe = Rpc.make("Subscribe", {
   payload: { chatId: ChatId.ChatId },
-  success: ChatView.Update,
+  // The view with none of Acme's own events: the server shows none.
+  success: ChatView.Update(),
   stream: true
 })
 

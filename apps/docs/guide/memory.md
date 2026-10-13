@@ -133,7 +133,7 @@ const MyAssistantHandlers = MyAssistant.toLayer((turn) => {
 ```
 
 The summary is for the model: the turn appends it, so it wakes no turn, and
-leave it out of what the chat client gets (see [the chat client](./client)).
+it reaches no chat client unless you `show` it (see [the chat client](./client)).
 A summary that failed to write changes nothing: the next turn reads the
 whole chat, as before. A summary starts the prompt cache over anyway, so
 it's the time to refresh anything else the chat reads once, like memory.

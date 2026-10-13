@@ -6,7 +6,9 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { type Assistant, AssistantEvent, ChatId, ChatView, InputId, RunId } from "../src/index.ts"
+import * as Rpc from "effect/rpc/Rpc"
+import * as RpcGroup from "effect/rpc/RpcGroup"
+import { Assistant, AssistantEvent, ChatId, ChatView, InputId, RunId } from "../src/index.ts"
 import {
   collectUntil,
   newChat,
@@ -14,7 +16,6 @@ import {
   say,
   storedUpdate,
   submittedUpdate,
-  TestAssistant,
   turnsDone,
   Update,
   update,
@@ -25,6 +26,11 @@ import * as AppEvents from "../src/internal/events.ts"
 import * as Scripted from "./utils/scripted.ts"
 
 const chatId = Effect.runSync(ChatId.make())
+
+/** Something for the model only, which no chat client should see. */
+class Note extends Schema.TaggedClass<Note>()("Note", { text: Schema.String }) {}
+
+const Viewing = Assistant.make("viewing", { events: [Update, Note] })
 
 const entries = (events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>) =>
   events.map((event, i) => AssistantEvent.Entry.make({ chatId, seq: i + 1, at: (i + 1) * 1000, event }))
@@ -93,7 +99,7 @@ describe("ChatView.fromEntries", () => {
       })
     ])
 
-    const json = JSON.stringify(Schema.encodeSync(ChatView.Update)(ChatView.snapshot(entries(quoting))))
+    const json = JSON.stringify(Schema.encodeSync(ChatView.Update())(ChatView.snapshot(entries(quoting))))
 
     for (const internal of ["toolu_quote", "ModelOutput", "TurnStarted"]) {
       expect(json).not.toContain(internal)
@@ -158,23 +164,26 @@ describe("ChatView.fromEntries", () => {
     expect(view([storedUpdate("workflow:Order", { status: "shipped" })]).activity.working).toBe(false)
   })
 
-  it("shows each app event it gets as a row typed with the assistant's events, in the log's order", () => {
+  it("shows the app events in `show` as rows typed with their schemas, and leaves out the rest", () => {
     const shipped = Update.make({
       id: InputId.fromKey("shipped"),
       source: "workflow:Order",
       payload: { status: "shipped" }
     })
 
-    // As `subscribe` streams it: decoded.
+    const note = Note.make({ text: "for the model" })
+
+    // As `subscribe` streams them: decoded.
     const decoded = [
       { chatId, seq: 1, at: 1000, event: hi },
       { chatId, seq: 2, at: 2000, event: shipped },
-      { chatId, seq: 3, at: 3000, event: ask }
+      { chatId, seq: 3, at: 2500, event: note },
+      { chatId, seq: 4, at: 3000, event: ask }
     ]
 
-    const shown: ChatView.View<Assistant.Events<typeof Updating>> = ChatView.fromEntries(decoded, Updating)
+    const shown: ChatView.View<Update> = ChatView.fromEntries(decoded, Viewing, { show: [Update] })
 
-    // Exhaustive over the assistant's events: the row's `_tag` is the event's, and the event is decoded.
+    // Exhaustive over the events shown: the row's `_tag` is the event's, and the event is decoded.
     const lines = shown.messages.map((message) =>
       Match.valueTags(message, {
         UserMessage: (sent) => `user: ${sent.text}`,
@@ -188,38 +197,41 @@ describe("ChatView.fromEntries", () => {
       "app-event:2 at 2000: workflow:Order true",
       "assistant: That's $1,200. Which color?"
     ])
-    expect(shown.messages.flatMap((message) => (Predicate.isTagged(message, "Update") ? [message.event] : []))).toEqual(
-      [shipped]
-    )
 
-    // On the wire, the event is JSON, and the update needs no definition.
-    const wire = JSON.stringify(Schema.encodeSync(ChatView.Update)(ChatView.snapshot(decoded, Updating)))
+    // Without `show`, none of the app's events.
+    expect(ChatView.fromEntries(decoded, Viewing).messages.map((message) => message._tag)).toEqual([
+      "UserMessage",
+      "AssistantMessage"
+    ])
 
-    expect(wire).toContain(
+    // On the wire, the event is in its JSON form, and the RPC's schema decodes it back.
+    const Wire = ChatView.Update([Update])
+    const json = Schema.encodeSync(Wire)(ChatView.snapshot(decoded, Viewing, { show: [Update] }))
+
+    expect(JSON.stringify(json)).toContain(
       '{"_tag":"Update","id":"app-event:2","at":2000,"event":{"_tag":"Update","id":"shipped","source":"workflow:Order","payload":{"status":"shipped"}}}'
     )
+    expect(ChatView.apply(ChatView.empty, Schema.decodeUnknownSync(Wire)(JSON.parse(JSON.stringify(json))))).toEqual(
+      shown
+    )
 
-    // As the log stores it, marked as submitted: the same row. Without a definition, no rows.
+    // As the log stores it, marked as submitted: the same rows.
     const stored = Schema.decodeUnknownSync(AssistantEvent.StoredAppEvent)(
       Schema.encodeSync(Schema.toCodecJson(Update))(shipped)
     )
 
     const log = entries([hi, AppEvents.markInput(stored), ask])
 
-    expect(ChatView.fromEntries(log, Updating)).toEqual(shown)
-    expect(ChatView.fromEntries(log).messages.map((message) => message._tag)).toEqual([
-      "UserMessage",
-      "AssistantMessage"
-    ])
+    expect(ChatView.fromEntries(log, Viewing, { show: [Update] }).messages).toEqual(shown.messages)
   })
 
-  it("leaves out a row whose event the definition doesn't have, or that doesn't decode", () => {
-    const update = Schema.decodeUnknownSync(ChatView.Update)(
+  it("decodes an update without the rows its schema doesn't name, or that don't decode", () => {
+    const update = Schema.decodeUnknownSync(ChatView.Update([Update]))(
       JSON.parse(`{
         "seq": 4,
         "messages": [
           { "_tag": "UserMessage", "id": "${hi.id}", "text": "hi", "at": 1 },
-          { "_tag": "Unknown", "id": "app-event:2", "at": 2, "event": { "_tag": "Unknown", "n": 1 } },
+          { "_tag": "Note", "id": "app-event:2", "at": 2, "event": { "_tag": "Note", "text": "hidden" } },
           { "_tag": "Update", "id": "app-event:3", "at": 3, "event": { "_tag": "Update", "source": 7 } },
           { "_tag": "Update", "id": "app-event:4", "at": 4, "event": { "_tag": "Update", "id": "u", "source": "s", "payload": {} } }
         ],
@@ -229,9 +241,21 @@ describe("ChatView.fromEntries", () => {
       }`)
     )
 
-    const shown = ChatView.apply(Updating)(ChatView.empty, update)
+    expect(update.messages.map((message) => message.id)).toEqual([hi.id, "app-event:4"])
+  })
 
-    expect(shown.messages.map((message) => message.id)).toEqual([hi.id, "app-event:4"])
+  it("types a handler's updates with what it shows, so they must fit its RPC's schema", () => {
+    const Rpcs = RpcGroup.make(Rpc.make("Subscribe", { success: ChatView.Update([Update]), stream: true }))
+
+    const layers = [
+      Rpcs.toLayer({ Subscribe: () => Stream.empty.pipe(ChatView.updates(Viewing, { show: [Update] })) }),
+      // Showing fewer than the schema names is safe: the client never gets those rows.
+      Rpcs.toLayer({ Subscribe: () => Stream.empty.pipe(ChatView.updates(Viewing)) }),
+      // @ts-expect-error a row the schema doesn't name couldn't be encoded, so this doesn't compile
+      Rpcs.toLayer({ Subscribe: () => Stream.empty.pipe(ChatView.updates(Viewing, { show: [Update, Note] })) })
+    ]
+
+    expect(layers).toHaveLength(3)
   })
 
   it("says when the chat was deleted, and that nothing works in it any more, even mid-turn", () => {
@@ -276,9 +300,8 @@ describe("ChatView.apply", () => {
       deleted: false
     }
 
-    const apply = ChatView.apply(TestAssistant)
-    const once = [first, second].reduce(apply, ChatView.empty)
-    const twice = [first, second, first, second].reduce(apply, ChatView.empty)
+    const once = [first, second].reduce(ChatView.apply, ChatView.empty)
+    const twice = [first, second, first, second].reduce(ChatView.apply, ChatView.empty)
 
     expect(once.messages.map((message) => message.id)).toEqual([hi.id, "m1", "m2"])
     expect(once.seq).toBe(5)
@@ -293,21 +316,22 @@ describe("updates", () => {
         Scripted.lastInput(request).includes("shipped") ? Scripted.reply("It shipped.") : Scripted.reply("Hi!")
       )
 
-      const { log, folded, since, filtered } = yield* Effect.gen(function* () {
+      const { log, folded, since, hidden } = yield* Effect.gen(function* () {
         const chat = yield* newChat
         yield* (yield* Updating).submit(chat, say("hi"))
         const first = yield* collectUntil(Updating, chat, (es) => turnsDone(es) >= 1)
         yield* (yield* Updating).submit(chat, update("workflow:Order", { status: "shipped" }))
         const log = yield* collectUntil(Updating, chat, (es) => turnsDone(es) >= 2)
 
-        const wire = Schema.toCodecJson(ChatView.Update)
+        // As an RPC would: encoded with its schema, to JSON text and back.
+        const Wire = ChatView.Update([Update])
 
         const folded = yield* (yield* Updating).subscribe(chat).pipe(
-          ChatView.updates(Updating),
+          ChatView.updates(Updating, { show: [Update] }),
           Stream.map((update) =>
-            Schema.decodeUnknownSync(wire)(JSON.parse(JSON.stringify(Schema.encodeSync(wire)(update))))
+            Schema.decodeUnknownSync(Wire)(JSON.parse(JSON.stringify(Schema.encodeSync(Wire)(update))))
           ),
-          Stream.scan(() => ChatView.empty, ChatView.apply(Updating)),
+          ChatView.views,
           Stream.takeUntil((shown) => shown.seq >= log.at(-1)!.seq),
           Stream.runLast,
           Effect.map(Option.getOrThrow)
@@ -315,23 +339,23 @@ describe("updates", () => {
 
         // Data-first, to cover both forms.
         const since = yield* ChatView.updates((yield* Updating).subscribe(chat), Updating, {
+          show: [Update],
           after: first.at(-1)!.seq
         }).pipe(
           Stream.takeUntil((changes) => changes.seq >= log.at(-1)!.seq),
           Stream.runCollect
         )
 
-        // What the app lets its user see: here, none of its events.
-        const filtered = yield* (yield* Updating).subscribe(chat).pipe(
-          Stream.filter(({ event }) => AssistantEvent.isLibraryEvent(event)),
+        // Without `show`, none of the app's events reach the client.
+        const hidden = yield* (yield* Updating).subscribe(chat).pipe(
           ChatView.updates(Updating),
-          Stream.scan(() => ChatView.empty, ChatView.apply(Updating)),
+          ChatView.views,
           Stream.takeUntil((shown) => shown.seq >= log.at(-1)!.seq),
           Stream.runLast,
           Effect.map(Option.getOrThrow)
         )
 
-        return { log, folded, since, filtered }
+        return { log, folded, since, hidden }
       }).pipe(
         Effect.provide(
           updatingAssistant((turn) => turn.loop({ instructions: "Be brief.", history: readUpdates }), model.layer)
@@ -347,13 +371,10 @@ describe("updates", () => {
           })
         )
 
-      expect(folded).toEqual(ChatView.fromEntries(log, Updating))
+      expect(folded).toEqual(ChatView.fromEntries(log, Updating, { show: [Update] }))
       expect(shown(folded.messages)).toEqual(["hi", "Hi!", "update: shipped", "It shipped."])
-      expect(since.flatMap((changes) => shown(ChatView.apply(Updating)(ChatView.empty, changes).messages))).toEqual([
-        "update: shipped",
-        "It shipped."
-      ])
-      expect(shown(filtered.messages)).toEqual(["hi", "Hi!", "It shipped."])
+      expect(since.flatMap((changes) => shown(changes.messages))).toEqual(["update: shipped", "It shipped."])
+      expect(shown(hidden.messages)).toEqual(["hi", "Hi!", "It shipped."])
     })
   )
 })

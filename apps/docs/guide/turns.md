@@ -60,7 +60,7 @@ writes on its own never reaches the user. It's private reasoning.
 
 What a workflow or a webhook reports (one of your [events](./app-events),
 which it submits) goes into the model's history as your history view maps it,
-and reaches the user only if you let it through to the [view](./client). For
+and reaches the user only if you `show` it in the [view](./client). For
 each one, the assistant decides whether the user needs to know: results,
 questions, and problems get a `send_user_message`; routine progress gets just
 `wait`.
@@ -98,7 +98,7 @@ always gets an answer or a visible failure, from a turn that runs the loop.
 A handler that ends the turn without running the loop (`turn.loop` or
 `turn.replyIfOwed`) decides itself, and its turn is never failed for being
 silent. Over a daily budget, say, it records one of your events and returns
-an empty stream; the user sees that event if you let it through to the
+an empty stream; the user sees that event if you `show` it in the
 [view](./client):
 
 ```ts

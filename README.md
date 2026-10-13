@@ -122,12 +122,12 @@ const watch = (chatId: ChatId.ChatId, after?: number) =>
 ```
 
 - `ChatView.updates` turns the chat's log into the chat as the user sees it: messages, blocks, `activity`,
-  `deleted`. The client folds it with `ChatView.apply(MyAssistant)`, from `ChatView.empty`.
-- The view shows every one of your own events it gets, as a row between the messages. An assistant with events
-  of its own filters `subscribe` to those its users may see first, with
-  `Stream.filter(({ event }) => AssistantEvent.isLibraryEvent(event) || Schema.is(Shown)(event))`. Updates are
-  JSON; `ChatView.apply(MyAssistant)` decodes each row on the client, typed: its `_tag` is the event's and `event`
-  is the event, so `Match.valueTags(message, { UserMessage, AssistantMessage, Shown: (row) => row.event })`.
+  `deleted`. The client folds it with `ChatView.views` (or `ChatView.apply`, from `ChatView.empty`).
+- None of your own events reach the client unless the server names them:
+  `ChatView.updates(MyAssistant, { show: [OrderPlaced] })`, with `ChatView.Update([OrderPlaced])` as the RPC's success
+  schema (a handler that shows more than the schema names doesn't compile). Each one is a row typed with its event:
+  its `_tag` is the event's and `event` is the event, so
+  `Match.valueTags(message, { UserMessage, AssistantMessage, OrderPlaced: (row) => row.event })`.
 - `after` goes to `ChatView.updates`, not to `subscribe`: the view is folded from the whole log, and only the
   updates up to `after` are skipped.
 - The client picks the `InputId`, so a retried send is stored once.
@@ -326,7 +326,7 @@ const MyAssistantLive = MyAssistant.toLayer((turn) =>
 Background work reports into the chat with events of your own: a workflow's progress, a webhook. The
 definition lists their schemas. An event that comes in through `submit` starts a turn, like a message; one a
 turn appends itself never does. The model reads one as your history view maps it, and the user sees it only
-if the assistant tells them, or you let it through to the view.
+if the assistant tells them, or you `show` it in the view.
 
 ```ts
 class ShipmentUpdated extends Schema.TaggedClass<ShipmentUpdated>()("ShipmentUpdated", {

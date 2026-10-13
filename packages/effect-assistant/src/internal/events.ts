@@ -7,7 +7,6 @@ import * as SchemaAST from "effect/SchemaAST"
 import type * as Assistant from "../Assistant.ts"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import { inputKey } from "./input.ts"
-import { toJson as anyToJson } from "./schema.ts"
 
 /** @internal */
 export interface AppEvents {
@@ -55,10 +54,17 @@ export const isRegistered = (app: AppEvents, event: { readonly _tag: string }): 
 const unmarked = (event: { readonly _tag: string }) =>
   Predicate.hasProperty(event, inputKey) ? Record.remove(event, inputKey) : event
 
+// An event as the log stores it, decoded with its schema.
+/** @internal */
+export const decodeWith = (
+  schema: AssistantEvent.AppEventSchema,
+  event: { readonly _tag: string }
+): Option.Option<{ readonly _tag: string }> => Schema.decodeUnknownOption(Schema.toCodecJson(schema))(unmarked(event))
+
 const decodeEvent = (app: AppEvents, event: { readonly _tag: string }): Option.Option<{ readonly _tag: string }> => {
   const schema = app.byTag.get(event._tag)
 
-  return schema === undefined ? Option.none() : Schema.decodeUnknownOption(Schema.toCodecJson(schema))(unmarked(event))
+  return schema === undefined ? Option.none() : decodeWith(schema, event)
 }
 
 // What came in through `submit`, from outside a turn, is an input: it wakes a turn.
@@ -92,13 +98,3 @@ const toEntry = (entry: AssistantEvent.AnyEntry) => ({
   seq: entry.seq,
   at: entry.at
 })
-
-// Decoded or as stored, an event's JSON is its schema's encoding; one no schema here knows is already JSON.
-/** @internal */
-export const toJson = (events: ReadonlyArray<AssistantEvent.AppEventSchema>, event: { readonly _tag: string }) => {
-  const schema = events.find((candidate) => tagOf(candidate) === event._tag)
-
-  const encoded = schema === undefined ? Option.none() : Schema.encodeUnknownOption(Schema.toCodecJson(schema))(event)
-
-  return Option.getOrElse(encoded, () => anyToJson(unmarked(event)))
-}

@@ -87,7 +87,7 @@ const program = Effect.gen(function* () {
 
   const view = yield* assistant.subscribe(chatId).pipe(
     ChatView.updates(MyAssistant),
-    Stream.scan(() => ChatView.empty, ChatView.apply(MyAssistant)),
+    ChatView.views,
     Stream.takeUntil((view) => view.messages.length > 1 && ChatView.isIdle(view)),
     Stream.runLast
   )
