@@ -6,9 +6,8 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import { AssistantToolCall } from "../AssistantToolCall.ts"
-import * as BlockKit from "../BlockKit.ts"
+import type * as BlockKit from "../BlockKit.ts"
 import { CurrentChat } from "../CurrentChat.ts"
-import * as Decision from "../Decision.ts"
 import * as ToolFailure from "../ToolFailure.ts"
 import * as Toolkits from "./toolkit.ts"
 import * as Uuid from "./uuid.ts"
@@ -77,45 +76,6 @@ const plainTools = Effect.gen(function* () {
   return yield* Effect.provideContext(PlainTools, yield* plainHandlers)
 })
 
-const decodeDecisionProps = Schema.decodeUnknownOption(Decision.Props)
-
-const checkDecisions = Effect.fnUntraced(function* (ids: ReadonlyArray<string>) {
-  const states = Decision.fromEntries(yield* CurrentChat.use((chat) => chat.entries))
-  const notWaiting = ids.filter((id) => states.get(id)?.outcome !== undefined || !states.has(id))
-
-  if (notWaiting.length > 0) {
-    return yield* ToolFailure.fail(
-      `Not waiting for the user's decision: ${notWaiting.join(", ")}. Use the ids of decisions that wait for one.`,
-      { reason: "NotWaitingForDecision" }
-    )
-  }
-})
-
-// A decision block closes when the user decides on it, not because the model says so: the order it asks about would
-// otherwise never be approved.
-const checkCloses = Effect.fnUntraced(function* (ids: ReadonlyArray<string>) {
-  const entries = yield* CurrentChat.use((chat) => chat.entries)
-  const states = BlockKit.fromEntries(entries)
-
-  const waiting = ids.filter((id) =>
-    entries.some(
-      ({ event }) =>
-        AssistantEvent.isLibraryEvent(event) &&
-        Predicate.isTagged(event, "AssistantMessage") &&
-        event.id === id &&
-        event.block?.kind === Decision.kind &&
-        states.get(id)?.open === true
-    )
-  )
-
-  if (waiting.length > 0) {
-    return yield* ToolFailure.fail(
-      `${waiting.join(", ")} asks for a decision that still waits for the user: only their answer in the block closes it. Send the message again without ${waiting.length === 1 ? "that id" : "those ids"} in closes.`,
-      { reason: "DecisionWaiting" }
-    )
-  }
-})
-
 const blockTools = Effect.fnUntraced(function* (kit: BlockKit.BlockKit) {
   const catalog = kit.blocks.map((block) => `- ${block.kind}: ${block.description}`).join("\n")
   const kinds = kit.blocks.map((block) => block.kind)
@@ -137,7 +97,7 @@ ${catalog}`,
       ),
       closes: Schema.optional(Schema.Array(Schema.String)).annotate({
         description:
-          "Ids of your earlier messages whose block the user just answered by typing instead of using it. Those blocks close. Leave it out otherwise: a block stays open when the user talks about something else. A decision block never closes this way: only the user's answer in it decides."
+          "Ids of your earlier messages whose block the user just answered by typing instead of using it. Those blocks close. Leave it out otherwise: a block stays open when the user talks about something else."
       })
     }),
     success: Schema.String,
@@ -160,8 +120,6 @@ ${catalog}`,
       const id = yield* messageId
       const closed = closes === undefined || closes.length === 0 ? {} : { closes }
 
-      if (closes !== undefined && closes.length > 0) yield* checkCloses(closes)
-
       if (block === undefined) {
         yield* append(AssistantEvent.AssistantMessage.make({ id, text, ...closed }))
 
@@ -172,15 +130,6 @@ ${catalog}`,
 
       if (props === undefined || Option.isNone(Schema.decodeUnknownOption(props)(block.props))) {
         return yield* ToolFailure.fail(`Those props don't fit a ${block.kind} block.`)
-      }
-
-      if (block.kind === Decision.kind) {
-        yield* checkDecisions(
-          Option.match(decodeDecisionProps(block.props), {
-            onNone: () => [],
-            onSome: (decoded) => decoded.decisionIds
-          })
-        )
       }
 
       yield* append(

@@ -14,20 +14,14 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as AssistantEvent from "../AssistantEvent.ts"
-import * as DecisionId from "../DecisionId.ts"
 import type * as Instructions from "../Instructions.ts"
-import * as Decisions from "./decisions.ts"
 import * as History from "./history.ts"
 import * as Telemetry from "./telemetry.ts"
 import * as Toolkits from "./toolkit.ts"
 import { isTurnEnding } from "./tools.ts"
 
 /** @internal */
-export type Event =
-  | AssistantEvent.ModelOutput
-  | AssistantEvent.ToolStarted
-  | AssistantEvent.ToolResult
-  | AssistantEvent.DecisionRequested
+export type Event = AssistantEvent.ModelOutput | AssistantEvent.ToolStarted | AssistantEvent.ToolResult
 
 // The assistant's own tools with the turn's services, so an app's own loop in a turn can message the user. A
 // specialist's run has none.
@@ -79,10 +73,7 @@ export interface StepResult {
 
 // The loop runs the calls itself, after storing each as started, so the model call runs none.
 const requestToolkit = (definitions: ReadonlyArray<Tool.Any>): Toolkit.WithHandler<Record<string, Tool.Any>> => ({
-  // The loop decides which calls wait for the user's decision; the model call would ask for approvals of its own.
-  tools: Object.fromEntries(
-    definitions.map((tool) => [tool.name, tool.needsApproval === undefined ? tool : tool.setNeedsApproval(false)])
-  ),
+  tools: Object.fromEntries(definitions.map((tool) => [tool.name, tool])),
   handle: () => Effect.succeed(Stream.empty)
 })
 
@@ -120,73 +111,28 @@ const runCall = Effect.fnUntraced(function* <R>(tools: Toolkits.Tools<R>, call: 
   return AssistantEvent.ToolResult.make({ callId: call.id, tool: call.name, ...result })
 })
 
-interface Pending {
-  readonly call: AssistantEvent.ToolCallPart
-  readonly approved: boolean
-}
-
-// Only a turn parks: a specialist's call fails instead.
-const park = Effect.fnUntraced(
-  function* (call: AssistantEvent.ToolCallPart) {
-    if (Option.isNone(yield* Decisions.TurnDecisions)) {
-      return AssistantEvent.ToolResult.make({
-        callId: call.id,
-        tool: call.name,
-        ...Toolkits.failed(
-          `${call.name} needs the user's decision, and only the assistant can ask them. Don't run it: say in your answer what needs deciding, with the details.`,
-          "NeedsDecision"
-        )
-      })
-    }
-
-    return AssistantEvent.DecisionRequested.make({
-      id: DecisionId.fromCallId(call.id),
-      origin: AssistantEvent.CallOrigin.make({ callId: call.id, tool: call.name, params: call.params })
-    })
-  },
-  (effect, call) => effect.pipe(Telemetry.toolSpan(call))
-)
-
-// Every `ToolStarted` is stored before any call runs. `then` is told whether the model has to read the results: one
-// failed, or waits for the user's decision.
+// Every `ToolStarted` is stored before any call runs. `then` is told whether one of the calls failed, so the model
+// has to read the results.
 const runCalls = <R, S, E, R2>(
   tools: Toolkits.Tools<R>,
-  pending: ReadonlyArray<Pending>,
-  history: ReadonlyArray<Prompt.Message>,
-  then: (reread: boolean) => Stream.Stream<Step<never, S>, E, R2>
+  calls: ReadonlyArray<AssistantEvent.ToolCallPart>,
+  then: (failed: boolean) => Stream.Stream<Step<never, S>, E, R2>
 ): Stream.Stream<Step<Event, S>, E, R | R2> =>
-  Stream.unwrap(
-    Effect.gen(function* () {
-      const parks = yield* Effect.forEach(pending, ({ call, approved }) =>
-        approved ? Effect.succeed(false) : Toolkits.needsDecisionOf(tools, call, history)
+  Stream.fromIterable(
+    calls.map((call) => value(AssistantEvent.ToolStarted.make({ callId: call.id, tool: call.name })))
+  ).pipe(
+    Stream.concat(
+      Stream.unwrap(
+        Effect.gen(function* () {
+          const done = yield* Effect.forEach(calls, (call) => runCall(tools, call), { concurrency: "unbounded" })
+
+          return Stream.fromIterable(done.map(value)).pipe(Stream.concat(then(done.some(isFailure))))
+        })
       )
-
-      const started = pending.flatMap(({ call }, i) =>
-        parks[i] ? [] : [value(AssistantEvent.ToolStarted.make({ callId: call.id, tool: call.name }))]
-      )
-
-      const results = Effect.forEach(pending, ({ call }, i) => (parks[i] ? park(call) : runCall(tools, call)), {
-        concurrency: "unbounded"
-      })
-
-      const reread = (done: ReadonlyArray<Event>) =>
-        done.some((event) => Predicate.isTagged(event, "DecisionRequested") || isFailure(event))
-
-      return Stream.fromIterable(started).pipe(
-        Stream.concat(
-          Stream.unwrap(
-            Effect.gen(function* () {
-              const done = yield* results
-
-              return Stream.fromIterable(done.map(value)).pipe(Stream.concat(then(reread(done))))
-            })
-          )
-        )
-      )
-    })
+    )
   )
 
-const isFailure = (event: Event) => Predicate.isTagged(event, "ToolResult") && event.outcome === "failure"
+const isFailure = (result: AssistantEvent.ToolResult) => result.outcome === "failure"
 
 /** @internal */
 export type Step<A, S> = Data.TaggedEnum<{
@@ -246,6 +192,9 @@ export const step = <R, S, E2 = never, R2 = never>(
   const instructions = Predicate.isString(options.instructions) ? { text: options.instructions } : options.instructions
 
   const after = (result: StepResult) => Stream.suspend(() => then(result))
+  const needingApproval = Toolkits.needingApproval(toolkit.definitions)
+
+  if (needingApproval.length > 0) return Stream.die(Toolkits.needsApprovalMessage(needingApproval))
 
   return Stream.unwrap(
     Effect.gen(function* () {
@@ -253,23 +202,9 @@ export const step = <R, S, E2 = never, R2 = never>(
       // Calls a crash cut off, with no result: they run again, with the same ids, before the model goes on.
       const cutOff = History.unansweredCalls(history)
 
-      // Calls the user approved: they run as the model made them, before the model goes on. Not in a loop without them.
-      const decisions = yield* Decisions.TurnDecisions
-
-      const approved = Option.isNone(decisions)
-        ? []
-        : (yield* decisions.value.approved).filter((call) =>
-            toolkit.definitions.some((tool) => tool.name === call.name)
-          )
-
-      if (cutOff.length > 0 || approved.length > 0) {
-        const pending = [
-          ...cutOff.map((call) => ({ call, approved: false })),
-          ...approved.map((call) => ({ call, approved: true }))
-        ]
-
-        return runCalls(toolkit, pending, history, () =>
-          after({ output: undefined, done: false, historyLength: history.length + pending.length })
+      if (cutOff.length > 0) {
+        return runCalls(toolkit, cutOff, () =>
+          after({ output: undefined, done: false, historyLength: history.length + cutOff.length })
         )
       }
 
@@ -295,20 +230,15 @@ export const step = <R, S, E2 = never, R2 = never>(
       const calls = toolCalls(output.parts)
       const historyLength = history.length + Prompt.fromResponseParts(output.parts).content.length + calls.length
 
-      // A failed call doesn't end the turn: a message that failed never reached the user, so the model reads why. Nor
-      // does a parked one: the model asks the user for the decision it waits for.
+      // A failed call doesn't end the turn: a message that failed never reached the user, so the model reads why.
       return Stream.make(value(output)).pipe(
         Stream.concat(
-          runCalls(
-            toolkit,
-            calls.map((call) => ({ call, approved: false })),
-            history,
-            (reread) =>
-              after({
-                output,
-                done: calls.length === 0 || (!reread && calls.some(isTurnEnding)),
-                historyLength
-              })
+          runCalls(toolkit, calls, (failed) =>
+            after({
+              output,
+              done: calls.length === 0 || (!failed && calls.some(isTurnEnding)),
+              historyLength
+            })
           )
         )
       )

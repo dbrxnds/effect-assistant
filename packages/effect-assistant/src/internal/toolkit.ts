@@ -1,11 +1,9 @@
 import * as AiError from "effect/ai/AiError"
-import type * as Prompt from "effect/ai/Prompt"
 import type * as Tool from "effect/ai/Tool"
 import type * as Toolkit from "effect/ai/Toolkit"
 import type * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
-import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import type * as AssistantEvent from "../AssistantEvent.ts"
@@ -25,17 +23,13 @@ export interface CallResult {
 export interface Tools<out R = never> {
   readonly definitions: ReadonlyArray<Tool.Any>
   readonly run: (call: AssistantEvent.ToolCallPart) => Effect.Effect<CallResult, never, R>
-  // Unset: no call waits for the user's decision.
-  readonly needsDecision?:
-    | ((call: AssistantEvent.ToolCallPart, history: ReadonlyArray<Prompt.Message>) => Effect.Effect<boolean, never, R>)
-    | undefined
 }
 
 /** @internal */
-export type ToolServices<T extends Record<string, Tool.Any>> =
-  | Exclude<Tool.HandlerServices<T[keyof T]>, AssistantToolCall>
-  // Already in the handlers' services; stated for the loop, which decodes params to decide on a call.
-  | T[keyof T]["parametersSchema"]["DecodingServices"]
+export type ToolServices<T extends Record<string, Tool.Any>> = Exclude<
+  Tool.HandlerServices<T[keyof T]>,
+  AssistantToolCall
+>
 
 const encodeFailure = Schema.encodeSync(ToolFailure.ToolFailure)
 
@@ -66,36 +60,15 @@ const hasTool = <T extends Record<string, Tool.Any>>(
   name: PropertyKey
 ): name is keyof T => Object.hasOwn(toolkit.tools, name)
 
-// With noUncheckedIndexedAccess, an index doesn't narrow on `hasTool`.
-const toolNamed = (toolkit: { readonly tools: Record<string, Tool.Any> }, name: string): Tool.Any | undefined =>
-  Object.hasOwn(toolkit.tools, name) ? toolkit.tools[name] : undefined
-
-const decodeParams = (tool: Tool.Any, params: Schema.Json) => Schema.decodeUnknownEffect(tool.parametersSchema)(params)
-
-// Params that don't fit the tool don't park: the call runs, and fails with why.
+// Approval would park a call until the user decides, which this library doesn't do: the model calls a tool with
+// final values, and a user's own commitment goes through the app's API from a block.
 /** @internal */
-export const needsDecision = Effect.fnUntraced(function* <T extends Record<string, Tool.Any>>(
-  toolkit: { readonly tools: T },
-  call: AssistantEvent.ToolCallPart,
-  history: ReadonlyArray<Prompt.Message>
-): Effect.fn.Return<boolean, never, ToolServices<T>> {
-  const tool = toolNamed(toolkit, call.name)
+export const needingApproval = (definitions: ReadonlyArray<Tool.Any>): ReadonlyArray<string> =>
+  definitions.flatMap((tool) => (tool.needsApproval === undefined || tool.needsApproval === false ? [] : [tool.name]))
 
-  if (tool === undefined) return false
-
-  const needs = tool.needsApproval
-
-  if (needs === undefined || Predicate.isBoolean(needs)) return needs === true
-
-  return yield* Effect.gen(function* () {
-    const decided = needs(yield* decodeParams(tool, call.params), {
-      toolCallId: call.id,
-      messages: history
-    })
-
-    return Effect.isEffect(decided) ? yield* decided : decided
-  }).pipe(Effect.orElseSucceed(() => false))
-})
+/** @internal */
+export const needsApprovalMessage = (names: ReadonlyArray<string>): string =>
+  `${names.join(", ")} ${names.length === 1 ? "sets" : "set"} needsApproval, and effect-assistant doesn't run tools that wait for approval. Remove needsApproval: let the model call the tool with final values, or show a block whose button calls your app's API, which does the work and submits an app event that wakes the chat.`
 
 // The toolkit decodes the params with the tool's schema before its handler sees them, and a call whose params don't
 // fit fails with a validation error the model reads: the model's JSON is what `handle` takes.
@@ -144,8 +117,7 @@ export const fromWithHandler = <T extends Record<string, Tool.Any>>(
   toolkit: Toolkit.WithHandler<T>
 ): Tools<ToolServices<T>> => ({
   definitions: Object.values(toolkit.tools),
-  run: (call) => runNative(toolkit, call),
-  needsDecision: (call, history) => needsDecision(toolkit, call, history)
+  run: (call) => runNative(toolkit, call)
 })
 
 /** @internal */
@@ -155,8 +127,7 @@ export const fromToolkit = <T extends Record<string, Tool.Any>>(
   definitions: Object.values(toolkit.tools),
   run: Effect.fnUntraced(function* (call) {
     return yield* runNative(yield* toolkit, call)
-  }),
-  needsDecision: (call, history) => needsDecision(toolkit, call, history)
+  })
 })
 
 // The handlers use services of the loop they run in, so they're made for each call, with its context.
@@ -171,8 +142,7 @@ export const withContext = <T extends Record<string, Tool.Any>, R>(
     const resolved = yield* Effect.provideContext(toolkit, yield* toolkit.toHandlers(handlers(context)))
 
     return yield* runNative(resolved, call)
-  }),
-  needsDecision: (call, history) => needsDecision(toolkit, call, history)
+  })
 })
 
 /** @internal */
@@ -192,26 +162,15 @@ export const merge = <A, B>(self: Tools<A>, that: Tools<B>): Tools<A | B> => {
 
   return {
     definitions: [...self.definitions, ...that.definitions],
-    run: (call) => (inSelf(call) ? self.run(call) : that.run(call)),
-    needsDecision: (call, history) =>
-      inSelf(call) ? needsDecisionOf(self, call, history) : needsDecisionOf(that, call, history)
+    run: (call) => (inSelf(call) ? self.run(call) : that.run(call))
   }
 }
-
-/** @internal */
-export const needsDecisionOf = <R>(
-  tools: Tools<R>,
-  call: AssistantEvent.ToolCallPart,
-  history: ReadonlyArray<Prompt.Message>
-): Effect.Effect<boolean, never, R> =>
-  tools.needsDecision === undefined ? Effect.succeed(false) : tools.needsDecision(call, history)
 
 // A turn's own services, for a loop the app writes.
 /** @internal */
 export const provide = <R>(tools: Tools<R>, context: Context.Context<R>): Tools => ({
   definitions: tools.definitions,
-  run: (call) => Effect.provideContext(tools.run(call), context),
-  needsDecision: (call, history) => Effect.provideContext(needsDecisionOf(tools, call, history), context)
+  run: (call) => Effect.provideContext(tools.run(call), context)
 })
 
 /** @internal */
@@ -225,7 +184,5 @@ export const duplicateNames = (tools: Tools<unknown>): ReadonlyArray<string> => 
 /** @internal */
 export const runOnly = <R>(tools: Tools<R>, names: ReadonlyArray<string>, message: string): Tools<R> => ({
   definitions: tools.definitions,
-  run: (call) => (names.includes(call.name) ? tools.run(call) : Effect.succeed(failed(message, "NotNow"))),
-  needsDecision: (call, history) =>
-    names.includes(call.name) ? needsDecisionOf(tools, call, history) : Effect.succeed(false)
+  run: (call) => (names.includes(call.name) ? tools.run(call) : Effect.succeed(failed(message, "NotNow")))
 })

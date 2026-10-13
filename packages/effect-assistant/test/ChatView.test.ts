@@ -5,7 +5,7 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { AssistantEvent, ChatId, ChatView, Decision, DecisionId, InputId, RunId } from "../src/index.ts"
+import { AssistantEvent, ChatId, ChatView, InputId, RunId } from "../src/index.ts"
 import {
   collectUntil,
   newChat,
@@ -35,62 +35,54 @@ const call = Response.makePart("tool-call", {
   providerExecuted: false
 })
 
-const request = AssistantEvent.DecisionRequested.make({
-  id: DecisionId.fromCallId("toolu_quote"),
-  origin: AssistantEvent.CallOrigin.make({
-    callId: "toolu_quote",
-    tool: "quote_order",
-    params: { sku: "tote", quantity: 300 }
-  })
-})
-
 const ask = AssistantEvent.AssistantMessage.make({
   id: "m1",
-  text: "Place the order for $1,200?",
+  text: "That's $1,200. Which color?",
   block: AssistantEvent.MessageBlock.make({
-    kind: Decision.kind,
-    props: { decisionIds: [request.id] }
+    kind: "choose_one",
+    props: { options: ["red", "blue"] }
   })
 })
 
-const approve = AssistantEvent.BlockAnswer.make({
+const pick = AssistantEvent.BlockAnswer.make({
   id: InputId.fromKey("m1:answer"),
   messageId: "m1",
-  kind: Decision.kind,
-  value: Decision.answerAll({ decisionIds: [request.id] }, "approved")
+  kind: "choose_one",
+  value: { choice: "blue" }
 })
 
-/** A turn that parks a call, asks for the decision, and the user approves it. */
-const deciding = [
+/** A turn that quotes an order and asks which color, and the user picks one. */
+const quoting = [
   hi,
   AssistantEvent.TurnStarted.make({ assistant: "test" }),
   AssistantEvent.ModelOutput.make({ parts: [call], seenThroughSeq: 2 }),
   AssistantEvent.ToolStarted.make({ callId: "toolu_quote", tool: "quote_order" }),
-  request,
+  AssistantEvent.ToolResult.make({
+    callId: "toolu_quote",
+    tool: "quote_order",
+    outcome: "success",
+    result: { total: 1200 }
+  }),
   ask,
   AssistantEvent.TurnCompleted.make({ throughSeq: 1 }),
-  approve,
-  AssistantEvent.DecisionResolved.make({ id: request.id, outcome: "approved", answer: approve.id })
+  pick
 ]
 
 describe("ChatView.fromEntries", () => {
-  it("has the messages and their blocks, with a decision's call and outcome, and nothing internal", () => {
-    const shown = view(deciding)
+  it("has the messages and their blocks, with the user's answer, and nothing internal", () => {
+    const shown = view(quoting)
 
     expect(shown.messages).toEqual([
       ChatView.UserMessage.make({ id: hi.id, text: "Order 300 totes", at: 1000 }),
       ChatView.AssistantMessage.make({
         id: "m1",
-        text: "Place the order for $1,200?",
+        text: "That's $1,200. Which color?",
         at: 6000,
         block: {
-          kind: Decision.kind,
-          props: { decisionIds: [request.id] },
+          kind: "choose_one",
+          props: { options: ["red", "blue"] },
           status: "answered",
-          answer: { decisions: { [request.id]: "approved" } },
-          decisions: [
-            { id: request.id, tool: "quote_order", params: { sku: "tote", quantity: 300 }, outcome: "approved" }
-          ]
+          answer: { choice: "blue" }
         }
       })
     ])

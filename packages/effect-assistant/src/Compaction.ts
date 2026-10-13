@@ -17,9 +17,7 @@ import type * as Assistant from "./Assistant.ts"
 import * as AssistantActivity from "./AssistantActivity.ts"
 import * as AssistantEvent from "./AssistantEvent.ts"
 import * as BlockKit from "./BlockKit.ts"
-import * as Decision from "./Decision.ts"
 import { userText } from "./internal/history.ts"
-import { toJsonText } from "./internal/schema.ts"
 
 /**
  * Represents the fields a summary event must have: its text and the last `seq` it covers.
@@ -55,8 +53,8 @@ export const inputTokens = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): nu
 }
 
 /**
- * Returns the items that were open at `throughSeq` and are still open: decisions waiting for the
- * user, blocks the user hasn't answered, and specialists that are working. The result is text for
+ * Returns the items that were open at `throughSeq` and are still open: blocks the user hasn't
+ * answered, and specialists that are working. The result is text for
  * the model, or `None` when nothing is open.
  *
  * @category utils
@@ -70,20 +68,6 @@ export const openItems = (
     entries.find(({ event }) => found(event))?.seq ?? Number.POSITIVE_INFINITY
 
   const opened = (seq: number) => seq <= throughSeq
-
-  const decisions = [...Decision.fromEntries(entries).values()].flatMap((state) =>
-    state.outcome === undefined &&
-    opened(
-      seqOf(
-        (event) =>
-          AssistantEvent.isLibraryEvent(event) &&
-          Predicate.isTagged(event, "DecisionRequested") &&
-          event.id === state.request.id
-      )
-    )
-      ? [`- decision ${state.request.id}, for ${state.request.origin.tool}: ${toJsonText(state.request.origin.params)}`]
-      : []
-  )
 
   const blocks = [...BlockKit.fromEntries(entries)].flatMap(([messageId, state]) => {
     const shown = entries.find(
@@ -117,7 +101,6 @@ export const openItems = (
   )
 
   const sections = [
-    decisions.length > 0 ? `Decisions waiting for the user:\n${decisions.join("\n")}` : "",
     blocks.length > 0 ? `Blocks the user hasn't answered:\n${blocks.join("\n")}` : "",
     specialists.length > 0 ? `Specialists still working:\n${specialists.join("\n")}` : ""
   ].filter((section) => section.length > 0)

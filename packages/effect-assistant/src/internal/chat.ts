@@ -5,7 +5,6 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as FiberSet from "effect/FiberSet"
-import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as PubSub from "effect/PubSub"
 import * as Ref from "effect/Ref"
@@ -17,10 +16,8 @@ import * as AssistantEvent from "../AssistantEvent.ts"
 import type { ChatId } from "../ChatId.ts"
 import { ChatLog } from "../ChatLog.ts"
 import { CurrentChat } from "../CurrentChat.ts"
-import type { InputId } from "../InputId.ts"
 import * as Chats from "../Chats.ts"
 import * as SpecialistService from "../Specialist.ts"
-import * as Decisions from "./decisions.ts"
 import * as AppEvents from "./events.ts"
 import * as History from "./history.ts"
 import * as Specialists from "./specialists.ts"
@@ -113,8 +110,6 @@ export const make = Effect.fnUntraced(function* (options: {
 
   const channel = yield* makeChannelPubSub
   const writes = yield* Semaphore.make(1)
-  // Inputs are stored one at a time with the decisions they make: an answer checks the decisions the last one made.
-  const storing = yield* Semaphore.make(1)
   const turnsLock = yield* Semaphore.make(1)
   const holding = yield* makeHolding(options.keepAlive)
   const deleted = yield* Deferred.make<undefined>()
@@ -179,13 +174,6 @@ export const make = Effect.fnUntraced(function* (options: {
     append: (...events) => Effect.asVoid(Effect.flatMap(Effect.forEach(events, toStored), chat.append))
   }
 
-  // An approved call runs at the turn's next step.
-  const resolve = Effect.fnUntraced(function* (decided: ReadonlyArray<Decisions.Decided>, answer: InputId) {
-    yield* chat.append(
-      decided.map(({ request, outcome }) => AssistantEvent.DecisionResolved.make({ id: request.id, outcome, answer }))
-    )
-  })
-
   // A chat the app deleted is deleted here too, which stops what works in it: a turn that checks stops there.
   const checkAvailable: Effect.Effect<boolean> = chats.get(chatId).pipe(
     Effect.as(true),
@@ -199,51 +187,24 @@ export const make = Effect.fnUntraced(function* (options: {
     )
   )
 
-  // Under `storing`: an answer's decisions are resolved before the next input is stored.
   const store = Effect.fnUntraced(function* (input: AssistantEvent.Input | AssistantEvent.StoredAppEvent) {
     if (yield* isDeleted) return yield* refused(input, "is deleted")
 
     if (!(yield* checkAvailable)) return yield* refused(input, "is unavailable")
 
     // Checked under the write lock: a retry that arrives while the first submit is storing is stored once.
-    const verdict = yield* Semaphore.withPermit(writes)(
+    yield* Semaphore.withPermit(writes)(
       Effect.gen(function* () {
-        if (yield* isDeleted) {
-          yield* refused(input, "is deleted")
+        if (yield* isDeleted) return yield* refused(input, "is deleted")
 
-          return Option.none()
-        }
-
-        const stored = yield* Ref.get(entries)
         const id = idOf(input)
 
-        if (id !== undefined && stored.some(({ event }) => idOf(event) === id)) return Option.none()
-
-        const verdict = Decisions.verdict(stored, input)
-
-        if (Predicate.isTagged(verdict, "Refuse")) {
-          yield* Effect.logWarning(`assistant chat refused ${input._tag}: ${verdict.reason}`)
-
-          return Option.none()
-        }
+        if (id !== undefined && (yield* Ref.get(entries)).some(({ event }) => idOf(event) === id)) return
 
         yield* write([input])
-
-        return Option.some(verdict)
       })
     )
-
-    if (Option.isSome(verdict) && Predicate.isTagged(verdict.value, "Decide")) {
-      yield* resolve(verdict.value.decided, verdict.value.answer)
-    }
-  }, Semaphore.withPermit(storing))
-
-  // A restart between storing an answer and resolving it: resolve it now, before anything reads the chat.
-  yield* Effect.forEach(
-    Decisions.unresolved(yield* Ref.get(entries)),
-    (decided) => resolve([decided], decided.answer),
-    { discard: true }
-  )
+  })
 
   // The handlers' builds run in the chat's working scope: what they set up lives until the chat closes or is deleted.
   const handler = yield* inWorking(Effect.provideService(registration.open(handle), CurrentChat, handle))
@@ -293,16 +254,6 @@ export const make = Effect.fnUntraced(function* (options: {
 
   const services = Context.make(CurrentChat, handle).pipe(
     Context.add(SpecialistService.Runner, runner),
-    Context.add(
-      Decisions.TurnDecisions,
-      Option.some({
-        approved: Effect.gen(function* () {
-          const all = yield* chat.entries
-
-          return Decisions.approvedCalls(all)
-        })
-      })
-    ),
     Context.merge(registration.model)
   )
 

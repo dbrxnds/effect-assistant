@@ -4,7 +4,7 @@ A chat assistant on [Effect](https://effect.website) that behaves like a
 colleague. It keeps an append-only event log per chat, runs an
 interruptible agent loop over it, and talks to the user only through a
 `send_user_message` tool. It also supports specialists, skills, UI blocks,
-decisions, memory, and compaction. It runs in memory or as one Effect
+memory, and compaction. It runs in memory or as one Effect
 Cluster entity per chat.
 
 ```bash

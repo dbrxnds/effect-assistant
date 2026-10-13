@@ -27,8 +27,7 @@ import * as Toolkits from "./internal/toolkit.ts"
  * Represents what the loop emits.
  *
  * For each model call, the loop emits the call's output. Then, for each of its tool calls, it
- * emits a `ToolStarted` before the call runs and the call's result, or a `DecisionRequested` for
- * a call that waits for the user's decision.
+ * emits a `ToolStarted` before the call runs and the call's result.
  *
  * @category models
  * @since 0.1.0
@@ -158,9 +157,12 @@ const toolsOf = <T extends Record<string, Tool.Any>>(toolkit: Toolkit.Toolkit<T>
  * **Details**
  *
  * The step calls the model with the current history and emits its `ModelOutput`. It then runs
- * the output's tool calls and emits a `ToolStarted` and a `ToolResult` for each, or a
- * `DecisionRequested` for a call that waits for the user's decision. `then` receives the step's
- * result and decides what comes next, with `AssistantLoop.next(state)` or `AssistantLoop.stop()`.
+ * the output's tool calls and emits a `ToolStarted` and a `ToolResult` for each. `then` receives
+ * the step's result and decides what comes next, with `AssistantLoop.next(state)` or
+ * `AssistantLoop.stop()`.
+ *
+ * A tool with Effect's `needsApproval` set fails the loop before the model is called: the
+ * library doesn't run calls that wait for approval (see the guide on involving the user).
  *
  * @category constructors
  * @since 0.1.0

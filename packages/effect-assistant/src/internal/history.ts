@@ -5,7 +5,6 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as AssistantEvent from "../AssistantEvent.ts"
-import * as Decision from "../Decision.ts"
 import { toJson, toJsonText } from "./schema.ts"
 import * as Uuid from "./uuid.ts"
 
@@ -108,60 +107,8 @@ const finishedText = (
 const answerText = (answer: AssistantEvent.BlockAnswer) =>
   `<answer message="${answer.messageId}" kind="${answer.kind}">\nThe user answered with the block on your message ${answer.messageId}.\n${toJsonText(answer.value)}\n</answer>`
 
-/** @internal */
-export const parkedResult = (
-  request: AssistantEvent.DecisionRequested,
-  origin: AssistantEvent.CallOrigin
-): Prompt.ToolMessage =>
-  Prompt.toolMessage({
-    content: [
-      Prompt.toolResultPart({
-        id: origin.callId,
-        name: origin.tool,
-        isFailure: false,
-        result: {
-          status: "waiting_for_decision",
-          decisionId: request.id,
-          next: "Not run: it runs only if the user approves it. Send them a message with a decision block for this decisionId that says what they approve (the call's key facts). Their answer runs it, or declines it."
-        },
-        providerExecuted: false
-      })
-    ]
-  })
-
-const whatDecided = (request: AssistantEvent.DecisionRequested, outcome: AssistantEvent.DecisionOutcome) =>
-  outcome === "approved"
-    ? `approved: ${request.origin.tool} runs now, and its result follows.`
-    : `declined: ${request.origin.tool} didn't run, and won't.`
-
-const decodeDecisionAnswer = Schema.decodeUnknownOption(Decision.Answer)
-
-const decisionAnswerText = (
-  answer: AssistantEvent.BlockAnswer,
-  requests: ReadonlyMap<string, AssistantEvent.DecisionRequested>
-) =>
-  Option.match(decodeDecisionAnswer(answer.value), {
-    onNone: () => answerText(answer),
-    onSome: ({ decisions }) => {
-      const lines = Object.entries(decisions).map(([id, outcome]) => {
-        const request = requests.get(id)
-
-        return `- ${id}: ${request === undefined ? outcome : whatDecided(request, outcome)}`
-      })
-
-      return `<answer message="${answer.messageId}" kind="${answer.kind}">\nThe user decided with the block on your message ${answer.messageId}:\n${lines.join("\n")}\n</answer>`
-    }
-  })
-
 const resultText = (result: AssistantEvent.ToolResult) =>
   `<result tool="${result.tool}" call="${result.callId}" outcome="${result.outcome}">\nThe result of a call from earlier in this chat.\n${toJsonText(result.result)}\n</result>`
-
-const approvedResultText = (
-  request: AssistantEvent.DecisionRequested,
-  tool: string,
-  result: AssistantEvent.ToolResult
-) =>
-  `<decision id="${request.id}" tool="${tool}" outcome="approved">\nThe user approved it, and ${tool} ran: ${result.outcome}.\n${toJsonText(result.result)}\n</decision>`
 
 // In the order the model saw the entries, not the order they were stored.
 /** @internal */
@@ -172,9 +119,6 @@ export const fromEntries = (
   const history: Array<Prompt.Message> = []
   const held: Array<Prompt.Message> = []
   const open = new Set<string>()
-  const requests = new Map<string, AssistantEvent.DecisionRequested>()
-  // Parked calls by call id: their result came with the parking, so a later one reads as the decision's.
-  const parked = new Map<string, AssistantEvent.DecisionRequested>()
   const called = new Set<string>()
 
   const flushIfClosed = () => {
@@ -209,11 +153,7 @@ export const fromEntries = (
       Match.tagsExhaustive({
         UserMessage: (message) =>
           input(index, userText(AssistantEvent.textWithAttachments(message.text, message.attachments))),
-        BlockAnswer: (answer) =>
-          input(
-            index,
-            userText(answer.kind === Decision.kind ? decisionAnswerText(answer, requests) : answerText(answer))
-          ),
+        BlockAnswer: (answer) => input(index, userText(answerText(answer))),
         ModelOutput: (output) => {
           history.push(...Prompt.fromResponseParts(output.parts).content)
 
@@ -227,26 +167,14 @@ export const fromEntries = (
           flushIfClosed()
         },
         ToolResult: (result) => {
-          const request = parked.get(result.callId)
-
-          if (request !== undefined) return input(index, userText(approvedResultText(request, result.tool, result)))
-
           // A view that starts after the call (since a summary, say) keeps its result as text: a tool result needs its
-          // call right before it. An approved call's result can come long after the call was parked.
+          // call right before it.
           if (!called.has(result.callId)) return input(index, userText(resultText(result)))
 
           history.push(toolMessage(result))
           open.delete(result.callId)
           flushIfClosed()
         },
-        DecisionRequested: (request) => {
-          requests.set(request.id, request)
-          parked.set(request.origin.callId, request)
-          history.push(parkedResult(request, request.origin))
-          open.delete(request.origin.callId)
-          flushIfClosed()
-        },
-        DecisionResolved: () => undefined,
         AssistantMessage: () => undefined,
         ToolStarted: () => undefined,
         TurnStarted: () => undefined,

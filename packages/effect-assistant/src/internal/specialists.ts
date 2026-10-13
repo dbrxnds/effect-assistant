@@ -26,7 +26,6 @@ import * as Skill from "../Skill.ts"
 import * as Skills from "./skills.ts"
 import * as Specialist from "../Specialist.ts"
 import * as ToolFailure from "../ToolFailure.ts"
-import * as Decisions from "./decisions.ts"
 import { toolMessage, userText } from "./history.ts"
 import { mapText } from "./instructions.ts"
 import * as Telemetry from "./telemetry.ts"
@@ -96,10 +95,9 @@ export const runBrief = Effect.fnUntraced(
       }
     }
 
-    // A run lives in memory, so there's nothing to run again after a crash: `ToolStarted` isn't kept. A run parks no
-    // call (it has no user to ask), so there's no `DecisionRequested` either.
+    // A run lives in memory, so there's nothing to run again after a crash: `ToolStarted` isn't kept.
     const record = Effect.fnUntraced(function* (event: AssistantLoop.Event) {
-      if (Predicate.isTagged(event, "ToolStarted") || Predicate.isTagged(event, "DecisionRequested")) return
+      if (Predicate.isTagged(event, "ToolStarted")) return
 
       if (Predicate.isTagged(event, "ToolResult")) return yield* add([toolMessage(event)])
 
@@ -272,9 +270,7 @@ export const makeRunner = Effect.fnUntraced(function* (options: {
       chatId: chat.chatId
     }).pipe(
       Effect.provideContext(Context.merge(options.model, services)),
-      // Spawned from a turn, a run would inherit the turn's decisions: it can't park a call or run an approved one.
-      Effect.provideService(Decisions.TurnDecisions, Option.none()),
-      // Nor its own tools: a run can't message the user.
+      // Spawned from a turn, a run would inherit the turn's own tools: a run can't message the user.
       Effect.provideService(Loop.TurnTools, Option.none()),
       Effect.matchCause({
         onSuccess: (answer): Outcome => ({ status: "answered", report: answer }),

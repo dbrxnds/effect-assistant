@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import { AssistantEvent, Block, BlockKit, ChatId, ChatView, Decision, InputId } from "../src/index.ts"
+import { AssistantEvent, Block, BlockKit, ChatId, ChatView, InputId } from "../src/index.ts"
 import { say } from "./utils/fixtures.ts"
 
 const Choose = Block.make("choose_one", {
@@ -141,16 +141,6 @@ describe("BlockKit.fromEntries", () => {
     const entries = events.map(entry)
 
     expect(BlockKit.staleBlocks(entries, { messages: 3 })).toEqual(["m1"])
-
-    // Work waits on a decision block, so typing past it leaves it open.
-    const decision = AssistantEvent.MessageBlock.make({
-      kind: Decision.kind,
-      props: { decisionIds: ["decision:1"] }
-    })
-
-    const deciding = [message("d1", decision), say("a"), say("b"), say("c")].map(entry)
-
-    expect(BlockKit.staleBlocks(deciding, { messages: 3 })).toEqual([])
 
     const closed = [...entries, entry(AssistantEvent.BlocksClosed.make({ messageIds: ["m1"] }), entries.length)]
 

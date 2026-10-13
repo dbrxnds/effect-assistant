@@ -2,7 +2,7 @@
  * Defines UI blocks that an assistant can put in a message.
  *
  * A block is a bit of UI for when a structured answer is easier than typing, such as options to
- * pick from, approve and deny buttons, or a small input. The assistant fills in its `props`, and
+ * pick from, a yes or no, or a small input. The assistant fills in its `props`, and
  * using the block sends back a value typed by its `answer` schema.
  *
  * @since 0.1.0

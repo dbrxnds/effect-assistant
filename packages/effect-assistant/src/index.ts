@@ -82,16 +82,6 @@ export * as CurrentChat from "./CurrentChat.ts"
 /**
  * @since 0.1.0
  */
-export * as Decision from "./Decision.ts"
-
-/**
- * @since 0.1.0
- */
-export * as DecisionId from "./DecisionId.ts"
-
-/**
- * @since 0.1.0
- */
 export * as InputId from "./InputId.ts"
 
 /**
