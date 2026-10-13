@@ -20,7 +20,7 @@ import * as Toolkit from "effect/ai/Toolkit"
 import * as LiveOrders from "./LiveOrders.ts"
 import * as PrintOrders from "./PrintOrders.ts"
 import * as Prompts from "./Prompts.ts"
-import { Research } from "./Research.ts"
+import { Research } from "@acme/demo-shared/Research"
 
 const OfficeInput = Schema.optional(Schema.String).annotate({ description: "Office name, like Amsterdam." })
 

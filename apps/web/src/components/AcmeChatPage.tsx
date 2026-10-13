@@ -1,3 +1,4 @@
+import { AcmeAssistant } from "@acme/demo-shared/AcmeAssistant"
 import { emptyThreadPrompt, suggestions } from "@acme/demo-shared/ChatList"
 import { demoChatId } from "@acme/demo-shared/Ids"
 import {
@@ -9,6 +10,7 @@ import {
 } from "@assistant-ui/react"
 import { useAtom, useAtomMount, useAtomSet, useAtomValue } from "@effect/atom-react"
 import { useNavigate } from "@tanstack/react-router"
+import type * as Assistant from "effect-assistant/Assistant"
 import * as AssistantEvent from "effect-assistant/AssistantEvent"
 import type * as ChatId from "effect-assistant/ChatId"
 import type * as ChatView from "effect-assistant/ChatView"
@@ -30,7 +32,8 @@ import { ThreadList } from "./ThreadList.tsx"
 type Shown = ChatView.UserMessage | ChatView.AssistantMessage
 
 // The server sends none of Acme's own events, so the thread has only messages.
-const isShown = (message: ChatView.Message): message is Shown => !Predicate.isTagged(message, "AppEvent")
+const isShown = (message: ChatView.Message<Assistant.Events<typeof AcmeAssistant>>): message is Shown =>
+  Predicate.isTagged(message, "UserMessage") || Predicate.isTagged(message, "AssistantMessage")
 
 const toThreadMessage = (message: Shown): ThreadMessageLike =>
   Predicate.isTagged(message, "UserMessage")
@@ -70,7 +73,7 @@ export function AcmeChatPage() {
   const blocks = useMemo<BlockContextValue>(
     () => ({
       chatId,
-      byId: new Map(state.messages.map((message) => [message.id, message])),
+      byId: new Map(state.messages.filter(isShown).map((message) => [message.id, message])),
       respond: (answer) => void send(answer)
     }),
     [chatId, state.messages, send]

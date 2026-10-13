@@ -12,7 +12,11 @@ log; pipe it through
 as [`ChatView.Update`](/api/ChatView#update)s: each one has the messages
 that are new or changed since the last (whole), and the activity now. The
 definition gives the fold the schemas of the app's events (see
-[your events in the view](#your-events-in-the-view)). The client folds them with [`ChatView.apply`](/api/ChatView#apply), from `ChatView.empty`.
+[your events in the view](#your-events-in-the-view)). Updates are JSON. The
+client folds them with [`ChatView.apply(MyAssistant)`](/api/ChatView#apply),
+from `ChatView.empty`, which decodes the assistant's events and types the
+view with them: the client imports the definition too, so keep it
+client-safe (its schemas, blocks, and specialists, not its handlers).
 
 ## Over RPC
 
@@ -57,7 +61,7 @@ const ChatRpcsLive = ChatRpcs.toLayer(
 On the client, fold it:
 
 ```ts
-const view = client("Subscribe", { chatId }).pipe(Stream.scan(() => ChatView.empty, ChatView.apply))
+const view = client("Subscribe", { chatId }).pipe(Stream.scan(() => ChatView.empty, ChatView.apply(MyAssistant)))
 ```
 
 An update that's applied twice changes nothing, so a client that
@@ -75,15 +79,19 @@ depends on what came before it (a block answered or closed later), so the fold r
 emitting the updates up to `after`. A `subscribe(chatId, { after })` would
 give it half a log, and the view would be wrong.
 
-`ChatView.View` is a schema too, for an RPC that returns a whole chat at
-once; `ChatView.fromEntries(entries)` makes one from a log on the server.
+For an RPC that returns a whole chat at once, `ChatView.snapshot(entries,
+MyAssistant)` makes the whole view as one `ChatView.Update` on the server,
+and the client applies it to `ChatView.empty`. Server code that reads the
+view itself uses `ChatView.fromEntries(entries, MyAssistant)`, typed the
+same way.
 
 ## What's in a view
 
 - **`messages`**: `UserMessage`s and `AssistantMessage`s, in order, each
   with `at` (epoch milliseconds). An assistant's message has its `block`,
   if it has one: its `kind` and `props`, its `status` (`"open"`,
-  `"answered"`, or `"closed"`), and the user's `answer`.
+  `"answered"`, or `"closed"`), and the user's `answer`. Between them, a row
+  for each of your events the view got (see below).
 - **`activity`**: `working` while a turn runs, or is about to start for
   something that arrived; `specialists`, the ones working (which, since
   when). `ChatView.isIdle(view)` is neither. A workflow waiting on a timer
@@ -113,12 +121,10 @@ assistant's events.
 
 ## Your events in the view
 
-**The view shows every app event it gets.** Each one becomes a
-`ChatView.AppEvent` row in `messages`, in the log's order between the
-messages: its `tag`, the event in its JSON form as `data`, an `id` fixed per
-entry, and `at`. So filter `subscribe` to the events your users may see
-before `ChatView.updates`: a summary for compaction, say, would reach the
-client otherwise.
+**The view shows every app event it gets.** Each one becomes a row in
+`messages`, in the log's order between the messages, so filter `subscribe` to
+the events your users may see before `ChatView.updates`: a summary for
+compaction, say, would reach the client otherwise.
 
 ```ts
 import { AssistantEvent, ChatView } from "effect-assistant"
@@ -132,12 +138,33 @@ const watch = (chatId: ChatId.ChatId) =>
   )
 ```
 
-The client reads a row back with the event's schema:
+On the client, `ChatView.apply(MyAssistant)` decodes each row with its
+event's schema. A row is a [`ChatView.EventRow`](/api/ChatView#eventrow): its
+`_tag` is the event's, the decoded event is in `event`, and the row's `id`
+(fixed per entry) and `at` sit beside it. The event isn't spread into the
+row, since it may have an `id` of its own, and a class keeps its prototype.
+So a match over the messages has one handler per event, beside the two
+messages, typed with the assistant's events:
 
-```ts
-const budget = (message: ChatView.Message) =>
-  Predicate.isTagged(message, "AppEvent") ? ChatView.decodeEvent(DailyBudgetReached)(message) : Option.none()
+```tsx
+import { type Assistant, ChatView } from "effect-assistant"
+import * as Match from "effect/Match"
+
+type MyView = ChatView.View<Assistant.Events<typeof MyAssistant>>
+
+const items = (view: MyView) =>
+  view.messages.map((message) =>
+    Match.valueTags(message, {
+      UserMessage: (sent) => <UserBubble key={sent.id} text={sent.text} />,
+      AssistantMessage: (sent) => <AssistantBubble key={sent.id} message={sent} />,
+      DailyBudgetReached: (row) => <BudgetNotice key={row.id} at={row.at} />,
+      OrderPlaced: (row) => <OrderPlacedRow key={row.id} order={row.event} />,
+      Summary: () => null // filtered out on the server; the types list every event of the assistant
+    })
+  )
 ```
 
-`ChatView.fromEntries(entries, MyAssistant)` shows the same rows, so pass it
-only the entries the user may see too.
+A row whose event the client's definition doesn't have, or that doesn't
+decode (an older client, say), is left out. `ChatView.fromEntries(entries,
+MyAssistant)` and `ChatView.snapshot` show the same rows, so pass them only
+the entries the user may see too.

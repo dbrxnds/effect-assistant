@@ -1,6 +1,6 @@
 /**
- * The research specialist's definition. Its handler is in `Tools.ts`, next to
- * the tools it uses.
+ * The research specialist's definition. Its handler is in the API's
+ * `Tools.ts`, next to the tools it uses.
  *
  * @since 0.1.0
  */

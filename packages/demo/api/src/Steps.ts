@@ -13,10 +13,10 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Activity from "effect/workflow/Activity"
 import * as DurableClock from "effect/workflow/DurableClock"
-import { AcmeAssistant } from "./AcmeAssistant.ts"
+import { AcmeAssistant } from "@acme/demo-shared/AcmeAssistant"
 import type { LiveOrder } from "./LiveOrders.ts"
-import { OrderPlaced } from "./OrderPlaced.ts"
-import { WorkflowStep } from "./WorkflowStep.ts"
+import { OrderPlaced } from "@acme/demo-shared/OrderPlaced"
+import { WorkflowStep } from "@acme/demo-shared/WorkflowStep"
 
 /**
  * One demo step, in seconds: `DEMO_STEP_SECONDS`, default 10. A step stands

@@ -12,6 +12,8 @@ ask for reports.
   - `Orders`: a year of campaign and product orders;
   - `Budgets`: quarterly budgets per office;
   - `Performance`: campaign results.
+- `shared/src/AcmeAssistant.ts`: the assistant's definition, shared with the web app, which folds the
+  chat's view with it (`ChatView.apply(AcmeAssistant)`). `shared/src/Research.ts` is its specialist's.
 - `api/src/Acme.ts`: the assistant's instructions, skills, tools, and model (`ACME_MODEL`).
 - `api/src/Prompts.ts`: the prompts, from Langfuse (label `production`), with defaults in code.
   `pnpm --filter @acme/demo-api prompts:push` uploads the defaults.
@@ -23,10 +25,10 @@ ask for reports.
 - `api/src/PrintOrders.ts`: `quote_order`, which the assistant uses to tell the user the total,
   `place` (what the order block's button runs through the `PlaceOrder` RPC), and the `PrintOrder`
   workflow.
-- `api/src/OrderPlaced.ts`: what the API tells the chat when the user places an order or starts a
+- `shared/src/OrderPlaced.ts`: what the API tells the chat when the user places an order or starts a
   campaign, one of Acme's own events: the API submits it, so it wakes a turn, and Acme follows up with
   the reference.
-- `api/src/WorkflowStep.ts`: a workflow's step, one of Acme's own events: the workflow submits it, so
+- `shared/src/WorkflowStep.ts`: a workflow's step, one of Acme's own events: the workflow submits it, so
   it wakes a turn, and the model reads it as a `<workflow>` update (Acme's history view in
   `api/src/Acme.ts` maps both events to notes).
 - `api/src/Steps.ts`: what the workflows share: reporting a step to the chat, and durable waits at

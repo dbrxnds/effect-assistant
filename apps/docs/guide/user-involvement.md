@@ -134,7 +134,7 @@ API can refuse (over budget, say), and the user sees why on the block.
 The demo does this for orders and campaigns: `OrderDraft` and
 `CampaignDraft` in `packages/demo/shared/src/Blocks.ts`, `PlaceOrder` and
 `StartCampaign` in its RPCs, and `OrderPlaced` in
-`packages/demo/api/src/OrderPlaced.ts`.
+`packages/demo/shared/src/OrderPlaced.ts`.
 
 ## The user answers
 

@@ -122,11 +122,12 @@ const watch = (chatId: ChatId.ChatId, after?: number) =>
 ```
 
 - `ChatView.updates` turns the chat's log into the chat as the user sees it: messages, blocks, `activity`,
-  `deleted`. The client folds it with `ChatView.apply`, from `ChatView.empty`.
-- The view shows every one of your own events it gets, as a `ChatView.AppEvent` row between the messages. An
-  assistant with events of its own filters `subscribe` to those its users may see first, with
-  `Stream.filter(({ event }) => AssistantEvent.isLibraryEvent(event) || Schema.is(Shown)(event))`; the client reads
-  a row back with `ChatView.decodeEvent(Shown)`.
+  `deleted`. The client folds it with `ChatView.apply(MyAssistant)`, from `ChatView.empty`.
+- The view shows every one of your own events it gets, as a row between the messages. An assistant with events
+  of its own filters `subscribe` to those its users may see first, with
+  `Stream.filter(({ event }) => AssistantEvent.isLibraryEvent(event) || Schema.is(Shown)(event))`. Updates are
+  JSON; `ChatView.apply(MyAssistant)` decodes each row on the client, typed: its `_tag` is the event's and `event`
+  is the event, so `Match.valueTags(message, { UserMessage, AssistantMessage, Shown: (row) => row.event })`.
 - `after` goes to `ChatView.updates`, not to `subscribe`: the view is folded from the whole log, and only the
   updates up to `after` are skipped.
 - The client picks the `InputId`, so a retried send is stored once.

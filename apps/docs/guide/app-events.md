@@ -144,7 +144,7 @@ assistant asks, maybe with a [block](./blocks).
 Work the user must agree to starts from a block's button instead, and your API
 submits an event like these (see [involving the user](./user-involvement)).
 
-The demo's workflows do this: `packages/demo/api/src/WorkflowStep.ts` and
+The demo's workflows do this: `packages/demo/shared/src/WorkflowStep.ts` and
 `Steps.ts`.
 
 If the chat is deleted while the work runs, what it reports is dropped,

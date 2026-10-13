@@ -15,13 +15,13 @@ import * as Layer from "effect/Layer"
 import * as Prompt from "effect/ai/Prompt"
 import * as Toolkit from "effect/ai/Toolkit"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
-import { AcmeAssistant } from "./AcmeAssistant.ts"
+import { AcmeAssistant } from "@acme/demo-shared/AcmeAssistant"
 import * as Campaign from "./Campaign.ts"
-import * as OrderPlaced from "./OrderPlaced.ts"
+import * as OrderPlaced from "@acme/demo-shared/OrderPlaced"
 import * as PrintOrders from "./PrintOrders.ts"
 import * as Prompts from "./Prompts.ts"
 import * as Tools from "./Tools.ts"
-import * as WorkflowStep from "./WorkflowStep.ts"
+import * as WorkflowStep from "@acme/demo-shared/WorkflowStep"
 
 const orderingCampaigns = Skill.make("Ordering a campaign", {
   description: "Use when the user wants to order or start a campaign.",

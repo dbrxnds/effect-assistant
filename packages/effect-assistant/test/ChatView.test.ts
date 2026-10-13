@@ -1,11 +1,12 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Response from "effect/ai/Response"
 import * as Effect from "effect/Effect"
+import * as Match from "effect/Match"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { AssistantEvent, ChatId, ChatView, InputId, RunId } from "../src/index.ts"
+import { type Assistant, AssistantEvent, ChatId, ChatView, InputId, RunId } from "../src/index.ts"
 import {
   collectUntil,
   newChat,
@@ -13,6 +14,7 @@ import {
   say,
   storedUpdate,
   submittedUpdate,
+  TestAssistant,
   turnsDone,
   Update,
   update,
@@ -91,7 +93,7 @@ describe("ChatView.fromEntries", () => {
       })
     ])
 
-    const json = JSON.stringify(Schema.encodeSync(ChatView.View)(shown))
+    const json = JSON.stringify(Schema.encodeSync(ChatView.Update)(ChatView.snapshot(entries(quoting))))
 
     for (const internal of ["toolu_quote", "ModelOutput", "TurnStarted"]) {
       expect(json).not.toContain(internal)
@@ -156,47 +158,80 @@ describe("ChatView.fromEntries", () => {
     expect(view([storedUpdate("workflow:Order", { status: "shipped" })]).activity.working).toBe(false)
   })
 
-  it("shows every app event it gets as a row between the messages, in the log's order", () => {
+  it("shows each app event it gets as a row typed with the assistant's events, in the log's order", () => {
     const shipped = Update.make({
       id: InputId.fromKey("shipped"),
       source: "workflow:Order",
       payload: { status: "shipped" }
     })
 
-    const json = Schema.encodeSync(Schema.toCodecJson(Update))(shipped)
-
-    expect(JSON.stringify(json)).toBe(
-      '{"_tag":"Update","id":"shipped","source":"workflow:Order","payload":{"status":"shipped"}}'
-    )
-
     // As `subscribe` streams it: decoded.
-    const shown = ChatView.fromEntries(
-      [
-        { chatId, seq: 1, at: 1000, event: hi },
-        { chatId, seq: 2, at: 2000, event: shipped },
-        { chatId, seq: 3, at: 3000, event: ask }
-      ],
-      Updating
+    const decoded = [
+      { chatId, seq: 1, at: 1000, event: hi },
+      { chatId, seq: 2, at: 2000, event: shipped },
+      { chatId, seq: 3, at: 3000, event: ask }
+    ]
+
+    const shown: ChatView.View<Assistant.Events<typeof Updating>> = ChatView.fromEntries(decoded, Updating)
+
+    // Exhaustive over the assistant's events: the row's `_tag` is the event's, and the event is decoded.
+    const lines = shown.messages.map((message) =>
+      Match.valueTags(message, {
+        UserMessage: (sent) => `user: ${sent.text}`,
+        AssistantMessage: (sent) => `assistant: ${sent.text}`,
+        Update: (row) => `${row.id} at ${row.at}: ${row.event.source} ${row.event instanceof Update}`
+      })
     )
 
-    expect(shown.messages.map((message) => message._tag)).toEqual(["UserMessage", "AppEvent", "AssistantMessage"])
-    expect(shown.messages[1]).toEqual(
-      ChatView.AppEvent.make({ id: "app-event:2", tag: "Update", data: json, at: 2000 })
+    expect(lines).toEqual([
+      "user: Order 300 totes",
+      "app-event:2 at 2000: workflow:Order true",
+      "assistant: That's $1,200. Which color?"
+    ])
+    expect(shown.messages.flatMap((message) => (Predicate.isTagged(message, "Update") ? [message.event] : []))).toEqual(
+      [shipped]
     )
 
-    const rows = shown.messages.flatMap((message) => (Predicate.isTagged(message, "AppEvent") ? [message] : []))
+    // On the wire, the event is JSON, and the update needs no definition.
+    const wire = JSON.stringify(Schema.encodeSync(ChatView.Update)(ChatView.snapshot(decoded, Updating)))
 
-    // A row reads back as its event with the event's schema; another schema reads nothing.
-    expect(rows.map(ChatView.decodeEvent(Update))).toEqual([Option.some(shipped)])
-    expect(rows.map(ChatView.decodeEvent(Schema.TaggedStruct("Other", { n: Schema.Int })))).toEqual([Option.none()])
-
-    // As the log stores it, without a definition: the stored JSON, without the input mark.
-    const stored = Schema.decodeUnknownSync(AssistantEvent.StoredAppEvent)(json)
-    const fromLog = view([hi, AppEvents.markInput(stored), ask])
-
-    expect(fromLog.messages[1]).toEqual(
-      ChatView.AppEvent.make({ id: "app-event:2", tag: "Update", data: json, at: 2000 })
+    expect(wire).toContain(
+      '{"_tag":"Update","id":"app-event:2","at":2000,"event":{"_tag":"Update","id":"shipped","source":"workflow:Order","payload":{"status":"shipped"}}}'
     )
+
+    // As the log stores it, marked as submitted: the same row. Without a definition, no rows.
+    const stored = Schema.decodeUnknownSync(AssistantEvent.StoredAppEvent)(
+      Schema.encodeSync(Schema.toCodecJson(Update))(shipped)
+    )
+
+    const log = entries([hi, AppEvents.markInput(stored), ask])
+
+    expect(ChatView.fromEntries(log, Updating)).toEqual(shown)
+    expect(ChatView.fromEntries(log).messages.map((message) => message._tag)).toEqual([
+      "UserMessage",
+      "AssistantMessage"
+    ])
+  })
+
+  it("leaves out a row whose event the definition doesn't have, or that doesn't decode", () => {
+    const update = Schema.decodeUnknownSync(ChatView.Update)(
+      JSON.parse(`{
+        "seq": 4,
+        "messages": [
+          { "_tag": "UserMessage", "id": "${hi.id}", "text": "hi", "at": 1 },
+          { "_tag": "Unknown", "id": "app-event:2", "at": 2, "event": { "_tag": "Unknown", "n": 1 } },
+          { "_tag": "Update", "id": "app-event:3", "at": 3, "event": { "_tag": "Update", "source": 7 } },
+          { "_tag": "Update", "id": "app-event:4", "at": 4, "event": { "_tag": "Update", "id": "u", "source": "s", "payload": {} } }
+        ],
+        "activity": { "working": false, "specialists": [] },
+        "failed": false,
+        "deleted": false
+      }`)
+    )
+
+    const shown = ChatView.apply(Updating)(ChatView.empty, update)
+
+    expect(shown.messages.map((message) => message.id)).toEqual([hi.id, "app-event:4"])
   })
 
   it("says when the chat was deleted, and that nothing works in it any more, even mid-turn", () => {
@@ -241,8 +276,9 @@ describe("ChatView.apply", () => {
       deleted: false
     }
 
-    const once = [first, second].reduce(ChatView.apply, ChatView.empty)
-    const twice = [first, second, first, second].reduce(ChatView.apply, ChatView.empty)
+    const apply = ChatView.apply(TestAssistant)
+    const once = [first, second].reduce(apply, ChatView.empty)
+    const twice = [first, second, first, second].reduce(apply, ChatView.empty)
 
     expect(once.messages.map((message) => message.id)).toEqual([hi.id, "m1", "m2"])
     expect(once.seq).toBe(5)
@@ -271,7 +307,7 @@ describe("updates", () => {
           Stream.map((update) =>
             Schema.decodeUnknownSync(wire)(JSON.parse(JSON.stringify(Schema.encodeSync(wire)(update))))
           ),
-          Stream.scan(() => ChatView.empty, ChatView.apply),
+          Stream.scan(() => ChatView.empty, ChatView.apply(Updating)),
           Stream.takeUntil((shown) => shown.seq >= log.at(-1)!.seq),
           Stream.runLast,
           Effect.map(Option.getOrThrow)
@@ -289,7 +325,7 @@ describe("updates", () => {
         const filtered = yield* (yield* Updating).subscribe(chat).pipe(
           Stream.filter(({ event }) => AssistantEvent.isLibraryEvent(event)),
           ChatView.updates(Updating),
-          Stream.scan(() => ChatView.empty, ChatView.apply),
+          Stream.scan(() => ChatView.empty, ChatView.apply(Updating)),
           Stream.takeUntil((shown) => shown.seq >= log.at(-1)!.seq),
           Stream.runLast,
           Effect.map(Option.getOrThrow)
@@ -302,12 +338,21 @@ describe("updates", () => {
         )
       )
 
-      const shown = (view: ReadonlyArray<ChatView.Message>) =>
-        view.map((message) => (Predicate.isTagged(message, "AppEvent") ? message.tag : message.text))
+      const shown = (messages: ReadonlyArray<ChatView.Message<Update>>) =>
+        messages.map((message) =>
+          Match.valueTags(message, {
+            UserMessage: (sent) => sent.text,
+            AssistantMessage: (sent) => sent.text,
+            Update: (row) => `update: ${row.event.payload["status"]}`
+          })
+        )
 
       expect(folded).toEqual(ChatView.fromEntries(log, Updating))
-      expect(shown(folded.messages)).toEqual(["hi", "Hi!", "Update", "It shipped."])
-      expect(since.flatMap((changes) => shown(changes.messages))).toEqual(["Update", "It shipped."])
+      expect(shown(folded.messages)).toEqual(["hi", "Hi!", "update: shipped", "It shipped."])
+      expect(since.flatMap((changes) => shown(ChatView.apply(Updating)(ChatView.empty, changes).messages))).toEqual([
+        "update: shipped",
+        "It shipped."
+      ])
       expect(shown(filtered.messages)).toEqual(["hi", "Hi!", "It shipped."])
     })
   )

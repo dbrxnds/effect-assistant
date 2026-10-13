@@ -22,8 +22,10 @@
  *
  * Scenarios run at the same time, in separate chats.
  */
+import { AcmeAssistant } from "@acme/demo-shared/AcmeAssistant"
 import { CampaignDraft, OrderDraft } from "@acme/demo-shared/Blocks"
 import { AcmeRpcs } from "@acme/demo-shared/Rpc"
+import type * as Assistant from "effect-assistant/Assistant"
 import * as AssistantEvent from "effect-assistant/AssistantEvent"
 import type * as ChatId from "effect-assistant/ChatId"
 import * as ChatView from "effect-assistant/ChatView"
@@ -49,13 +51,17 @@ const layer = RpcClient.layerProtocolSocket().pipe(
 )
 
 /** What the smoke test sees of a chat: its view after each update, as a client folds them. */
-type Views = ReadonlyArray<ChatView.View>
+type View = ChatView.View<Assistant.Events<typeof AcmeAssistant>>
+
+type Views = ReadonlyArray<View>
+
+const applyUpdate = ChatView.apply(AcmeAssistant)
 
 const ChoiceProps = Schema.Struct({ options: Schema.Array(Schema.String) })
 
-const latest = (views: Views): ChatView.View => views.at(-1) ?? ChatView.empty
+const latest = (views: Views): View => views.at(-1) ?? ChatView.empty
 
-const sent = (view: ChatView.View): ReadonlyArray<ChatView.AssistantMessage> =>
+const sent = (view: View): ReadonlyArray<ChatView.AssistantMessage> =>
   view.messages.flatMap((message) => (Predicate.isTagged(message, "AssistantMessage") ? [message] : []))
 
 const messages = (views: Views): ReadonlyArray<string> => sent(latest(views)).map((message) => message.text)
@@ -121,7 +127,7 @@ const program = Effect.gen(function* () {
     return client.Subscribe({ chatId }).pipe(
       Stream.scan(
         (): Views => [],
-        (views, update) => [...views, ChatView.apply(latest(views), update)]
+        (views, update) => [...views, applyUpdate(latest(views), update)]
       ),
       Stream.tap((views) => Effect.sync(() => (seen = views))),
       Stream.takeUntil((views) => until(views) || failed(views)),

@@ -585,6 +585,27 @@ interface Assistant<
 export type Any = Assistant<any, any, any>
 
 /**
+ * Extracts the type of an assistant's own events: the union of its event schemas' types.
+ *
+ * **Example** (Typing a chat's view on the client)
+ *
+ * ```ts
+ * import { Assistant, ChatView } from "effect-assistant"
+ * import * as Schema from "effect/Schema"
+ *
+ * class OrderPlaced extends Schema.TaggedClass<OrderPlaced>()("OrderPlaced", { reference: Schema.String }) {}
+ *
+ * const MyAssistant = Assistant.make("my-assistant", { events: [OrderPlaced] })
+ *
+ * type MyView = ChatView.View<Assistant.Events<typeof MyAssistant>>
+ * ```
+ *
+ * @category utility types
+ * @since 0.3.0
+ */
+export type Events<A extends Any> = A extends Assistant<any, any, infer E> ? E : never
+
+/**
  * Returns `true` when the value is an assistant's definition, created with {@link make}.
  *
  * @category guards
@@ -817,3 +838,26 @@ type Any = Assistant<any, any, any>
 ```
 
 <small>Since 0.1.0</small>
+
+### Events
+
+Extracts the type of an assistant's own events: the union of its event schemas' types.
+
+**Example** (Typing a chat's view on the client)
+
+```ts
+import { Assistant, ChatView } from "effect-assistant"
+import * as Schema from "effect/Schema"
+
+class OrderPlaced extends Schema.TaggedClass<OrderPlaced>()("OrderPlaced", { reference: Schema.String }) {}
+
+const MyAssistant = Assistant.make("my-assistant", { events: [OrderPlaced] })
+
+type MyView = ChatView.View<Assistant.Events<typeof MyAssistant>>
+```
+
+```ts
+type Events<A extends Any> = A extends Assistant<any, any, infer E> ? E : never
+```
+
+<small>Since 0.3.0</small>

@@ -9,15 +9,17 @@ import { ChatView } from "effect-assistant"
 This module provides the view of a chat as its user sees it. A chat client receives this view
 and nothing else.
 
-A `View` holds the chat's messages with their blocks, the app's own events it was given
-(`AppEvent`), the chat's `Activity`, and whether the last turn failed or the chat
-was deleted. It never contains the model's output, tool calls or results, what the model read,
-or why a turn failed. The server streams `Update`s by piping the assistant's `subscribe`
-through `updates`, and the client folds them with `apply`, starting from
-`empty`. On the server, `fromEntries` builds a whole view from a chat's log.
+A `View` holds the chat's messages with their blocks, the assistant's own events it was
+given (each a row typed with the assistant's events, see `EventRow`), the chat's
+`Activity`, and whether the last turn failed or the chat was deleted. It never contains the
+model's output, tool calls or results, what the model read, or why a turn failed. The server
+streams `Update`s, which are JSON, by piping the assistant's `subscribe` through
+`updates`, and the client folds them with `apply(MyAssistant)`, which decodes the events,
+starting from `empty`. On the server, `fromEntries` builds a whole view from a
+chat's log, and `snapshot` the whole view as one update.
 
 **The view shows every app event it gets.** Filter the entries to the events the chat's user may
-see before they reach `updates` or `fromEntries`: an event that is only for the
+see before they reach `updates`, `snapshot`, or `fromEntries`: an event that is only for the
 assistant, like a summary of the chat, would reach the client otherwise.
 
 ## Constructors
@@ -25,7 +27,7 @@ assistant, like a summary of the chat, would reach the client otherwise.
 ### empty
 
 The view of a chat before anything has happened in it, with no messages and nothing working.
-Use it as the starting point when folding updates with `apply`.
+Use it as the starting point when folding updates with `apply`, for any assistant.
 
 ```ts
 const empty: View
@@ -33,20 +35,43 @@ const empty: View
 
 <small>Since 0.1.0</small>
 
-### fromEntries
+### snapshot
 
-Returns a chat's view, built from the entries of its log.
+Returns a chat's whole view as one update, built from the entries of its log.
 
 **When to use**
 
-Use it in server-side code, for example to return a whole chat at once. A client gets the view
-as a stream from `updates` instead.
+Use it on the server for an RPC that returns a whole chat at once: the RPC's success schema is
+`Update`, and the client applies it to `empty` with `apply`.
 
 **Details**
 
-Every app event among the entries becomes an `AppEvent` row, so pass only those the user
-may see. The definition's schemas give a decoded event its JSON form; without one, the event is
-taken as it is stored, as `ChatLog.read` returns it.
+Every app event among the entries becomes a row, so pass only those the user may see. The
+definition's schemas give a decoded event its JSON form; without one, an event is taken as it is
+stored, as `ChatLog.read` returns it.
+
+```ts
+const snapshot: <Events>(
+  entries: ReadonlyArray<AssistantEvent.AnyEntry>,
+  definition?: Definition<Events>
+) => Update
+```
+
+<small>Since 0.3.0</small>
+
+### fromEntries
+
+Returns a chat's view, built from the entries of its log, typed with the assistant's events.
+
+**When to use**
+
+Use it in server-side code that reads a whole chat. A client gets the view as a stream from
+`updates` instead, and an RPC that returns a whole chat sends a `snapshot`.
+
+**Details**
+
+Every app event among the entries becomes a row, so pass only those the user may see. Without a
+definition, the view has no rows for app events.
 
 **Example** (Building a chat's view from its log)
 
@@ -61,7 +86,10 @@ const viewOf = (chatId: ChatId.ChatId) =>
 ```
 
 ```ts
-const fromEntries: (entries: ReadonlyArray<AssistantEvent.AnyEntry>, definition?: Definition) => View
+const fromEntries: {
+  (entries: ReadonlyArray<AssistantEvent.AnyEntry>): View
+  <Events>(entries: ReadonlyArray<AssistantEvent.AnyEntry>, definition: Definition<Events>): View<Events>
+}
 ```
 
 <small>Since 0.1.0</small>
@@ -70,7 +98,8 @@ const fromEntries: (entries: ReadonlyArray<AssistantEvent.AnyEntry>, definition?
 
 ### apply
 
-Returns the view after applying an update.
+Returns a function that applies an update to a view, decoding the rows of the assistant's events
+with its schemas.
 
 **Details**
 
@@ -79,8 +108,25 @@ are added after the rest. The update's activity, `failed`, and `deleted` replace
 Applying an update twice changes nothing, so a client that resubscribes from the start can fold
 again and get the same view.
 
+A row for one of the assistant's events becomes the event, decoded, typed with the definition's
+events (see `EventRow`). A row whose tag the definition doesn't have, or whose event
+doesn't decode, is left out.
+
+**Example** (Folding a chat's updates on the client)
+
 ```ts
-const apply: (view: View, update: Update) => View
+import { Assistant, ChatView } from "effect-assistant"
+import * as Stream from "effect/Stream"
+
+const MyAssistant = Assistant.make("my-assistant")
+
+declare const updates: Stream.Stream<ChatView.Update>
+
+const views = updates.pipe(Stream.scan(() => ChatView.empty, ChatView.apply(MyAssistant)))
+```
+
+```ts
+const apply: <Events>(definition: Definition<Events>) => (view: View<Events>, update: Update) => View<Events>
 ```
 
 <small>Since 0.1.0</small>
@@ -127,22 +173,53 @@ type AssistantMessage = typeof AssistantMessage.Type
 
 <small>Since 0.1.0</small>
 
-### AppEvent
+### EventRow
 
-Represents one of the app's own events, as the chat's user sees it.
+Represents one of the assistant's own events in the view: a row between the messages, in the
+order the chat stored it.
+
+**Details**
+
+The row's `_tag` is the event's, so a match over a view's messages takes a handler per event
+beside `UserMessage` and `AssistantMessage`. The event, decoded with its schema, is in `event`,
+and the row's own fields sit beside it rather than spread into it: an event may have an `id` or
+an `at` of its own, and a class instance keeps its prototype. `id` is fixed per entry of the
+chat's log, and `at` is when the event was stored, in epoch milliseconds.
 
 ```ts
-type AppEvent = typeof AppEvent.Type
+type EventRow<E> = E extends { readonly _tag: infer Tag extends string }
+  ? { readonly _tag: Tag; readonly id: string; readonly at: number; readonly event: E }
+  : never
 ```
 
 <small>Since 0.3.0</small>
 
 ### Message
 
-Represents an item in the chat.
+Represents an item in the chat as its user sees it: a message the user or the assistant sent,
+or one of the assistant's own events (see `EventRow`), typed with the assistant's events.
+
+**Example** (Showing each item of a chat)
 
 ```ts
-type Message = typeof Message.Type
+import { Assistant, ChatView } from "effect-assistant"
+import * as Match from "effect/Match"
+import * as Schema from "effect/Schema"
+
+class DailyBudgetReached extends Schema.TaggedClass<DailyBudgetReached>()("DailyBudgetReached", {}) {}
+
+const MyAssistant = Assistant.make("my-assistant", { events: [DailyBudgetReached] })
+
+const line = (message: ChatView.Message<DailyBudgetReached>) =>
+  Match.valueTags(message, {
+    UserMessage: (sent) => `You: ${sent.text}`,
+    AssistantMessage: (sent) => `Assistant: ${sent.text}`,
+    DailyBudgetReached: () => "You've reached today's budget."
+  })
+```
+
+```ts
+type Message<Events = never> = UserMessage | AssistantMessage | EventRow<Events>
 ```
 
 <small>Since 0.1.0</small>
@@ -169,10 +246,21 @@ type Activity = typeof Activity.Type
 
 ### View
 
-Represents a chat as its user sees it.
+Represents a chat as its user sees it, typed with the assistant's events. It holds the chat's
+messages and the assistant's events it was given, in order, what is working in it, whether the
+last turn failed, and whether the chat was deleted. `seq` is the position in the chat's log that
+the view is up to.
 
 ```ts
-type View = typeof View.Type
+interface View<Events = never> {
+  readonly seq: number
+  readonly messages: ReadonlyArray<Message<Events>>
+  readonly activity: Activity
+  /** Whether the last turn failed with no message after it. */
+  readonly failed: boolean
+  /** Whether the chat was deleted. A deleted chat accepts nothing more, and its stream ends. */
+  readonly deleted: boolean
+}
 ```
 
 <small>Since 0.1.0</small>
@@ -189,14 +277,116 @@ type Update = typeof Update.Type
 
 ### Definition
 
-Represents an assistant's definition as `updates` and `fromEntries` read it: the
-schemas of the app's events, which give each one's JSON form in an `AppEvent` row. An
-assistant made with `Assistant.make` fits it.
+Represents an assistant's definition as the view reads it. An assistant made with
+`Assistant.make` fits it.
 
 ```ts
-interface Definition {
+interface Definition<Events = never> {
+  /** The schemas of the assistant's events, which encode and decode their rows. */
   readonly events: ReadonlyArray<AssistantEvent.AppEventSchema>
+  /** The schema of the chat's entries, typed with the assistant's events: it types the rows. */
+  readonly Entry: Schema.Codec<Assistant.Entry<Events>, Schema.Json>
 }
+
+/**
+ * Represents the options accepted by {@link updates}.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface UpdatesOptions {
+  /**
+   * The `seq` up to which the client already has the view. The result contains only the updates
+   * after it. Defaults to `0`, every update.
+   */
+  readonly after?: number | undefined
+}
+
+/**
+ * Returns the stream of view updates that a chat's entries produce, for a chat client.
+ *
+ * **Details**
+ *
+ * The entries must stream from the start of the chat's log, as `assistant.subscribe(chatId)` does
+ * without `after`. The fold reads every entry, because a message's view depends on earlier
+ * entries: a block is answered or closed later. `after` only skips
+ * emitting the updates up to that `seq`, so a client that has the view up to a `seq` receives only
+ * what changed since. Pass `after` here, not to `subscribe`: a subscription that starts after a
+ * `seq` gives the fold an incomplete log, and the updates it produces are wrong.
+ *
+ * Each chunk of entries becomes one update; the stored entries, for example, arrive as one chunk.
+ *
+ * **Every app event it gets is shown.** Each one becomes a row between the messages (see
+ * {@link EventRow}), which the client receives. Filter the stream to the events the chat's user may see
+ * before this, or an event that is only for the assistant, like a summary of the chat, reaches the
+ * client. A view shows a turn as working once it starts, or from the user's input.
+ *
+ * **Example** (Streaming a chat's view to a client, with the one app event its user sees)
+ *
+ * ```ts
+ * import { Assistant, AssistantEvent, type ChatId, ChatView } from "effect-assistant"
+ * import * as Schema from "effect/Schema"
+ * import * as Stream from "effect/Stream"
+ *
+ * class Summary extends Schema.TaggedClass<Summary>()("Summary", { text: Schema.String, throughSeq: Schema.Int }) {}
+ * class DailyBudgetReached extends Schema.TaggedClass<DailyBudgetReached>()("DailyBudgetReached", {}) {}
+ *
+ * const MyAssistant = Assistant.make("my-assistant", { events: [Summary, DailyBudgetReached] })
+ *
+ * const watch = (chatId: ChatId.ChatId, after: number) =>
+ *   Stream.unwrap(
+ *     MyAssistant.useSync((assistant) =>
+ *       assistant.subscribe(chatId).pipe(
+ *         // The summary is for the model: only the budget notice reaches the user.
+ *         Stream.filter(({ event }) => AssistantEvent.isLibraryEvent(event) || Schema.is(DailyBudgetReached)(event)),
+ *         ChatView.updates(MyAssistant, { after })
+ *       )
+ *     )
+ *   )
+ * ```
+ *
+ * @see {@link apply} for folding the updates into a view on the client
+ *
+ * @category utils
+ * @since 0.1.0
+ */
+export const updates: {
+  <Events>(
+    definition: Definition<Events>,
+    options?: UpdatesOptions
+  ): <E, R>(entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>) => Stream.Stream<Update, E, R>
+  <E, R, Events>(
+    entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
+    definition: Definition<Events>,
+    options?: UpdatesOptions
+  ): Stream.Stream<Update, E, R>
+} = dual(
+  (args) => Stream.isStream(args[0]),
+  <E, R>(
+    entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
+    definition: Schemas,
+    options?: UpdatesOptions
+  ): Stream.Stream<Update, E, R> => {
+    const after = options?.after ?? 0
+
+    return entries.pipe(
+      Stream.mapAccumArray(
+        () => folding(definition.events),
+        (fold, chunk) => {
+          const changed = chunk.flatMap((entry) => {
+            const update = fold.step(entry)
+
+            return update === undefined || entry.seq <= after ? [] : [update]
+          })
+
+          const merged = merge(changed)
+
+          return [fold, merged === undefined ? [] : [merged]]
+        }
+      )
+    )
+  }
+)
 ```
 
 <small>Since 0.1.0</small>
@@ -264,34 +454,6 @@ const AssistantMessage = Schema.TaggedStruct("AssistantMessage", { …
 
 <small>Since 0.1.0</small>
 
-### AppEvent
-
-Schema for one of the app's own events, as the chat's user sees it: a row between the messages,
-in the order the chat stored it.
-
-**Details**
-
-`id` is fixed per entry of the chat's log. `tag` is the event's `_tag`, and `data` the event in
-its schema's JSON form, `_tag` included. Read it back with `decodeEvent`. `at` is when it
-was stored, in epoch milliseconds.
-
-```ts
-const AppEvent = Schema.TaggedStruct("AppEvent", { …
-```
-
-<small>Since 0.3.0</small>
-
-### Message
-
-Schema for an item in the chat: a message sent by either the user or the assistant, or one of
-the app's own events.
-
-```ts
-const Message = Schema.Union([UserMessage, AssistantMessage, AppEvent])
-```
-
-<small>Since 0.1.0</small>
-
 ### SpecialistWorking
 
 Schema for a specialist that is working for the assistant. It holds the specialist's name and
@@ -317,27 +479,20 @@ const Activity = Schema.Struct({ …
 
 <small>Since 0.1.0</small>
 
-### View
-
-Schema for a chat as its user sees it. It holds the chat's messages and the app's events it was
-given, in order, what is working in it, whether the last turn failed, and whether the chat was
-deleted. `seq` is the position in the
-chat's log that the view is up to.
-
-```ts
-const View = Schema.Struct({ …
-```
-
-<small>Since 0.1.0</small>
-
 ### Update
 
-Schema for a change to a chat's view.
+Schema for a change to a chat's view, as it goes over the wire.
+
+**Details**
 
 An update holds each message that is new or changed (for example, a block answered or
 closed), in full. It also holds the current activity, whether the last turn failed,
 and whether the chat was deleted. `seq` is the position in the chat's log that the update is up
 to.
+
+It is JSON and needs no definition, so it serves as an RPC's success schema as it is. A row for
+one of the assistant's events holds the event in its JSON form; the client's `apply`
+decodes it with the assistant's schemas.
 
 ```ts
 const Update = Schema.Struct({ …
@@ -353,41 +508,12 @@ Returns whether nothing is working in the chat: no turn is running or about to s
 specialist is working.
 
 ```ts
-const isIdle: (view: View) => boolean
+const isIdle: <Events>(view: View<Events>) => boolean
 ```
 
 <small>Since 0.1.0</small>
 
 ## Utils
-
-### decodeEvent
-
-Returns the event in a view's `AppEvent` row, decoded with its schema, or `None` when the
-row holds another event or one that doesn't decode.
-
-**Example** (Showing a notice for one of the app's events)
-
-```ts
-import { ChatView } from "effect-assistant"
-import * as Option from "effect/Option"
-import * as Predicate from "effect/Predicate"
-import * as Schema from "effect/Schema"
-
-class DailyBudgetReached extends Schema.TaggedClass<DailyBudgetReached>()("DailyBudgetReached", {}) {}
-
-const notice = (message: ChatView.Message) =>
-  Predicate.isTagged(message, "AppEvent")
-    ? Option.map(ChatView.decodeEvent(DailyBudgetReached)(message), () => "You've reached today's budget.")
-    : Option.none()
-```
-
-```ts
-const decodeEvent: <S extends AssistantEvent.AppEventSchema>(
-  schema: S
-) => ((row: AppEvent) => Option.Option<S["Type"]>)
-```
-
-<small>Since 0.3.0</small>
 
 ### updates
 
@@ -404,8 +530,8 @@ what changed since. Pass `after` here, not to `subscribe`: a subscription that s
 
 Each chunk of entries becomes one update; the stored entries, for example, arrive as one chunk.
 
-**Every app event it gets is shown.** Each one becomes an `AppEvent` row between the
-messages, which the client receives. Filter the stream to the events the chat's user may see
+**Every app event it gets is shown.** Each one becomes a row between the messages (see
+`EventRow`), which the client receives. Filter the stream to the events the chat's user may see
 before this, or an event that is only for the assistant, like a summary of the chat, reaches the
 client. A view shows a turn as working once it starts, or from the user's input.
 
@@ -435,13 +561,13 @@ const watch = (chatId: ChatId.ChatId, after: number) =>
 
 ```ts
 const updates: {
-  (
-    definition: Definition,
+  <Events>(
+    definition: Definition<Events>,
     options?: UpdatesOptions
   ): <E, R>(entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>) => Stream.Stream<Update, E, R>
-  <E, R>(
+  <E, R, Events>(
     entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
-    definition: Definition,
+    definition: Definition<Events>,
     options?: UpdatesOptions
   ): Stream.Stream<Update, E, R>
 }
