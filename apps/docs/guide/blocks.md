@@ -74,6 +74,52 @@ schema), which you `submit` like a message. The chat shows it inside the
 block, not as a message. The renderer returns `undefined` for messages it
 can't show; show just the text then.
 
+## Showing a tool's result
+
+Some UI is just what a tool returned: found items as cards, a download as a
+button. Copying that into block props costs the model output tokens (a signed
+link is hundreds), and a wrong character breaks it. A block made with
+[`Block.fromToolResult`](/api/Block#fromtoolresult) shows the result itself:
+
+```ts
+import { Block, BlockKit } from "effect-assistant"
+import { SearchItems } from "./tools.ts"
+
+export const Blocks = BlockKit.make([ChooseOne, Block.fromToolResult(SearchItems)])
+```
+
+The tool's results then carry a `resultId` in what the model reads, and the
+model shows one with a `tool_result` block:
+`send_user_message({ text, block: { kind: "tool_result", props: { resultId: "r-1a2b3c4d" } } })`.
+It never sees the block's kind or how the client draws it, and it decides
+whether to show a result at all; the message text is the caption. An id the
+chat has no successful result for fails back to the model.
+
+The client gets the result with the message, and the renderer for the tool's
+name gets it decoded by the tool's success schema:
+
+```tsx
+const render = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
+  choose_one: …,
+  search_items: ({ result }) => <ItemCards items={result.items} />
+})
+```
+
+The tool's definition is shared with the client, so add server-only services
+on the server with `Tool.addDependency`. The client gets the whole result:
+only show tools whose results the user may see in full.
+
+To keep fields only the UI needs (image URLs, file ids) out of the model's
+context, give the tool a [model view](/api/ToolResult#modelview). The log keeps
+the whole result:
+
+```ts
+export const SearchItems = ToolResult.modelView(
+  Tool.make("search_items", { parameters, success: Schema.Struct({ items: Schema.Array(Item) }) }),
+  (result) => ({ items: result.items.map(({ id, name }) => ({ id, name })) })
+)
+```
+
 ## Open and closed
 
 A block stays open until it's answered: with the block itself, or in words.

@@ -118,3 +118,8 @@ export * as ToolDiscovery from "./ToolDiscovery.ts"
  * @since 0.1.0
  */
 export * as ToolFailure from "./ToolFailure.ts"
+
+/**
+ * @since 0.5.0
+ */
+export * as ToolResult from "./ToolResult.ts"

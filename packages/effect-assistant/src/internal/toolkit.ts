@@ -2,7 +2,7 @@ import * as AiError from "effect/ai/AiError"
 import type * as Prompt from "effect/ai/Prompt"
 import type * as Tool from "effect/ai/Tool"
 import type * as Toolkit from "effect/ai/Toolkit"
-import type * as Context from "effect/Context"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
@@ -11,13 +11,17 @@ import * as Stream from "effect/Stream"
 import type * as AssistantEvent from "../AssistantEvent.ts"
 import { AssistantToolCall } from "../AssistantToolCall.ts"
 import * as ToolFailure from "../ToolFailure.ts"
+import { ModelView } from "../ToolResult.ts"
 import { toJson } from "./schema.ts"
+import * as Uuid from "./uuid.ts"
 
 /** @internal */
 export interface CallResult {
   readonly outcome: AssistantEvent.ToolOutcome
   readonly result: Schema.Json
   readonly reason?: string | undefined
+  readonly full?: Schema.Json | undefined
+  readonly resultId?: string | undefined
 }
 
 // Apps give the loop native toolkits; these are what the loop makes of them, merged with its own.
@@ -119,12 +123,22 @@ export const runNative = Effect.fnUntraced(function* <T extends Record<string, T
     const results = yield* toolkit.handle<keyof T>(name, params, call.id)
     const last = yield* Stream.runLast(Stream.filter(results, (result) => !result.preliminary))
 
+    const view = Option.flatMap(Option.fromUndefinedOr(toolNamed(toolkit, call.name)), (tool) =>
+      Context.getOption(tool.annotations, ModelView)
+    )
+
     return Option.match(last, {
       onNone: () => failed(`${call.name} returned no result.`, "NoResult"),
-      onSome: (result): CallResult =>
-        result.isFailure
-          ? failure(toJson(result.encodedResult))
-          : { outcome: "success", result: toJson(result.encodedResult) }
+      onSome: (result): CallResult => {
+        if (result.isFailure) return failure(toJson(result.encodedResult))
+
+        const full = toJson(result.encodedResult)
+
+        return Option.match(view, {
+          onNone: () => ({ outcome: "success", result: full }),
+          onSome: (read) => ({ outcome: "success", result: toJson(read(result.result)), full })
+        })
+      }
     })
   }).pipe(
     Effect.catch((error) =>
@@ -179,6 +193,42 @@ export const merge = <A, B>(self: Tools<A>, that: Tools<B>): Tools<A | B> => {
       inSelf(call) ? self.needsApproval(call, history) : that.needsApproval(call, history)
   }
 }
+
+// Short, for the model to copy, and from the call: a call run again after a crash keeps its id.
+/** @internal */
+export const resultIdOf = (callId: string): string => `r-${Uuid.fromKey(`result:${callId}`).slice(0, 8)}`
+
+const decodeJsonObject = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Json))
+
+const withResultId = (result: CallResult, resultId: string): CallResult => {
+  if (result.outcome === "failure") return result
+
+  const read = result.result
+  const fields = Array.isArray(read) ? Option.none() : decodeJsonObject(read)
+
+  return {
+    ...result,
+    result: Option.match(fields, {
+      onNone: () => ({ resultId, result: read }),
+      onSome: (object) => ({ resultId, ...object })
+    }),
+    full: result.full ?? read,
+    resultId
+  }
+}
+
+// The results of tools the assistant's blocks show get an id the model passes to show one.
+/** @internal */
+export const showing = <R>(tools: Tools<R>, names: ReadonlySet<string>): Tools<R> =>
+  names.size === 0
+    ? tools
+    : {
+        ...tools,
+        run: (call) =>
+          names.has(call.name)
+            ? Effect.map(tools.run(call), (result) => withResultId(result, resultIdOf(call.id)))
+            : tools.run(call)
+      }
 
 // A turn's own services, for a loop the app writes.
 /** @internal */

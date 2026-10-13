@@ -17,7 +17,7 @@ import type { ChatId } from "../ChatId.ts"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import type * as AssistantLoop from "../AssistantLoop.ts"
 import * as Loop from "./loop.ts"
-import type * as BlockKit from "../BlockKit.ts"
+import * as BlockKit from "../BlockKit.ts"
 import type { CurrentChat } from "../CurrentChat.ts"
 import * as Instructions from "../Instructions.ts"
 import * as ToolApproval from "../ToolApproval.ts"
@@ -214,6 +214,7 @@ const makeTurnApi = (
 ): Assistant.Turn<any> => {
   const { definition, builtins } = registration
   const { app } = definition
+  const shownTools = BlockKit.toolNames(definition.blocks)
 
   const running = <A, E, R>(stream: Stream.Stream<A, E, R>) =>
     Stream.unwrap(Ref.set(ranLoop, true).pipe(Effect.as(stream)))
@@ -297,7 +298,7 @@ const makeTurnApi = (
     )
 
   const prepare = <T extends Record<string, Tool.Any>>(options: Assistant.LoopOptions<T, any>) => {
-    const own = Toolkits.fromToolkitOrEmpty(options.toolkit)
+    const own = Toolkits.showing(Toolkits.fromToolkitOrEmpty(options.toolkit), shownTools)
 
     return {
       system: instructions(options.instructions),

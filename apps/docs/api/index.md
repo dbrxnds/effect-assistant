@@ -37,3 +37,4 @@ import * as Assistant from "effect-assistant/Assistant"
 - [ToolApproval](./ToolApproval)
 - [ToolDiscovery](./ToolDiscovery)
 - [ToolFailure](./ToolFailure)
+- [ToolResult](./ToolResult)

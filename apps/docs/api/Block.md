@@ -12,6 +12,9 @@ A block is a bit of UI for when a structured answer is easier than typing, such 
 pick from, a yes or no, or a small input. The assistant fills in its `props`, and
 using the block sends back a value typed by its `answer` schema.
 
+A block made with `fromToolResult` shows a tool's result instead: the assistant picks the
+result, and the client draws it from what the tool returned.
+
 ## Constructors
 
 ### make
@@ -51,6 +54,44 @@ const make: <const Kind extends string, Props extends Codec, Answer extends Code
 
 <small>Since 0.1.0</small>
 
+### fromToolResult
+
+Creates a block that shows a tool's results.
+
+**Details**
+
+Put it in the assistant's `BlockKit`. The tool's results then carry a `resultId` in what the model
+reads, and the model shows one with a `tool_result` block that names it: it never sees the
+block's kind or how the client draws it. Sending the block fails back to the model when no
+successful result of a shown tool has that id.
+
+On the client, `BlockKit.toClient` gives the block's renderer the result, decoded by the tool's
+success schema. The tool's definition is shared with the client for that, so it can't need
+server-only services: add those on the server with `Tool.addDependency`.
+
+**Example** (Showing search results as cards)
+
+```ts
+import { Block, BlockKit } from "effect-assistant"
+import { SearchAssets } from "./tools.ts"
+
+export const Blocks = BlockKit.make([PickOne, Block.fromToolResult(SearchAssets)])
+
+// Client
+const renderBlock = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
+  pick_one: ({ props, respond }) => <Options options={props.options} onPick={respond} />,
+  search_assets: ({ result }) => <AssetCards assets={result.items} />
+})
+```
+
+```ts
+const fromToolResult: <T extends Tool.Any>(
+  tool: T & { readonly successSchema: Codec }
+) => ToolResultBlock<T>
+```
+
+<small>Since 0.5.0</small>
+
 ## Models
 
 ### Block
@@ -70,6 +111,49 @@ interface Block<Kind extends string = string, Props extends Codec = Codec, Answe
 ```
 
 <small>Since 0.1.0</small>
+
+### ToolResultBlock
+
+Represents a block that shows a tool's results, made with `fromToolResult`. Its kind is the
+tool's name.
+
+```ts
+interface ToolResultBlock<T extends Tool.Any = Tool.Any> extends Block<
+  Tool.Name<T>,
+  typeof NoProps,
+  Schema.Never
+> {
+  readonly tool: T
+  /** The tool's success schema, which the client decodes the result with. */
+  readonly result: Codec
+}
+```
+
+<small>Since 0.5.0</small>
+
+## Schemas
+
+### NoProps
+
+Schema for the props of a block that shows a tool's result: none, since the result is the block.
+
+```ts
+const NoProps = Schema.Struct({})
+```
+
+<small>Since 0.5.0</small>
+
+## Guards
+
+### isToolResult
+
+Returns whether a block shows a tool's results.
+
+```ts
+const isToolResult: (block: Any) => block is ToolResultBlock
+```
+
+<small>Since 0.5.0</small>
 
 ## Utility types
 
