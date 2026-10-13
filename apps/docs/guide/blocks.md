@@ -4,17 +4,18 @@ A block is a bit of UI the assistant can put in a message when a structured answ
 is easier than typing: options to pick from, a small input. It's only a
 shortcut. The user can always type instead, and the assistant reads either.
 
-What the user must approve, like an order, is a [decision](./decisions): the
-library's own block, `Decision.block`, and only its answer decides.
+A block without an answer is a card, and its buttons can call your app's API:
+that's how the user places an order the assistant prepared (see
+[involving the user](./user-involvement)).
 
 ## Define a catalog
 
 Blocks are defined once and shared by server and client.
 
-**Example** (A choice, and decisions)
+**Example** (A choice)
 
 ```ts
-import { Block, BlockKit, Decision } from "effect-assistant"
+import { Block, BlockKit } from "effect-assistant"
 import * as Schema from "effect/Schema"
 
 export const ChooseOne = Block.make("choose_one", {
@@ -23,7 +24,7 @@ export const ChooseOne = Block.make("choose_one", {
   answer: Schema.Struct({ choice: Schema.String })
 })
 
-export const Blocks = BlockKit.make([ChooseOne, Decision.block])
+export const Blocks = BlockKit.make([ChooseOne])
 ```
 
 - `description` is what the assistant reads to decide when to use it.
@@ -60,17 +61,7 @@ const render = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
       <button key={option} disabled={!open} onClick={() => respond({ choice: option })}>
         {answer?.choice === option ? `✓ ${option}` : option}
       </button>
-    )),
-  decision: ({ props, open, respond }) => (
-    <>
-      <button disabled={!open} onClick={() => respond(Decision.answerAll(props, "approved"))}>
-        {props.approveLabel ?? "Approve"}
-      </button>
-      <button disabled={!open} onClick={() => respond(Decision.answerAll(props, "declined"))}>
-        {props.declineLabel ?? "Decline"}
-      </button>
-    </>
-  )
+    ))
 })
 
 // For each AssistantMessage in the view:
@@ -103,6 +94,6 @@ event, so every client folds them closed. `BlockKit.staleBlocks(entries,
 
 A workflow that needs something from the user doesn't build the UI. It notifies the
 assistant with an [event](./app-events) that says what it needs ("ask which delivery
-date works"), and the assistant writes the message and picks the block. Work that needs the
-user's approval asks before it starts: the tool that starts it needs a
-[decision](./decisions).
+date works"), and the assistant writes the message and picks the block. Work the user must
+agree to starts from a block's button, through your API (see
+[involving the user](./user-involvement)).

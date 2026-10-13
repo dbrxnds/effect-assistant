@@ -15,7 +15,7 @@ import * as Schema from "effect/Schema"
  *
  * It holds a message that says what went wrong and, optionally, a `reason` the model can tell
  * apart, such as `"NotFound"` or `"OverBudget"`. The library's own reasons are PascalCase, like
- * `"NeedsDecision"`.
+ * `"ToolNotFoundError"`.
  *
  * @category errors
  * @since 0.1.0

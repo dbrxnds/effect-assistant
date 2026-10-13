@@ -49,8 +49,8 @@ const inputTokens: (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => number
 
 ### openItems
 
-Returns the items that were open at `throughSeq` and are still open: decisions waiting for the
-user, blocks the user hasn't answered, and specialists that are working. The result is text for
+Returns the items that were open at `throughSeq` and are still open: blocks the user hasn't
+answered, and specialists that are working. The result is text for
 the model, or `None` when nothing is open.
 
 ```ts

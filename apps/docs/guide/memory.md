@@ -95,7 +95,7 @@ summary, and what it says are your app's:
 - **`Compaction.since(isSummary)`**: a history view that starts at the last
   summary. The model reads the summary, the files attached earlier (a
   summary may drop a file's id, and tools need it), and what's still open
-  (blocks not answered, decisions waiting, specialists working), then the
+  (blocks not answered, specialists working), then the
   entries after it.
 - **`Compaction.inputTokens(entries)`**: the last model call's input
   tokens, to decide when the prompt is big enough to compact.

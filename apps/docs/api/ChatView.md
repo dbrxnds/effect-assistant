@@ -9,7 +9,7 @@ import { ChatView } from "effect-assistant"
 This module provides the view of a chat as its user sees it. A chat client receives this view
 and nothing else.
 
-A `View` holds the chat's messages with their blocks and decisions, the chat's
+A `View` holds the chat's messages with their blocks, the chat's
 `Activity`, and whether the last turn failed or the chat was deleted. It never contains
 the model's output, tool calls or results, what the model read, the app's own events, or why a
 turn failed. The server streams `Update`s by piping the assistant's `subscribe` through
@@ -76,16 +76,6 @@ const apply: (view: View, update: Update) => View
 <small>Since 0.1.0</small>
 
 ## Models
-
-### PendingDecision
-
-Represents a decision as the user sees it.
-
-```ts
-type PendingDecision = typeof PendingDecision.Type
-```
-
-<small>Since 0.1.0</small>
 
 ### BlockStatus
 
@@ -228,10 +218,6 @@ interface Folding {
   readonly view: View
 }
 
-const decodeProps = Schema.decodeUnknownOption(Decisions.Props)
-
-const decodeAnswer = Schema.decodeUnknownOption(Decisions.Answer)
-
 const activityOf = (activity: AssistantActivity.State): Activity => ({
   working: activity.turnSince !== undefined || activity.queued,
   specialists: [...activity.specialists.values()].map((run) => ({
@@ -249,49 +235,24 @@ const sameActivity = (a: Activity, b: Activity) =>
     return other !== undefined && run.specialist === other.specialist && run.since === other.since
   })
 
-const decisionIds = (block: AssistantEvent.MessageBlock): ReadonlyArray<string> =>
-  block.kind === Decisions.kind
-    ? Option.match(decodeProps(block.props), {
-        onNone: () => [],
-        onSome: (props) => props.decisionIds
-      })
-    : []
-
 const folding = (wakes: ReadonlySet<string>): Folding => {
   let seq = 0
   let failed = false
   let deleted = false
   let activity = AssistantActivity.empty
   let blocks: ReadonlyMap<string, BlockKit.State> = new Map()
-  let decisions: ReadonlyMap<string, Decisions.State> = new Map()
   // The messages in order, and the assistant's as stored: their blocks change as the chat goes on.
   const messages = new Map<string, Message>()
   const sent = new Map<string, AssistantEvent.AssistantMessage>()
-  // Which messages ask for a decision, so a decision's outcome updates the block that asked for it.
-  const asking = new Map<string, Array<string>>()
 
   const blockOf = (message: AssistantEvent.AssistantMessage): Block | undefined => {
     if (message.block === undefined) return undefined
 
     const state = blocks.get(message.id)
     const status = state === undefined || state.open ? "open" : state.answer === undefined ? "closed" : "answered"
-    const ids = decisionIds(message.block)
-
-    const shown = ids.flatMap((id) => {
-      const decision = decisions.get(id)
-
-      if (decision === undefined) return []
-
-      const { tool, params } = decision.request.origin
-      const shown = { id: decision.request.id, tool, params }
-
-      return [decision.outcome === undefined ? shown : { ...shown, outcome: decision.outcome }]
-    })
-
     const block: Block = { kind: message.block.kind, props: toJson(message.block.props), status }
-    const answered = state?.answer === undefined ? block : { ...block, answer: toJson(state.answer.value) }
 
-    return message.block.kind === Decisions.kind ? { ...answered, decisions: shown } : answered
+    return state?.answer === undefined ? block : { ...block, answer: toJson(state.answer.value) }
   }
 
   const viewOf = (message: AssistantEvent.AssistantMessage, at: number): AssistantMessage => {
@@ -326,27 +287,14 @@ const folding = (wakes: ReadonlySet<string>): Folding => {
           messages.set(message.id, viewOf(message, at))
           failed = false
 
-          if (message.block !== undefined) {
-            for (const id of decisionIds(message.block)) asking.set(id, [...(asking.get(id) ?? []), message.id])
-          }
-
           return [message.id, ...(message.closes ?? [])]
         },
         BlockAnswer: (answer) => {
           failed = false
 
-          const decided =
-            answer.kind === Decisions.kind
-              ? Option.match(decodeAnswer(answer.value), {
-                  onNone: () => [],
-                  onSome: ({ decisions }) => Object.keys(decisions).flatMap((id) => asking.get(id) ?? [])
-                })
-              : []
-
-          return [answer.messageId, ...decided]
+          return [answer.messageId]
         },
         BlocksClosed: (closed) => closed.messageIds,
-        DecisionResolved: (resolved) => asking.get(resolved.id) ?? [],
         TurnFailed: () => {
           failed = true
 
@@ -359,7 +307,6 @@ const folding = (wakes: ReadonlySet<string>): Folding => {
         TurnCompleted: () => [],
         SpecialistStarted: () => [],
         SpecialistFinished: () => [],
-        DecisionRequested: () => [],
         ChatDeleted: () => {
           deleted = true
 
@@ -382,7 +329,6 @@ const folding = (wakes: ReadonlySet<string>): Folding => {
     }
 
     blocks = BlockKit.apply(blocks, event)
-    decisions = Decisions.apply(decisions, event)
 
     const changed = [...new Set(touched(event, entry.at))].flatMap((id) => {
       const message = sent.get(id)
@@ -467,7 +413,7 @@ const wakesOf = (definition: Definition): ReadonlySet<string> =>
  *
  * The entries must stream from the start of the chat's log, as `assistant.subscribe(chatId)` does
  * without `after`. The fold reads every entry, because a message's view depends on earlier
- * entries: a block is answered or closed later, and a decision is made later. `after` only skips
+ * entries: a block is answered or closed later. `after` only skips
  * emitting the updates up to that `seq`, so a client that has the view up to a `seq` receives only
  * what changed since. Pass `after` here, not to `subscribe`: a subscription that starts after a
  * `seq` gives the fold an incomplete log, and the updates it produces are wrong.
@@ -570,18 +516,6 @@ interface UpdatesOptions {
 
 ## Schemas
 
-### PendingDecision
-
-Schema for a decision as the user sees it on a decision block. It holds the call the decision is
-for (its tool and params, which the app can display as it likes) and, once the user has
-decided, the outcome.
-
-```ts
-const PendingDecision = Schema.Struct({ …
-```
-
-<small>Since 0.1.0</small>
-
 ### BlockStatus
 
 Schema for the status of a block. A block is `"open"` while it accepts an answer, `"answered"`
@@ -597,8 +531,8 @@ const BlockStatus = Schema.Literals(["open", "answered", "closed"])
 ### Block
 
 Schema for a block on an assistant's message. It holds the block's kind, its props (JSON, as
-the block's props schema encodes them), its status, the user's answer (JSON, as the block's
-answer schema encodes it), and, for a decision block, its decisions.
+the block's props schema encodes them), its status, and the user's answer (JSON, as the block's
+answer schema encodes it).
 
 ```ts
 const Block = Schema.Struct({ …
@@ -654,7 +588,7 @@ Schema for what is working in the chat.
 
 `working` is true while the assistant runs a turn, or when a turn is about to start for
 something that arrived. `specialists` lists the specialists that are working. When the chat is
-idle, nothing is working, even if a workflow is waiting on a timer or a decision.
+idle, nothing is working, even if a workflow is waiting on a timer or on the user.
 
 ```ts
 const Activity = Schema.Struct({ …
@@ -678,8 +612,8 @@ const View = Schema.Struct({ …
 
 Schema for a change to a chat's view.
 
-An update holds each message that is new or changed (for example, a block answered or closed,
-or a decision made), in full. It also holds the current activity, whether the last turn failed,
+An update holds each message that is new or changed (for example, a block answered or
+closed), in full. It also holds the current activity, whether the last turn failed,
 and whether the chat was deleted. `seq` is the position in the chat's log that the update is up
 to.
 
@@ -712,7 +646,7 @@ Returns the stream of view updates that a chat's entries produce, for a chat cli
 
 The entries must stream from the start of the chat's log, as `assistant.subscribe(chatId)` does
 without `after`. The fold reads every entry, because a message's view depends on earlier
-entries: a block is answered or closed later, and a decision is made later. `after` only skips
+entries: a block is answered or closed later. `after` only skips
 emitting the updates up to that `seq`, so a client that has the view up to a `seq` receives only
 what changed since. Pass `after` here, not to `subscribe`: a subscription that starts after a
 `seq` gives the fold an incomplete log, and the updates it produces are wrong.

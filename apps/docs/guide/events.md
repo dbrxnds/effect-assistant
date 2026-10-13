@@ -34,7 +34,6 @@ Each event is stored as an `AssistantEvent.Entry`: the chat id, a `seq`
 | `TurnStarted`, `TurnCompleted`, `TurnFailed` | [Turn](./turns) bookkeeping.                                                                                             |
 | `SpecialistStarted`, `SpecialistFinished`    | A [specialist](./specialists) run working, and done; a finished run's report wakes a turn.                               |
 | `BlocksClosed`                               | [Blocks](./blocks) closed without an answer.                                                                             |
-| `DecisionRequested`, `DecisionResolved`      | A [decision](./decisions) the user is asked to make for a parked call, and how they decided.                             |
 | `ChatDeleted`                                | The chat was [deleted](./chats#deleting-a-chat): nothing is stored after it.                                             |
 | Your own events                              | [Yours](./app-events), like a workflow's progress or a summary, stored as themselves.                                    |
 

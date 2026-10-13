@@ -1,11 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as LanguageModel from "effect/ai/LanguageModel"
-import * as Response from "effect/ai/Response"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { AppEvent, Assistant, AssistantEvent, ChatId, Compaction, CurrentChat, DecisionId } from "../src/index.ts"
+import { AppEvent, Assistant, AssistantEvent, ChatId, Compaction, CurrentChat, RunId } from "../src/index.ts"
 import { collectUntil, newChat, runMemory, say, turnsDone } from "./utils/fixtures.ts"
 import * as Scripted from "./utils/scripted.ts"
 
@@ -69,37 +68,26 @@ describe("Compaction", () => {
     })
   )
 
-  it("keeps what is still open after the summary: a decision waiting for the user", () => {
+  it("keeps what is still open after the summary: a block the user hasn't answered, and a specialist working", () => {
     const chatId = Effect.runSync(ChatId.make())
-    const callId = "toolu_order_1"
-    const decisionId = DecisionId.fromCallId(callId)
+    const runId = RunId.fromKey("compaction-test")
 
     const events = [
       say("Order 300 totes."),
-      AssistantEvent.ModelOutput.make({
-        parts: [
-          Response.makePart("tool-call", {
-            id: callId,
-            name: "place_order",
-            params: { quantity: 300 },
-            providerExecuted: false
-          })
-        ]
+      AssistantEvent.AssistantMessage.make({
+        id: "m1",
+        text: "Which color?",
+        block: AssistantEvent.MessageBlock.make({ kind: "choose_one", props: { options: ["red", "blue"] } })
       }),
-      AssistantEvent.DecisionRequested.make({
-        id: decisionId,
-        origin: AssistantEvent.CallOrigin.make({
-          callId,
-          tool: "place_order",
-          params: { quantity: 300 }
-        })
-      })
+      AssistantEvent.SpecialistStarted.make({ runId, specialist: "research", goal: "Compare tote suppliers" })
     ]
 
     const entries = events.map((event, i) => AssistantEvent.Entry.make({ chatId, seq: i + 1, at: 0, event }))
 
     expect(Compaction.openItems(entries, entries.length)).toEqual(
-      Option.some(`Decisions waiting for the user:\n- decision ${decisionId}, for place_order: {"quantity":300}`)
+      Option.some(
+        `Blocks the user hasn't answered:\n- message m1, a choose_one block: Which color?\n\nSpecialists still working:\n- your research specialist (${runId}), working on: Compare tote suppliers`
+      )
     )
     // Opened after the summary: the entries after it show it themselves.
     expect(Compaction.openItems(entries, 1)).toEqual(Option.none())

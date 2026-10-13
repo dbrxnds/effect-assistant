@@ -94,8 +94,8 @@ const requiring =
  * the tools' handlers. A catalog tool's services are `execute_tool`'s, so the turn provides them
  * as it does for any tool.
  *
- * `execute_tool` doesn't run a tool that needs the user's decision; keep such tools in the loop's
- * toolkit directly.
+ * A catalog tool with Effect's `needsApproval` set fails the layer when it is built, as it would
+ * fail a loop: the library doesn't run calls that wait for approval.
  *
  * **Example** (Finding rarely used tools when needed)
  *
@@ -146,6 +146,9 @@ export const layer = <T extends Record<string, Tool.Any>>(catalog: Toolkit.Toolk
     Effect.gen(function* () {
       const resolved = yield* catalog
       const definitions = Object.values(resolved.tools)
+      const needingApproval = Toolkits.needingApproval(definitions)
+
+      if (needingApproval.length > 0) return yield* Effect.die(Toolkits.needsApprovalMessage(needingApproval))
 
       return {
         search_tools: ({ query }) =>
@@ -166,17 +169,6 @@ export const layer = <T extends Record<string, Tool.Any>>(catalog: Toolkit.Toolk
             params: input,
             providerExecuted: false
           })
-
-          // A call that needs the user's decision parks only as a call the model made itself,
-          // where it can ask for it.
-          if (yield* Toolkits.needsDecision(resolved, call, [])) {
-            return yield* Effect.fail(
-              Toolkits.failed(
-                `${name} needs the user's decision, so it can't run through execute_tool.`,
-                "NeedsDecision"
-              ).result
-            )
-          }
 
           const { outcome, result } = yield* Toolkits.runNative(resolved, call)
 

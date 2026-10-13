@@ -207,31 +207,39 @@ const deleteChat = (chatId: ChatId.ChatId) =>
 
 ### Ask before acting
 
-Some things the assistant shouldn't do on its own, like placing an order. Mark the tool with Effect's
-`needsApproval`, and give the assistant the decision block: the model asks the user, and only their click
-runs the call.
+Some things the assistant shouldn't do on its own, like placing an order. The assistant prepares it and shows
+it in a block without an answer; the block's button calls your API with exactly what it shows. Your API places
+the order and tells the chat with one of your events, which wakes the assistant to follow up.
 
 ```ts
-import { BlockKit, Decision } from "effect-assistant"
+const OrderDraft = Block.make("order_draft", {
+  description: "An order ready to place, with a Place order button. Only the user places it.",
+  props: Schema.Struct({ sku: Schema.String, quantity: Schema.Int, total: Schema.Finite })
+})
 
-export const Shop = Assistant.make("shop", { blocks: BlockKit.make([Decision.block]) })
+class OrderPlaced extends Schema.TaggedClass<OrderPlaced>()("OrderPlaced", {
+  id: InputId.InputId,
+  reference: Schema.String
+}) {}
 
-const OrderTools = Toolkit.make(
-  Tool.make("place_order", {
-    description: "Places an order.",
-    parameters: Schema.Struct({ sku: Schema.String, quantity: Schema.Int }),
-    success: Schema.Struct({ reference: Schema.String }),
-    needsApproval: true // or a function of the params
+export const Shop = Assistant.make("shop", {
+  blocks: BlockKit.make([OrderDraft]),
+  events: [AppEvent.make(OrderPlaced, { wakes: true })]
+})
+
+// Your API, behind the block's button: once per block, then tell the chat.
+const placeOrder = (chatId: ChatId.ChatId, messageId: string, order: typeof OrderDraft.props.Type) =>
+  Effect.gen(function* () {
+    const reference = yield* placeOnce(`${chatId}:${messageId}`, order)
+    yield* Shop.use((shop) =>
+      shop.submit(chatId, OrderPlaced.make({ id: InputId.fromKey(`placed:${reference}`), reference }))
+    )
   })
-)
-
-const ShopLive = Shop.toLayer((turn) => turn.loop({ instructions, toolkit: OrderTools })).pipe(
-  Layer.provide(OrderTools.toLayer({ place_order: () => Effect.succeed({ reference: "R-1042" }) }))
-)
 ```
 
-The call waits until the user answers the decision block. Approved, it runs exactly as the model made it;
-declined, it never runs. The view gives the client the paused call's `tool` and `params`.
+What the assistant may do by itself is a tool with final values; a question for the user is a block with an
+`answer` schema. The library doesn't run tools with Effect's `needsApproval`: a loop with one fails. See
+[involving the user](./apps/docs/guide/user-involvement.md).
 
 ### UI blocks
 
@@ -246,7 +254,7 @@ const PickOne = Block.make("pick_one", {
   answer: Schema.Struct({ picked: Schema.String })
 })
 
-const Blocks = BlockKit.make([PickOne, Decision.block])
+const Blocks = BlockKit.make([PickOne])
 export const MyAssistant = Assistant.make("my-assistant", { blocks: Blocks })
 
 // In the client: a renderer per kind, checked by the type system.
@@ -256,12 +264,7 @@ const renderBlock = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
       <button key={option} disabled={!open} onClick={() => respond({ picked: option })}>
         {option}
       </button>
-    )),
-  decision: ({ props, open, respond }) => (
-    <button disabled={!open} onClick={() => respond(Decision.answerAll(props, "approved"))}>
-      Approve
-    </button>
-  )
+    ))
 })
 ```
 
@@ -455,13 +458,13 @@ The [guides](./apps/docs/guide) cover each piece in depth, and the API reference
 
 ## This repository
 
-| Path                        | What                                                                                            |
-| --------------------------- | ----------------------------------------------------------------------------------------------- |
-| `packages/effect-assistant` | The library.                                                                                    |
-| `packages/demo/api`         | A demo server for a fictional company, Acme: tools, approvals, prompts, durable workflows, RPC. |
-| `packages/demo/shared`      | What the demo's web app and API share: RPCs, UI blocks, ids, demo data.                         |
-| `apps/web`                  | The demo's chat UI.                                                                             |
-| `apps/docs`                 | The docs site.                                                                                  |
+| Path                        | What                                                                                                            |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `packages/effect-assistant` | The library.                                                                                                    |
+| `packages/demo/api`         | A demo server for a fictional company, Acme: tools, orders placed from blocks, prompts, durable workflows, RPC. |
+| `packages/demo/shared`      | What the demo's web app and API share: RPCs, UI blocks, ids, demo data.                                         |
+| `apps/web`                  | The demo's chat UI.                                                                                             |
+| `apps/docs`                 | The docs site.                                                                                                  |
 
 ```bash
 pnpm install

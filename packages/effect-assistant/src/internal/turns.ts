@@ -18,12 +18,10 @@ import type * as AssistantLoop from "../AssistantLoop.ts"
 import * as Loop from "./loop.ts"
 import type * as BlockKit from "../BlockKit.ts"
 import type { CurrentChat } from "../CurrentChat.ts"
-import * as Decision from "../Decision.ts"
 import * as Instructions from "../Instructions.ts"
 import * as Skill from "../Skill.ts"
 import * as Skills from "./skills.ts"
 import type * as Specialist from "../Specialist.ts"
-import * as Decisions from "./decisions.ts"
 import * as AppEvents from "./events.ts"
 import * as History from "./history.ts"
 import { mapText } from "./instructions.ts"
@@ -86,12 +84,6 @@ export const register = Effect.fnUntraced(function* (
   options: { readonly open: Registration["open"] }
 ) {
   const model = yield* Effect.context<LanguageModel.LanguageModel>()
-
-  const decisionBlock = definition.blocks?.byKind.get(Decision.kind)
-
-  if (decisionBlock !== undefined && decisionBlock !== Decision.block) {
-    return yield* Effect.die(`The ${Decision.kind} block kind is the library's: use Decision.block.`)
-  }
 
   const specialists = yield* Effect.forEach(
     definition.specialists,
@@ -172,10 +164,7 @@ const closeOpenCalls = Effect.fnUntraced(function* (chat: Writer, startSeq: numb
     entries.flatMap(({ event }) => (Predicate.isTagged(event, "ToolStarted") ? [event.callId] : []))
   )
 
-  // Approved calls this turn started that have no result are cut off like any other; one not started yet waits.
-  const all = yield* chat.entries
-  const approved = Decisions.approvedCalls(all).filter((call) => started.has(call.id))
-  const open = [...History.unansweredCalls(History.fromEntries(entries, () => undefined)), ...approved]
+  const open = History.unansweredCalls(History.fromEntries(entries, () => undefined))
 
   if (open.length === 0) return
 
@@ -335,23 +324,15 @@ const makeTurnApi = (
       const { system, toolkit, view } = prepare(options)
       const twice = Toolkits.duplicateNames(toolkit)
 
-      const deciding = toolkit.definitions.filter(
-        (tool) => tool.needsApproval !== undefined && tool.needsApproval !== false
-      )
-
       const loop =
         twice.length > 0
           ? Stream.die(`Tool names used twice, like one named after a built-in: ${twice.join(", ")}`)
-          : deciding.length > 0 && definition.blocks?.byKind.get(Decision.kind) === undefined
-            ? Stream.die(
-                `${deciding.map((tool) => tool.name).join(", ")} can wait for the user's decision: add Decision.block to the assistant's blocks.`
-              )
-            : Loop.run({
-                instructions: system,
-                toolkit,
-                history: history(view),
-                maxSteps: options.maxSteps ?? 16
-              })
+          : Loop.run({
+              instructions: system,
+              toolkit,
+              history: history(view),
+              maxSteps: options.maxSteps ?? 16
+            })
 
       return Stream.concat(loop, replyPass({ instructions: system, toolkit, view, nudge: options.replyNudge }))
     }

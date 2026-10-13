@@ -12,7 +12,6 @@ import * as Response from "effect/ai/Response"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import { ChatId } from "./ChatId.ts"
-import { DecisionId } from "./DecisionId.ts"
 import { InputId, make as makeInputId } from "./InputId.ts"
 import { RunId } from "./RunId.ts"
 
@@ -137,69 +136,6 @@ export class SpecialistFinished extends Schema.TaggedClass<SpecialistFinished>()
   status: Schema.Literals(["answered", "failed", "stopped", "cut_off"]),
   report: Schema.optional(Schema.String),
   error: Schema.optional(Schema.String)
-}) {}
-
-/**
- * Schema for how the user decided, either `"approved"` or `"declined"`.
- *
- * @category schemas
- * @since 0.1.0
- */
-export const DecisionOutcome = Schema.Literals(["approved", "declined"])
-
-/**
- * Represents how the user decided.
- *
- * @category models
- * @since 0.1.0
- */
-export type DecisionOutcome = typeof DecisionOutcome.Type
-
-/**
- * Schema for the origin of a decision that a tool call waits for.
- *
- * It holds the call as the model wrote it. Approving the decision runs exactly this call.
- *
- * @category schemas
- * @since 0.1.0
- */
-export const CallOrigin = Schema.TaggedStruct("Call", {
-  callId: Schema.String,
-  tool: Schema.String,
-  params: Schema.Json
-})
-
-/**
- * Represents the origin of a decision that a tool call waits for.
- *
- * @category models
- * @since 0.1.0
- */
-export type CallOrigin = typeof CallOrigin.Type
-
-/**
- * Represents a request for the user to decide something, by approving or declining it.
- *
- * @category schemas
- * @since 0.1.0
- */
-export class DecisionRequested extends Schema.TaggedClass<DecisionRequested>()("DecisionRequested", {
-  id: DecisionId,
-  origin: CallOrigin
-}) {}
-
-/**
- * Represents a decision the user made by answering a decision block for it.
- *
- * `answer` is the id of that `BlockAnswer`. An approved call runs at the turn's next step.
- *
- * @category schemas
- * @since 0.1.0
- */
-export class DecisionResolved extends Schema.TaggedClass<DecisionResolved>()("DecisionResolved", {
-  id: DecisionId,
-  outcome: DecisionOutcome,
-  answer: InputId
 }) {}
 
 /**
@@ -481,8 +417,6 @@ export const AssistantEvent = Schema.Union([
   SpecialistStarted,
   SpecialistFinished,
   BlocksClosed,
-  DecisionRequested,
-  DecisionResolved,
   ChatDeleted
 ])
 

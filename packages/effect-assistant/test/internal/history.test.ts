@@ -2,8 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import type * as Prompt from "effect/ai/Prompt"
 import * as Response from "effect/ai/Response"
 import * as Effect from "effect/Effect"
-import { AssistantEvent, ChatId, Decision, DecisionId, InputId, RunId } from "../../src/index.ts"
-import * as Decisions from "../../src/internal/decisions.ts"
+import { AssistantEvent, ChatId, InputId, RunId } from "../../src/index.ts"
 import * as History from "../../src/internal/history.ts"
 import { say } from "../utils/fixtures.ts"
 
@@ -185,139 +184,47 @@ describe("History.fromEntries, a finished specialist run", () => {
   })
 })
 
-describe("History.fromEntries, decisions", () => {
-  const params = { sku: "tote", quantity: 300 }
-  const id = DecisionId.fromCallId("a")
-
-  const parked = [
-    say("order 300 totes"),
-    TurnStarted.make({ assistant: "test" }),
-    ModelOutput.make({
-      parts: [
-        Response.makePart("tool-call", {
-          id: "a",
-          name: "place_order",
-          params,
-          providerExecuted: false
-        })
-      ],
-      seenThroughSeq: 2
-    }),
-    AssistantEvent.DecisionRequested.make({
-      id,
-      origin: AssistantEvent.CallOrigin.make({ callId: "a", tool: "place_order", params })
-    }),
-    ModelOutput.make({ parts: [call("b", "send_user_message")], seenThroughSeq: 4 }),
-    result("b", "send_user_message"),
-    AssistantEvent.AssistantMessage.make({
-      id: "m",
-      text: "Place it?",
-      block: AssistantEvent.MessageBlock.make({
-        kind: Decision.kind,
-        props: { decisionIds: [id] }
-      })
-    }),
-    AssistantEvent.TurnCompleted.make({ throughSeq: 7 })
-  ]
-
-  const answer = (outcome: AssistantEvent.DecisionOutcome) =>
-    AssistantEvent.BlockAnswer.make({
-      id: InputId.fromKey("m:answer"),
-      messageId: "m",
-      kind: Decision.kind,
-      value: { decisions: { [id]: outcome } }
-    })
-
-  const resolved = (outcome: AssistantEvent.DecisionOutcome) =>
-    AssistantEvent.DecisionResolved.make({ id, outcome, answer: InputId.fromKey("m:answer") })
-
+describe("History.fromEntries, block answers and earlier results", () => {
   const texts = (history: ReadonlyArray<Prompt.Message>) =>
     history.flatMap((message) =>
       message.role === "user" ? [message.content.map((part) => (part.type === "text" ? part.text : "")).join("")] : []
     )
 
-  it("answers a parked call with its decision: waiting, with the decision's id", () => {
-    const history = fromEntries(entries(parked))
-
-    const [first] = history.flatMap((message) =>
-      message.role === "tool" ? message.content.flatMap((part) => (part.type === "tool-result" ? [part] : [])) : []
+  it("reads a block answer as the user's answer on that message", () => {
+    const history = fromEntries(
+      entries([
+        say("order 300 totes"),
+        AssistantEvent.AssistantMessage.make({
+          id: "m",
+          text: "Which color?",
+          block: AssistantEvent.MessageBlock.make({ kind: "choose_one", props: { options: ["red", "blue"] } })
+        }),
+        AssistantEvent.BlockAnswer.make({
+          id: InputId.fromKey("m:answer"),
+          messageId: "m",
+          kind: "choose_one",
+          value: { choice: "blue" }
+        })
+      ])
     )
 
-    expect(trace(history)).toEqual([
-      "user: order 300 totes",
-      "call: place_order",
-      "result: a",
-      "call: send_user_message",
-      "result: b"
-    ])
-    expect(first?.isFailure).toBe(false)
-    expect(first?.result).toMatchObject({
-      status: "waiting_for_decision",
-      decisionId: id
-    })
-    // Parked is answered: the loop doesn't run it again.
-    expect(History.unansweredCalls(history)).toEqual([])
-    expect(Decisions.approvedCalls(entries(parked))).toEqual([])
+    expect(texts(history).at(-1)).toEqual(
+      '<answer message="m" kind="choose_one">\nThe user answered with the block on your message m.\n{"choice":"blue"}\n</answer>'
+    )
   })
 
-  it("reads an approval, then the call's result where it ran, as the decision's", () => {
-    const approved = [...parked, answer("approved"), resolved("approved")]
-
-    // Approved and not run yet: the loop runs it, as the model made it.
-    expect(Decisions.approvedCalls(entries(approved)).map((pending) => [pending.id, pending.params])).toEqual([
-      ["a", params]
-    ])
-
-    const ran = [
-      ...approved,
-      TurnStarted.make({ assistant: "test" }),
-      ToolStarted.make({ callId: "a", tool: "place_order" }),
-      ToolResult.make({
-        callId: "a",
-        tool: "place_order",
-        outcome: "success",
-        result: { reference: "R-1" }
-      })
+  it("reads a call's result as text when a view starts after the call", () => {
+    const events = [
+      say("look up the orders"),
+      ModelOutput.make({ parts: [call("a", "order_history")], seenThroughSeq: 1 }),
+      ToolStarted.make({ callId: "a", tool: "order_history" }),
+      ToolResult.make({ callId: "a", tool: "order_history", outcome: "success", result: { orders: 3 } })
     ]
 
-    const history = fromEntries(entries(ran))
-
-    expect(texts(history).slice(-2)).toEqual([
-      `<answer message="m" kind="decision">\nThe user decided with the block on your message m:\n- ${id}: approved: place_order runs now, and its result follows.\n</answer>`,
-      `<decision id="${id}" tool="place_order" outcome="approved">\nThe user approved it, and place_order ran: success.\n{"reference":"R-1"}\n</decision>`
-    ])
-    // One result per call: the run's reads as a message, not a second tool result.
-    expect(trace(history).filter((line) => line === "result: a")).toHaveLength(1)
-    expect(History.unansweredCalls(history)).toEqual([])
-    expect(Decisions.approvedCalls(entries(ran))).toEqual([])
-  })
-
-  it("reads an approved call's result as text when a view starts after the call", () => {
-    const later = [
-      answer("approved"),
-      resolved("approved"),
-      TurnStarted.make({ assistant: "test" }),
-      ToolStarted.make({ callId: "a", tool: "place_order" }),
-      ToolResult.make({
-        callId: "a",
-        tool: "place_order",
-        outcome: "success",
-        result: { reference: "R-1" }
-      })
-    ]
-
-    // Only what came after the parked call and its request, like a view since a summary.
-    const history = fromEntries(entries([...parked, ...later]).slice(parked.length))
+    // Only what came after the call, like a view since a summary.
+    const history = fromEntries(entries(events).slice(2))
 
     expect(history.every((message) => message.role === "user")).toBe(true)
-    expect(texts(history).at(-1)).toContain('<result tool="place_order" call="a" outcome="success">')
-  })
-
-  it("reads a decline as a call that didn't run", () => {
-    const declined = [...parked, answer("declined"), resolved("declined")]
-    const history = fromEntries(entries(declined))
-
-    expect(texts(history).at(-1)).toContain(`- ${id}: declined: place_order didn't run, and won't.`)
-    expect(Decisions.approvedCalls(entries(declined))).toEqual([])
+    expect(texts(history).at(-1)).toContain('<result tool="order_history" call="a" outcome="success">')
   })
 })

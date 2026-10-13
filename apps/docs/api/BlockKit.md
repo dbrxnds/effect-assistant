@@ -108,8 +108,7 @@ export const fromEntries = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): Re
  *
  * **Details**
  *
- * These are the blocks {@link closeStale} closes. Decision blocks never go stale, since work waits
- * on them and closing one would leave it waiting.
+ * These are the blocks {@link closeStale} closes.
  *
  * @category utils
  * @since 0.1.0
@@ -126,15 +125,7 @@ export const staleBlocks = (
         AssistantEvent.isLibraryEvent(event) && Predicate.isTagged(event, "AssistantMessage") && event.id === id
     )
 
-    const message = entries[shown]?.event
-
-    if (
-      message === undefined ||
-      (AssistantEvent.isLibraryEvent(message) &&
-        Predicate.isTagged(message, "AssistantMessage") &&
-        message.block?.kind === Decision.kind)
-    )
-      return false
+    if (shown === -1) return false
 
     const typed = entries.slice(shown + 1).filter(({ event }) => Predicate.isTagged(event, "UserMessage")).length
 
@@ -160,11 +151,6 @@ interface RenderArgs<B> {
   readonly open: boolean
   /** The user's answer, if they used the block. */
   readonly answer: AnswerOf<B> | undefined
-  /**
-   * For the decision block, the call each decision is for (its tool and params) and how it was
-   * decided. Empty for other blocks.
-   */
-  readonly decisions: ReadonlyArray<ChatView.PendingDecision>
   /** Sends an answer. Only call it while `open`. */
   readonly respond: (answer: AnswerOf<B>) => void
 }
@@ -206,10 +192,10 @@ export interface RenderOptions {
  * **Example** (Rendering blocks with React)
  *
  * ```tsx
- * import { BlockKit, Decision } from "effect-assistant"
+ * import { BlockKit } from "effect-assistant"
  * import type { ReactNode } from "react"
  *
- * const Blocks = BlockKit.make([PickOne, Decision.block])
+ * const Blocks = BlockKit.make([PickOne, OrderDraft])
  *
  * const renderBlock = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
  *   pick_one: ({ props, open, respond }) =>
@@ -218,11 +204,8 @@ export interface RenderOptions {
  *         {option}
  *       </button>
  *     )),
- *   decision: ({ props, open, respond }) => (
- *     <button disabled={!open} onClick={() => respond(Decision.answerAll(props, "approved"))}>
- *       {props.approveLabel ?? "Approve"}
- *     </button>
- *   )
+ *   // No answer schema: the button calls the app's own API with the props the user sees.
+ *   order_draft: ({ props }) => <button onClick={() => placeOrder(props)}>Place order</button>
  * })
  *
  * // For each AssistantMessage in the chat's view:
@@ -266,7 +249,6 @@ export function toClient<Out>(
       props: props.value,
       open: message.block.status === "open",
       answer: Option.getOrUndefined(answer),
-      decisions: message.block.decisions ?? [],
       respond: (value) =>
         options.respond(
           AssistantEvent.BlockAnswer.make({
@@ -341,8 +323,7 @@ number of messages without using them.
 
 **Details**
 
-These are the blocks `closeStale` closes. Decision blocks never go stale, since work waits
-on them and closing one would leave it waiting.
+These are the blocks `closeStale` closes.
 
 ```ts
 const staleBlocks: (

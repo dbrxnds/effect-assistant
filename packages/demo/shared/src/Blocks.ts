@@ -6,7 +6,6 @@
  */
 import * as Block from "effect-assistant/Block"
 import * as BlockKit from "effect-assistant/BlockKit"
-import * as Decision from "effect-assistant/Decision"
 import * as Schema from "effect/Schema"
 
 /**
@@ -37,11 +36,51 @@ export const TextInput = Block.make("text_input", {
 })
 
 /**
- * Every block Acme can use. Orders and campaigns are approved with the
- * library's decision block: a plain choice is a block like the others, an
- * approval is a decision.
+ * A product order ready to place, with a Place order button. It has no
+ * answer: the button places the order through Acme's API (`PlaceOrder`)
+ * with exactly these props, and the API tells the chat.
  *
  * @category blocks
  * @since 0.1.0
  */
-export const Blocks = BlockKit.make([ChooseOne, TextInput, Decision.block])
+export const OrderDraft = Block.make("order_draft", {
+  description:
+    "A product order ready to place, from quote_order, with a Place order button. Only the user places it, with the button; you hear back when they do.",
+  props: Schema.Struct({
+    office: Schema.String,
+    product: Schema.String,
+    quantity: Schema.Int,
+    total: Schema.Finite.annotate({ description: "In USD, from quote_order." }),
+    remainingBudget: Schema.Finite.annotate({ description: "The office's budget left after it, from quote_order." })
+  })
+})
+
+/**
+ * A campaign ready to start, with a Start campaign button. It has no answer:
+ * the button starts the campaign through Acme's API (`StartCampaign`) with
+ * exactly these props, and the API tells the chat.
+ *
+ * @category blocks
+ * @since 0.1.0
+ */
+export const CampaignDraft = Block.make("campaign_draft", {
+  description:
+    "A campaign ready to start, with a Start campaign button. Only the user starts it, with the button; you hear back when they do.",
+  props: Schema.Struct({
+    campaignId: Schema.String.annotate({ description: "From list_campaign_products." }),
+    campaign: Schema.String.annotate({ description: "The campaign product's name." }),
+    office: Schema.String.annotate({ description: "The office paying for it." }),
+    audience: Schema.String,
+    budget: Schema.Finite.annotate({ description: "In USD." })
+  })
+})
+
+/**
+ * Every block Acme can use. A choice or a short answer goes back to Acme as
+ * the block's answer; an order or a campaign is placed by the user from its
+ * block, through Acme's API.
+ *
+ * @category blocks
+ * @since 0.1.0
+ */
+export const Blocks = BlockKit.make([ChooseOne, TextInput, OrderDraft, CampaignDraft])
