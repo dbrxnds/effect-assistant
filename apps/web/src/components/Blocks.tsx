@@ -1,28 +1,37 @@
 /**
  * Renderers for the blocks Acme can put in a message. Each message's view
  * says where its block stands. Answering sends a `BlockAnswer`; once
- * answered, a block shows the answer and stops taking input.
+ * answered, a block shows the answer and stops taking input. An order or a
+ * campaign has no answer: its button places it through the API, which tells
+ * the chat.
  */
-import { Blocks } from "@acme/demo-shared/Blocks"
+import { useAtomSet } from "@effect/atom-react"
+import { Blocks, type CampaignDraft, type OrderDraft } from "@acme/demo-shared/Blocks"
+import { OrderRefused } from "@acme/demo-shared/Rpc"
 import type * as AssistantEvent from "effect-assistant/AssistantEvent"
 import * as BlockKit from "effect-assistant/BlockKit"
+import type * as ChatId from "effect-assistant/ChatId"
 import type * as ChatView from "effect-assistant/ChatView"
-import * as Decision from "effect-assistant/Decision"
+import * as Exit from "effect/Exit"
+import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import { createContext, type ReactNode, useContext, useState } from "react"
+import * as AcmeRpc from "~/lib/AcmeRpc.ts"
 
-/** What block renderers need from the page: the messages, and a way to answer. */
+/** What block renderers need from the page: the chat, its messages, and a way to answer. */
 export interface BlockContextValue {
+  readonly chatId: ChatId.ChatId | undefined
   readonly byId: ReadonlyMap<string, ChatView.Message>
   readonly respond: (answer: AssistantEvent.BlockAnswer) => void
 }
 
 export const BlockContext = createContext<BlockContextValue>({
+  chatId: undefined,
   byId: new Map(),
   respond: () => {}
 })
 
-/** A call's params, one per line: what the user decides on. */
+/** What a block shows, one per line: what the user places. */
 function Preview(props: { readonly value: unknown }) {
   if (!Predicate.isObject(props.value) || Array.isArray(props.value)) return null
 
@@ -38,35 +47,93 @@ function Preview(props: { readonly value: unknown }) {
   )
 }
 
-/** Approve / decline for the decisions a message asks for, with what each one is about. */
-function DecisionBlock(props: {
-  readonly block: Decision.Props
-  readonly decisions: ReadonlyArray<ChatView.PendingDecision>
+type Placed = Exit.Exit<{ readonly reference: string }, { readonly _tag: string }>
+
+/** Why the API refused, or a generic line when it didn't say. */
+const refusal = (exit: Placed) =>
+  Option.match(Exit.findErrorOption(exit), {
+    onNone: () => "Couldn't place it. Try again.",
+    onSome: (error) => (error instanceof OrderRefused ? error.message : "Couldn't place it. Try again.")
+  })
+
+/** The message whose block is rendering: the API places one order per block. */
+const CurrentMessage = createContext<string | undefined>(undefined)
+
+/**
+ * What the block shows, and a button that places it through the API. The
+ * API tells the chat, and Acme follows up with the reference.
+ */
+function PlaceBlock(props: {
+  readonly shows: object
+  readonly label: string
   readonly open: boolean
-  readonly respond: (answer: Decision.Answer) => void
+  readonly place: () => Promise<Placed>
 }) {
-  const [clicked, setClicked] = useState<AssistantEvent.DecisionOutcome | undefined>(undefined)
-  const decided = props.decisions.find((decision) => decision.outcome !== undefined)?.outcome ?? clicked
-  const approve = props.block.approveLabel ?? "Approve"
-  const decline = props.block.declineLabel ?? "Decline"
+  const [busy, setBusy] = useState(false)
+  const [placed, setPlaced] = useState<string | undefined>(undefined)
+  const [refused, setRefused] = useState<string | undefined>(undefined)
+
+  const onClick = async () => {
+    setBusy(true)
+    setRefused(undefined)
+
+    const exit = await props.place()
+
+    setBusy(false)
+
+    if (Exit.isSuccess(exit)) setPlaced(exit.value.reference)
+    else setRefused(refusal(exit))
+  }
 
   return (
-    <div className="block-decision">
-      {props.decisions.map((decision) => (
-        <Preview key={decision.id} value={decision.params} />
-      ))}
-      <ChooseOne
-        options={[approve, decline]}
-        open={props.open && decided === undefined}
-        picked={decided === undefined ? undefined : decided === "approved" ? approve : decline}
-        onPick={(label) => {
-          const outcome = label === approve ? "approved" : "declined"
-
-          setClicked(outcome)
-          props.respond(Decision.answerAll(props.block, outcome))
-        }}
-      />
+    <div className="block-place">
+      <Preview value={props.shows} />
+      <div className="block-options">
+        <button
+          type="button"
+          className={placed === undefined ? undefined : "picked"}
+          disabled={!props.open || busy || placed !== undefined}
+          onClick={() => void onClick()}
+        >
+          {placed === undefined ? props.label : `Placed: ${placed}`}
+        </button>
+      </div>
+      {refused === undefined ? null : <p className="block-refused">{refused}</p>}
     </div>
+  )
+}
+
+function OrderBlock(props: { readonly order: typeof OrderDraft.props.Type; readonly open: boolean }) {
+  const { chatId } = useContext(BlockContext)
+  const messageId = useContext(CurrentMessage)
+  const placeOrder = useAtomSet(AcmeRpc.placeOrder, { mode: "promiseExit" })
+
+  if (chatId === undefined || messageId === undefined) return null
+
+  return (
+    <PlaceBlock
+      shows={props.order}
+      label="Place order"
+      open={props.open}
+      place={() => placeOrder({ payload: { chatId, messageId, order: props.order } })}
+    />
+  )
+}
+
+function CampaignBlock(props: { readonly campaign: typeof CampaignDraft.props.Type; readonly open: boolean }) {
+  const { chatId } = useContext(BlockContext)
+  const messageId = useContext(CurrentMessage)
+  const startCampaign = useAtomSet(AcmeRpc.startCampaign, { mode: "promiseExit" })
+
+  if (chatId === undefined || messageId === undefined) return null
+
+  return (
+    <PlaceBlock
+      shows={props.campaign}
+      label="Start campaign"
+      open={props.open}
+      place={() => startCampaign({ payload: { chatId, messageId, campaign: props.campaign } })}
+    />
   )
 }
 
@@ -141,9 +208,8 @@ const render = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
   choose_one: ({ props, open, answer, respond }) => (
     <ChooseOne options={props.options} open={open} picked={answer?.choice} onPick={(choice) => respond({ choice })} />
   ),
-  decision: ({ props, decisions, open, respond }) => (
-    <DecisionBlock block={props} decisions={decisions} open={open} respond={respond} />
-  ),
+  order_draft: ({ props, open }) => <OrderBlock order={props} open={open} />,
+  campaign_draft: ({ props, open }) => <CampaignBlock campaign={props} open={open} />,
   text_input: ({ props, open, answer, respond }) => (
     <TextInput
       placeholder={props.placeholder}
@@ -161,5 +227,5 @@ export function MessageBlock(props: { readonly messageId: string }) {
 
   if (message === undefined || !Predicate.isTagged(message, "AssistantMessage")) return null
 
-  return render(message, { respond }) ?? null
+  return <CurrentMessage.Provider value={message.id}>{render(message, { respond }) ?? null}</CurrentMessage.Provider>
 }

@@ -7,6 +7,10 @@
  * folds the updates and renders them; it never gets the assistant's own work
  * (model output, tool calls, workflow steps).
  *
+ * `PlaceOrder` and `StartCampaign` are the buttons on an order or campaign
+ * block: the user commits with exactly what the block shows, and the API
+ * tells the chat, which wakes Acme to follow up.
+ *
  * @since 0.1.0
  */
 import * as AssistantEvent from "effect-assistant/AssistantEvent"
@@ -16,6 +20,7 @@ import * as ChatView from "effect-assistant/ChatView"
 import * as Schema from "effect/Schema"
 import * as Rpc from "effect/rpc/Rpc"
 import * as RpcGroup from "effect/rpc/RpcGroup"
+import { CampaignDraft, OrderDraft } from "./Blocks.ts"
 import { ChatList } from "./ChatList.ts"
 
 /**
@@ -73,9 +78,47 @@ export const DeleteChat = Rpc.make("DeleteChat", {
 })
 
 /**
+ * Why the API didn't place an order or start a campaign, for the user to
+ * read, like an office that no longer has the budget.
+ *
+ * @category errors
+ * @since 0.1.0
+ */
+export class OrderRefused extends Schema.Error<OrderRefused>("acme/OrderRefused")({
+  _tag: Schema.tag("OrderRefused"),
+  message: Schema.String
+}) {}
+
+/**
+ * Places the product order an `order_draft` block shows. Once per block: a
+ * second click returns the same reference.
+ *
+ * @category rpcs
+ * @since 0.1.0
+ */
+export const PlaceOrder = Rpc.make("PlaceOrder", {
+  payload: { chatId: ChatId.ChatId, messageId: Schema.String, order: OrderDraft.props },
+  success: Schema.Struct({ reference: Schema.String }),
+  error: Schema.Union([OrderRefused, Chats.GetChatError])
+})
+
+/**
+ * Starts the campaign a `campaign_draft` block shows. Once per block: a
+ * second click returns the same reference.
+ *
+ * @category rpcs
+ * @since 0.1.0
+ */
+export const StartCampaign = Rpc.make("StartCampaign", {
+  payload: { chatId: ChatId.ChatId, messageId: Schema.String, campaign: CampaignDraft.props },
+  success: Schema.Struct({ reference: Schema.String }),
+  error: Schema.Union([OrderRefused, Chats.GetChatError])
+})
+
+/**
  * Every RPC the API serves.
  *
  * @category rpcs
  * @since 0.1.0
  */
-export const AcmeRpcs = RpcGroup.make(Subscribe, Submit, ListChats, CreateChat, DeleteChat)
+export const AcmeRpcs = RpcGroup.make(Subscribe, Submit, ListChats, CreateChat, DeleteChat, PlaceOrder, StartCampaign)

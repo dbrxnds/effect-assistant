@@ -11,21 +11,22 @@
  *   works.
  * - interrupt: a second question while the assistant works on the first; both get
  *   answered.
- * - campaign: order with office, audience, and budget up front; approve the
- *   workflow's decision with the decision block; the assistant reports going
+ * - campaign: order with office, audience, and budget up front; start it with
+ *   the campaign block's button (`StartCampaign`); the assistant reports going
  *   live and the first results.
- * - products: order tote bags; approve the order's decision; the assistant
- *   reports shipping (with tracking) and delivery.
+ * - products: order tote bags; place it with the order block's button
+ *   (`PlaceOrder`); the assistant reports shipping (with tracking) and
+ *   delivery.
  * - research: a performance report across campaigns, from the research
  *   specialist, in the background.
  *
  * Scenarios run at the same time, in separate chats.
  */
+import { CampaignDraft, OrderDraft } from "@acme/demo-shared/Blocks"
 import { AcmeRpcs } from "@acme/demo-shared/Rpc"
 import * as AssistantEvent from "effect-assistant/AssistantEvent"
 import type * as ChatId from "effect-assistant/ChatId"
 import * as ChatView from "effect-assistant/ChatView"
-import * as Decision from "effect-assistant/Decision"
 import * as InputId from "effect-assistant/InputId"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -138,11 +139,7 @@ const program = Effect.gen(function* () {
   })
 
   /** Uses a block the way the web app does. */
-  const answer = (
-    chatId: ChatId.ChatId,
-    message: ChatView.AssistantMessage,
-    value: Record<string, string | boolean> | Decision.Answer
-  ) =>
+  const answer = (chatId: ChatId.ChatId, message: ChatView.AssistantMessage, value: Record<string, string | boolean>) =>
     client.Submit({
       chatId,
       input: AssistantEvent.BlockAnswer.make({
@@ -153,20 +150,26 @@ const program = Effect.gen(function* () {
       })
     })
 
-  /** Waits for the decision block, and approves everything it asks for. */
-  const approve = Effect.fn(function* (chatId: ChatId.ChatId, label: string) {
+  /** Waits for the order or campaign block, and clicks its button the way the web app does. */
+  const place = Effect.fn(function* (chatId: ChatId.ChatId, label: string, kind: "order_draft" | "campaign_draft") {
     const asked = yield* waitFor(
       chatId,
-      `${label}: decision block`,
-      (es) => blockMessages(es, Decision.kind).length > 0 && idle(es),
+      `${label}: ${kind} block`,
+      (es) => blockMessages(es, kind).length > 0 && idle(es),
       150
     )
 
-    const ask = blockMessages(asked, Decision.kind)[0]!
-    const props = yield* Schema.decodeUnknownEffect(Decision.Props)(ask.block!.props).pipe(Effect.orDie)
+    const ask = blockMessages(asked, kind)[0]!
 
-    console.log(`     ${label} > ${oneLine(ask.text)} [decision]`)
-    yield* answer(chatId, ask, Decision.answerAll(props, "approved"))
+    console.log(`     ${label} > ${oneLine(ask.text)} [${kind}]`)
+
+    if (kind === "order_draft") {
+      const order = yield* Schema.decodeUnknownEffect(OrderDraft.props)(ask.block!.props).pipe(Effect.orDie)
+      yield* client.PlaceOrder({ chatId, messageId: ask.id, order })
+    } else {
+      const campaign = yield* Schema.decodeUnknownEffect(CampaignDraft.props)(ask.block!.props).pipe(Effect.orDie)
+      yield* client.StartCampaign({ chatId, messageId: ask.id, campaign })
+    }
   })
 
   const timed = Effect.fn(function* <A, E, R>(label: string, effect: Effect.Effect<A, E, R>) {
@@ -229,7 +232,7 @@ const program = Effect.gen(function* () {
   )
 
   const campaign = timed(
-    "campaign: approval, live, first results",
+    "campaign: started from its block, live, first results",
     Effect.gen(function* () {
       const chatId = yield* newChat
       yield* send(
@@ -237,7 +240,7 @@ const program = Effect.gen(function* () {
         "Order the Summer Campaign for the Amsterdam office, for parents in Austin planning trips, budget $4,000."
       )
 
-      yield* approve(chatId, "campaign")
+      yield* place(chatId, "campaign", "campaign_draft")
 
       const done = yield* waitFor(chatId, "first results", (views) => said(views, /conversion|clicks/i), 240)
 
@@ -246,11 +249,11 @@ const program = Effect.gen(function* () {
   )
 
   const products = timed(
-    "products: approval, shipped, delivered",
+    "products: placed from its block, shipped, delivered",
     Effect.gen(function* () {
       const chatId = yield* newChat
       yield* send(chatId, "Please order 300 cotton tote bags for the Berlin office.")
-      yield* approve(chatId, "products")
+      yield* place(chatId, "products", "order_draft")
 
       // The tracking number is only in the workflow's shipped step: the assistant shared it.
       const shipped = yield* waitFor(chatId, "shipped, with tracking", (views) => said(views, /1Z/), 240)

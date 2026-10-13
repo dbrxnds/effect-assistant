@@ -64,10 +64,11 @@ export function AcmeChatPage() {
 
   const blocks = useMemo<BlockContextValue>(
     () => ({
+      chatId,
       byId: new Map(state.messages.map((message) => [message.id, message])),
       respond: (answer) => void send(answer)
     }),
-    [state.messages, send]
+    [chatId, state.messages, send]
   )
 
   const openChat = (next: ChatId.ChatId) => {

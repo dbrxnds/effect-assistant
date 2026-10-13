@@ -598,8 +598,14 @@ body,
   opacity: 0.4;
 }
 
-.block-decision {
+.block-place {
   margin-top: 6px;
+}
+
+.block-refused {
+  margin: 6px 0 0;
+  color: #9a3412;
+  font-size: 13px;
 }
 
 .block-preview {
