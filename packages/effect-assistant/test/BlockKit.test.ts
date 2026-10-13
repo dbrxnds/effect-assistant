@@ -47,10 +47,10 @@ const answer = (messageId: string, value: string) =>
 
 describe("BlockKit.toClient", () => {
   const render = BlockKit.toClient(kit, {
-    choose_one: ({ text, props, answer, respond }) => {
+    choose_one: ({ messageId, text, props, answer, respond }) => {
       if (answer === undefined) respond({ choice: props.options[1]! })
 
-      return answer === undefined ? `${text}: ${props.options.join("/")}` : `picked ${answer.choice}`
+      return answer === undefined ? `${messageId} ${text}: ${props.options.join("/")}` : `picked ${answer.choice}`
     },
     pick_date: ({ props, respond }) => {
       respond({ date: new Date("2026-10-01T00:00:00Z") })
@@ -66,7 +66,7 @@ describe("BlockKit.toClient", () => {
       respond: (a) => sent.push(a)
     })
 
-    expect(out).toBe("Pick one: red/blue")
+    expect(out).toBe("m1 Pick one: red/blue")
     expect(sent[0]).toBeInstanceOf(AssistantEvent.BlockAnswer)
     expect(sent[0]).toMatchObject({
       messageId: "m1",

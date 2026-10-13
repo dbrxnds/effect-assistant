@@ -170,6 +170,11 @@ export const closeStale = Effect.fn(function* (options: { readonly messages: num
  * @since 0.1.0
  */
 export interface RenderArgs<B> {
+  /**
+   * The id of the message the block is on. A block whose button calls your API can key the work
+   * on it, with the chat's id, so the work runs once per block.
+   */
+  readonly messageId: string
   readonly text: string
   readonly props: PropsOf<B>
   /**
@@ -273,6 +278,7 @@ export function toClient<Out>(
       given === undefined || answerCodec === undefined ? Option.none() : Schema.decodeUnknownOption(answerCodec)(given)
 
     return render({
+      messageId: message.id,
       text: message.text,
       props: props.value,
       open: message.block.status === "open",

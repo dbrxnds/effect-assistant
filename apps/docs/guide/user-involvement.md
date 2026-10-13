@@ -87,13 +87,13 @@ send_user_message({
 })
 ```
 
-On the client, the renderer gets the props and calls your API. A block
-without an answer schema has nothing to `respond` with:
+On the client, the renderer gets the props and the id of the message the block is on, and
+calls your API. A block without an answer schema has nothing to `respond` with:
 
 ```tsx
 const render = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
-  order_draft: ({ props }) => (
-    <button onClick={() => placeOrder({ chatId, messageId: message.id, order: props })}>Place order</button>
+  order_draft: ({ messageId, props }) => (
+    <button onClick={() => placeOrder({ chatId, messageId, order: props })}>Place order</button>
   )
 })
 ```

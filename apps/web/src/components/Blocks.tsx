@@ -57,7 +57,6 @@ const refusal = (exit: Placed) =>
   })
 
 /** The message whose block is rendering: the API places one order per block. */
-const CurrentMessage = createContext<string | undefined>(undefined)
 
 /**
  * What the block shows, and a button that places it through the API. The
@@ -103,36 +102,42 @@ function PlaceBlock(props: {
   )
 }
 
-function OrderBlock(props: { readonly order: typeof OrderDraft.props.Type; readonly open: boolean }) {
+function OrderBlock(props: {
+  readonly order: typeof OrderDraft.props.Type
+  readonly messageId: string
+  readonly open: boolean
+}) {
   const { chatId } = useContext(BlockContext)
-  const messageId = useContext(CurrentMessage)
   const placeOrder = useAtomSet(AcmeRpc.placeOrder, { mode: "promiseExit" })
 
-  if (chatId === undefined || messageId === undefined) return null
+  if (chatId === undefined) return null
 
   return (
     <PlaceBlock
       shows={props.order}
       label="Place order"
       open={props.open}
-      place={() => placeOrder({ payload: { chatId, messageId, order: props.order } })}
+      place={() => placeOrder({ payload: { chatId, messageId: props.messageId, order: props.order } })}
     />
   )
 }
 
-function CampaignBlock(props: { readonly campaign: typeof CampaignDraft.props.Type; readonly open: boolean }) {
+function CampaignBlock(props: {
+  readonly campaign: typeof CampaignDraft.props.Type
+  readonly messageId: string
+  readonly open: boolean
+}) {
   const { chatId } = useContext(BlockContext)
-  const messageId = useContext(CurrentMessage)
   const startCampaign = useAtomSet(AcmeRpc.startCampaign, { mode: "promiseExit" })
 
-  if (chatId === undefined || messageId === undefined) return null
+  if (chatId === undefined) return null
 
   return (
     <PlaceBlock
       shows={props.campaign}
       label="Start campaign"
       open={props.open}
-      place={() => startCampaign({ payload: { chatId, messageId, campaign: props.campaign } })}
+      place={() => startCampaign({ payload: { chatId, messageId: props.messageId, campaign: props.campaign } })}
     />
   )
 }
@@ -208,8 +213,8 @@ const render = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
   choose_one: ({ props, open, answer, respond }) => (
     <ChooseOne options={props.options} open={open} picked={answer?.choice} onPick={(choice) => respond({ choice })} />
   ),
-  order_draft: ({ props, open }) => <OrderBlock order={props} open={open} />,
-  campaign_draft: ({ props, open }) => <CampaignBlock campaign={props} open={open} />,
+  order_draft: ({ messageId, props, open }) => <OrderBlock order={props} messageId={messageId} open={open} />,
+  campaign_draft: ({ messageId, props, open }) => <CampaignBlock campaign={props} messageId={messageId} open={open} />,
   text_input: ({ props, open, answer, respond }) => (
     <TextInput
       placeholder={props.placeholder}
@@ -227,5 +232,5 @@ export function MessageBlock(props: { readonly messageId: string }) {
 
   if (message === undefined || !Predicate.isTagged(message, "AssistantMessage")) return null
 
-  return <CurrentMessage.Provider value={message.id}>{render(message, { respond }) ?? null}</CurrentMessage.Provider>
+  return render(message, { respond }) ?? null
 }
