@@ -174,7 +174,7 @@ describe("turn completion", () => {
               providerExecuted: false
             })
           ],
-          seenThroughSeq: 1
+          seenThroughSequence: 1
         }),
         AssistantEvent.ToolStarted.make({ callId, tool: "send_user_message" }),
         AssistantEvent.AssistantMessage.make({
@@ -240,7 +240,7 @@ describe("turn completion", () => {
                 Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(submitted)), Effect.as("held"))
             }),
             (handlers) =>
-              turn.loop({ instructions: "Be brief.", toolkit: HoldTools }).pipe(Stream.provideContext(handlers))
+              turn.run({ instructions: "Be brief.", toolkit: HoldTools }).pipe(Stream.provideContext(handlers))
           )
         )
 

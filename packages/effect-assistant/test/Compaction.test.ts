@@ -10,7 +10,7 @@ import * as Scripted from "./utils/scripted.ts"
 
 class Summary extends Schema.TaggedClass<Summary>()("Summary", {
   text: Schema.String,
-  throughSeq: Schema.Int
+  throughSequence: Schema.Int
 }) {}
 
 const Compacting = Assistant.make("compaction-test", { events: [Summary] })
@@ -29,10 +29,12 @@ const compacting = (turn: Assistant.Turn<Summary>) => {
     if (entries.some(({ event }) => event instanceof Summary)) return
 
     const { text } = yield* LanguageModel.generateText({ prompt: summarizePrompt })
-    yield* (yield* CurrentChat.CurrentChat).append(Summary.make({ text, throughSeq: entries.at(-1)?.seq ?? 0 }))
+    yield* (yield* CurrentChat.CurrentChat).append(
+      Summary.make({ text, throughSequence: entries.at(-1)?.sequence ?? 0 })
+    )
   })
 
-  return Stream.concat(turn.loop(options), Stream.drain(Stream.fromEffect(compact)))
+  return Stream.concat(turn.run(options), Stream.drain(Stream.fromEffect(compact)))
 }
 
 describe("Compaction", () => {
@@ -82,7 +84,7 @@ describe("Compaction", () => {
       AssistantEvent.SpecialistStarted.make({ runId, specialist: "research", goal: "Compare tote suppliers" })
     ]
 
-    const entries = events.map((event, i) => AssistantEvent.Entry.make({ chatId, seq: i + 1, at: 0, event }))
+    const entries = events.map((event, i) => AssistantEvent.Entry.make({ chatId, sequence: i + 1, at: 0, event }))
 
     expect(Compaction.openItems(entries, entries.length)).toEqual(
       Option.some(
@@ -99,9 +101,9 @@ describe("Compaction", () => {
     class Shipped extends Schema.TaggedClass<Shipped>()("Shipped", { orderId: Schema.String }) {}
 
     const entries: ReadonlyArray<Assistant.Entry<Summary | Shipped>> = [
-      { chatId, seq: 1, at: 0, event: say("Order 300 totes.") },
-      { chatId, seq: 2, at: 0, event: Summary.make({ text: "They ordered totes.", throughSeq: 1 }) },
-      { chatId, seq: 3, at: 0, event: Shipped.make({ orderId: "o1" }) }
+      { chatId, sequence: 1, at: 0, event: say("Order 300 totes.") },
+      { chatId, sequence: 2, at: 0, event: Summary.make({ text: "They ordered totes.", throughSequence: 1 }) },
+      { chatId, sequence: 3, at: 0, event: Shipped.make({ orderId: "o1" }) }
     ]
 
     const viewed = history(entries)
@@ -120,7 +122,7 @@ describe("Compaction", () => {
       ToolApproval.reject({ id: "c2" })
     ]
 
-    const entries = events.map((event, i) => AssistantEvent.Entry.make({ chatId, seq: i + 1, at: 0, event }))
+    const entries = events.map((event, i) => AssistantEvent.Entry.make({ chatId, sequence: i + 1, at: 0, event }))
 
     expect(Compaction.openItems(entries, entries.length)).toEqual(
       Option.some(`Calls waiting for the user's approval:\n- your call to place_order (c1): {"quantity":300}`)

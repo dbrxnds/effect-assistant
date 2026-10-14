@@ -219,7 +219,7 @@ describe("with a real model", () => {
     }).pipe(
       Effect.provide(
         runMemory(
-          Ordering.toLayer((turn) => turn.loop({ instructions, history: placedOrders })),
+          Ordering.toLayer((turn) => turn.run({ instructions, history: placedOrders })),
           realModel
         )
       )
@@ -261,7 +261,7 @@ describe("with a real model", () => {
               providerExecuted: false
             })
           ],
-          seenThroughSeq: 2
+          seenThroughSequence: 2
         }),
         AssistantEvent.ToolStarted.make({ callId: "toolu_report_1", tool: "send_report" })
       ])

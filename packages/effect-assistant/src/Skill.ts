@@ -168,7 +168,7 @@ function toolkitOf(skills: ReadonlyArray<Skill<unknown>>): Toolkit<unknown> {
  * const AssistantSkills = Skill.toolkit([orderingCampaigns, sharingAssets])
  *
  * const MyAssistantLive = MyAssistant.toLayer((turn) =>
- *   turn.loop({ instructions, toolkit: Toolkit.merge(MyTools, AssistantSkills) })
+ *   turn.run({ instructions, toolkit: Toolkit.merge(MyTools, AssistantSkills) })
  * ).pipe(Layer.provide([MyToolsLive, AssistantSkills.layer]))
  * ```
  *

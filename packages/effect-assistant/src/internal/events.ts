@@ -95,6 +95,6 @@ export type DecodedEntries = ReturnType<typeof decodeEntries>
 
 const toEntry = (entry: AssistantEvent.AnyEntry) => ({
   chatId: entry.chatId,
-  seq: entry.seq,
+  sequence: entry.sequence,
   at: entry.at
 })

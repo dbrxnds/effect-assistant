@@ -15,7 +15,7 @@ class OrderShipped extends Schema.TaggedClass<OrderShipped>()("OrderShipped", {
   carrier: Schema.String
 }) {}
 
-class Summary extends Schema.TaggedClass<Summary>()("Summary", { text: Schema.String, throughSeq: Schema.Int }) {}
+class Summary extends Schema.TaggedClass<Summary>()("Summary", { text: Schema.String, throughSequence: Schema.Int }) {}
 
 export const MyAssistant = Assistant.make("my-assistant", { events: [OrderShipped, Summary] })
 ```
@@ -54,7 +54,7 @@ const shipments: Assistant.HistoryView<OrderShipped | Summary> = (entries) =>
       : entry
   )
 
-const MyAssistantHandlers = MyAssistant.toLayer((turn) => turn.loop({ instructions, history: shipments }))
+const MyAssistantHandlers = MyAssistant.toLayer((turn) => turn.run({ instructions, history: shipments }))
 ```
 
 The assistant's `submit` (`yield* MyAssistant`) stores them like a user's

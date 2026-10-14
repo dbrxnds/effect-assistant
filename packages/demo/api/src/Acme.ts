@@ -72,7 +72,7 @@ export const layer = AcmeAssistant.toLayer(
       yield* BlockKit.closeStale({ messages: 3 })
       yield* ToolApproval.closeStale({ messages: 3 })
 
-      return turn.loop({
+      return turn.run({
         instructions: { ...prompt, text: `${prompt.text}\n\nToday is ${new Date().toDateString()}.` },
         toolkit: AcmeTools,
         history

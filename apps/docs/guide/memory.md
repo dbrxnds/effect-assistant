@@ -57,7 +57,7 @@ const MyAssistantLive = MyAssistant.toLayer(
     return (turn) =>
       Stream.unwrap(
         Effect.map(memory.facts(turn.chatId), (facts) =>
-          turn.loop({
+          turn.run({
             instructions: `${instructions}\n\n${Memory.render(facts)}`,
             toolkit: Toolkit.merge(MyTools, Memory.Tools)
           })
@@ -89,8 +89,8 @@ it covers. The log keeps everything; the UI still shows the whole chat.
 The library gives the pieces. When to compact, which model writes the
 summary, and what it says are your app's:
 
-- **A summary event**: your own tagged schema with `text` and `throughSeq`,
-  the last `seq` it covers. Entries after `throughSeq` stay as they are, so
+- **A summary event**: your own tagged schema with `text` and `throughSequence`,
+  the last `sequence` it covers. Entries after `throughSequence` stay as they are, so
   a message that arrived while the summary was written isn't lost.
 - **`Compaction.since(isSummary)`**: a history view that starts at the last
   summary. The model reads the summary, the files attached earlier (a
@@ -106,7 +106,7 @@ import * as LanguageModel from "effect/ai/LanguageModel"
 
 class Summary extends Schema.TaggedClass<Summary>()("Summary", {
   text: Schema.String,
-  throughSeq: Schema.Int
+  throughSequence: Schema.Int
 }) {}
 
 export const MyAssistant = Assistant.make("my-assistant", { events: [Summary] })
@@ -124,11 +124,11 @@ const MyAssistantHandlers = MyAssistant.toLayer((turn) => {
       prompt: `Summarize this chat for whoever picks it up:\n\n${transcript(entries)}` // transcript: yours
     })
 
-    yield* chat.append(Summary.make({ text: response.text, throughSeq: entries.at(-1)?.seq ?? 0 }))
+    yield* chat.append(Summary.make({ text: response.text, throughSequence: entries.at(-1)?.sequence ?? 0 }))
   }).pipe(Effect.catchCause((cause) => Effect.logWarning("compaction failed", cause)))
 
   // After the reply, so the user doesn't wait for it; the next turn reads the summary.
-  return Stream.concat(turn.loop({ instructions, history: sinceSummary }), Stream.drain(Stream.fromEffect(compact)))
+  return Stream.concat(turn.run({ instructions, history: sinceSummary }), Stream.drain(Stream.fromEffect(compact)))
 })
 ```
 

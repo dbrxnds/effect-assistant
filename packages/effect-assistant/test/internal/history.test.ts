@@ -11,7 +11,7 @@ const { ModelOutput, ToolResult, ToolStarted, TurnStarted } = AssistantEvent
 const chatId = Effect.runSync(ChatId.make())
 
 const entries = (events: ReadonlyArray<AssistantEvent.AssistantEvent>) =>
-  events.map((event, i) => AssistantEvent.Entry.make({ chatId, seq: i + 1, at: 0, event }))
+  events.map((event, i) => AssistantEvent.Entry.make({ chatId, sequence: i + 1, at: 0, event }))
 
 const call = (id: string, name: string) =>
   Response.makePart("tool-call", { id, name, params: {}, providerExecuted: false })
@@ -41,15 +41,15 @@ const unhandledInputs = (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => His
 
 describe("History.fromEntries", () => {
   it("puts a message that arrived while the model was writing after that step", () => {
-    // Seq 5 arrives after the step at seq 6 read through seq 4.
+    // Sequence 5 arrives after the step at sequence 6 read through sequence 4.
     const history = fromEntries(
       entries([
         say("what orders does amsterdam have"),
         TurnStarted.make({ assistant: "test" }),
-        ModelOutput.make({ parts: [call("a", "order_history")], seenThroughSeq: 2 }),
+        ModelOutput.make({ parts: [call("a", "order_history")], seenThroughSequence: 2 }),
         result("a", "order_history"),
         say("and do it for amsterdam"),
-        ModelOutput.make({ parts: [call("b", "send_user_message")], seenThroughSeq: 4 }),
+        ModelOutput.make({ parts: [call("b", "send_user_message")], seenThroughSequence: 4 }),
         result("b", "send_user_message")
       ])
     )
@@ -70,7 +70,7 @@ describe("History.fromEntries", () => {
         say("hi"),
         TurnStarted.make({ assistant: "test" }),
         say("also this"),
-        ModelOutput.make({ parts: [call("a", "send_user_message")], seenThroughSeq: 3 }),
+        ModelOutput.make({ parts: [call("a", "send_user_message")], seenThroughSequence: 3 }),
         result("a", "send_user_message")
       ])
     )
@@ -82,10 +82,10 @@ describe("History.fromEntries", () => {
     const history = fromEntries(
       entries([
         say("check A-17"),
-        ModelOutput.make({ parts: [call("a", "lookup_order")], seenThroughSeq: 1 }),
+        ModelOutput.make({ parts: [call("a", "lookup_order")], seenThroughSequence: 1 }),
         say("also 12 x 12?"),
         result("a", "lookup_order"),
-        ModelOutput.make({ parts: [call("b", "send_user_message")], seenThroughSeq: 4 })
+        ModelOutput.make({ parts: [call("b", "send_user_message")], seenThroughSequence: 4 })
       ])
     )
 
@@ -105,7 +105,7 @@ describe("History.fromEntries, after a crash", () => {
       entries([
         say("look up the orders"),
         TurnStarted.make({ assistant: "test" }),
-        ModelOutput.make({ parts: [call("a", "order_history")], seenThroughSeq: 2 }),
+        ModelOutput.make({ parts: [call("a", "order_history")], seenThroughSequence: 2 }),
         ToolStarted.make({ callId: "a", tool: "order_history" }),
         // The process died here; the resumed turn starts, and a message arrives.
         TurnStarted.make({ assistant: "test" }),
@@ -124,18 +124,18 @@ describe("History.needsTurn", () => {
     const events = [say("hi"), TurnStarted.make({ assistant: "test" })]
 
     expect(needsTurn(entries(events))).toBe(true)
-    expect(needsTurn(entries([...events, AssistantEvent.TurnCompleted.make({ throughSeq: 2 })]))).toBe(false)
+    expect(needsTurn(entries([...events, AssistantEvent.TurnCompleted.make({ throughSequence: 2 })]))).toBe(false)
     expect(
-      unhandledInputs(entries([...events, AssistantEvent.TurnCompleted.make({ throughSeq: 2 }), say("more")])).map(
+      unhandledInputs(entries([...events, AssistantEvent.TurnCompleted.make({ throughSequence: 2 }), say("more")])).map(
         (input) => input._tag
       )
     ).toEqual(["UserMessage"])
   })
 
   it("counts a failed turn as handled, so a failing input isn't retried", () => {
-    expect(needsTurn(entries([say("boom"), AssistantEvent.TurnFailed.make({ throughSeq: 1, message: "x" })]))).toBe(
-      false
-    )
+    expect(
+      needsTurn(entries([say("boom"), AssistantEvent.TurnFailed.make({ throughSequence: 1, message: "x" })]))
+    ).toBe(false)
   })
 })
 
@@ -144,10 +144,10 @@ describe("History.fromEntries, a finished specialist run", () => {
     const runId = RunId.fromKey("history-test")
 
     const history = fromEntries([
-      AssistantEvent.Entry.make({ chatId, seq: 1, at: 0, event: say("research Q4") }),
+      AssistantEvent.Entry.make({ chatId, sequence: 1, at: 0, event: say("research Q4") }),
       AssistantEvent.Entry.make({
         chatId,
-        seq: 2,
+        sequence: 2,
         at: 1000,
         event: AssistantEvent.SpecialistStarted.make({
           runId,
@@ -157,7 +157,7 @@ describe("History.fromEntries, a finished specialist run", () => {
       }),
       AssistantEvent.Entry.make({
         chatId,
-        seq: 3,
+        sequence: 3,
         at: 121_000,
         event: AssistantEvent.SpecialistFinished.make({
           id: InputId.fromKey(`${runId}:1`),
@@ -213,7 +213,7 @@ describe("History.fromEntries, block answers and earlier results", () => {
   it("reads a call's result as text when a view starts after the call", () => {
     const events = [
       say("look up the orders"),
-      ModelOutput.make({ parts: [call("a", "order_history")], seenThroughSeq: 1 }),
+      ModelOutput.make({ parts: [call("a", "order_history")], seenThroughSequence: 1 }),
       ToolStarted.make({ callId: "a", tool: "order_history" }),
       ToolResult.make({ callId: "a", tool: "order_history", outcome: "success", result: { orders: 3 } })
     ]
@@ -232,7 +232,12 @@ describe("History.fromEntries, the app's own events", () => {
   it("reads none of them by itself", () => {
     const history = fromEntries([
       ...entries([say("hi")]),
-      AssistantEvent.Entry.make({ chatId, seq: 2, at: 0, event: storedUpdate("workflow:Order", { status: "done" }) })
+      AssistantEvent.Entry.make({
+        chatId,
+        sequence: 2,
+        at: 0,
+        event: storedUpdate("workflow:Order", { status: "done" })
+      })
     ])
 
     expect(trace(history)).toEqual(["user: hi"])
@@ -241,7 +246,7 @@ describe("History.fromEntries, the app's own events", () => {
   it("keeps a call and its result together around a message a view put between them", () => {
     const [ask, output, started, done] = entries([
       say("look up the orders"),
-      ModelOutput.make({ parts: [call("a", "order_history")], seenThroughSeq: 1 }),
+      ModelOutput.make({ parts: [call("a", "order_history")], seenThroughSequence: 1 }),
       ToolStarted.make({ callId: "a", tool: "order_history" }),
       result("a", "order_history")
     ])
@@ -258,10 +263,10 @@ describe("History.fromEntries, the app's own events", () => {
   })
 
   it("puts a message after the step whose model call didn't read it", () => {
-    // The note stands for an event at seq 2; the step at seq 3 read through seq 1.
-    const [ask, output] = entries([say("hi"), ModelOutput.make({ parts: [call("w", "wait")], seenThroughSeq: 1 })])
+    // The note stands for an event at sequence 2; the step at sequence 3 read through sequence 1.
+    const [ask, output] = entries([say("hi"), ModelOutput.make({ parts: [call("w", "wait")], seenThroughSequence: 1 })])
 
-    const history = fromEntries([ask!, note("The order shipped."), { ...output!, seq: 3 }])
+    const history = fromEntries([ask!, note("The order shipped."), { ...output!, sequence: 3 }])
 
     expect(trace(history)).toEqual(["user: hi", "call: wait", "user: The order shipped."])
   })
@@ -273,9 +278,9 @@ describe("History.needsTurn, the app's own events", () => {
       ...entries([
         say("hi"),
         TurnStarted.make({ assistant: "test" }),
-        AssistantEvent.TurnCompleted.make({ throughSeq: 2 })
+        AssistantEvent.TurnCompleted.make({ throughSequence: 2 })
       ]),
-      AssistantEvent.Entry.make({ chatId, seq: 4, at: 0, event })
+      AssistantEvent.Entry.make({ chatId, sequence: 4, at: 0, event })
     ]
 
     expect(needsTurn(after(submittedUpdate("workflow:Order", { status: "done" })))).toBe(true)

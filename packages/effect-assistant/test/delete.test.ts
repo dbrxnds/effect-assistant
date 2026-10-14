@@ -79,7 +79,7 @@ for (const [name, run] of Object.entries(engines)) {
     it.live("ends its log with ChatDeleted, once, and drops later inputs and events, quietly", () =>
       Effect.gen(function* () {
         const layer = run(
-          Deleting.toLayer((turn) => turn.loop({ instructions: "Be brief." })).pipe(
+          Deleting.toLayer((turn) => turn.run({ instructions: "Be brief." })).pipe(
             Layer.provide(slowLive(yield* signals))
           ),
           Scripted.layer(() => Scripted.reply("Hi."))
@@ -180,7 +180,7 @@ for (const [name, run] of Object.entries(engines)) {
         const chats = yield* appChats
 
         const layer = run(
-          Deleting.toLayer((turn) => turn.loop({ instructions: "Be brief." })).pipe(
+          Deleting.toLayer((turn) => turn.run({ instructions: "Be brief." })).pipe(
             Layer.provide(slowLive(yield* signals))
           ),
           Scripted.layer(() => Scripted.reply("Hi."))
@@ -221,7 +221,7 @@ for (const [name, run] of Object.entries(engines)) {
         })
 
         const layer = run(
-          Deleting.toLayer((turn) => turn.loop({ instructions: "Be brief.", toolkit: toolkit.toolkit })).pipe(
+          Deleting.toLayer((turn) => turn.run({ instructions: "Be brief.", toolkit: toolkit.toolkit })).pipe(
             Layer.provide(toolkit.toolkit.toLayer(toolkit.handlers)),
             Layer.provide(slowLive(yield* signals))
           ),

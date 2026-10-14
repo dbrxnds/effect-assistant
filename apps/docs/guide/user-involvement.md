@@ -111,7 +111,7 @@ const OrderToolsLive = OrderTools.toLayer({
 const MyAssistantLive = MyAssistant.toLayer((turn) =>
   Stream.unwrap(
     // Calls the user moved on from (ten messages later) expire.
-    ToolApproval.closeStale({ messages: 10 }).pipe(Effect.as(turn.loop({ instructions, toolkit: OrderTools })))
+    ToolApproval.closeStale({ messages: 10 }).pipe(Effect.as(turn.run({ instructions, toolkit: OrderTools })))
   )
 ).pipe(Layer.provide(OrderToolsLive))
 ```

@@ -21,7 +21,7 @@ const withFile = AssistantEvent.UserMessage.make({
 })
 
 const entries = (events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>) =>
-  events.map((event, i) => AssistantEvent.Entry.make({ chatId, seq: i + 1, at: (i + 1) * 1000, event }))
+  events.map((event, i) => AssistantEvent.Entry.make({ chatId, sequence: i + 1, at: (i + 1) * 1000, event }))
 
 const userTexts = (history: ReturnType<typeof History.fromEntries>) =>
   history.flatMap((message) =>
@@ -66,13 +66,13 @@ describe("attachments", () => {
   it("keeps the id and name of a file a summary covers", () => {
     const Summary = Schema.TaggedStruct("Summary", {
       text: Schema.String,
-      throughSeq: Schema.Int
+      throughSequence: Schema.Int
     })
 
     const log = entries([
       withFile,
       Schema.decodeUnknownSync(AssistantEvent.StoredAppEvent)(
-        Summary.make({ text: "They want a flyer printed.", throughSeq: 1 })
+        Summary.make({ text: "They want a flyer printed.", throughSequence: 1 })
       )
     ])
 

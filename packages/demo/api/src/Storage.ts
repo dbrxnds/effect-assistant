@@ -67,10 +67,10 @@ const layerChatLogTable = Layer.effectDiscard(
     yield* sql`
       CREATE TABLE IF NOT EXISTS chat_log (
         chat_id TEXT NOT NULL,
-        seq INTEGER NOT NULL,
+        sequence INTEGER NOT NULL,
         at DOUBLE PRECISION NOT NULL,
         event TEXT NOT NULL,
-        PRIMARY KEY (chat_id, seq)
+        PRIMARY KEY (chat_id, sequence)
       )
     `
   })

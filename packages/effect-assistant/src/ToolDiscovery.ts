@@ -110,7 +110,7 @@ const requiring =
  * const OfficeDiscoveryLive = ToolDiscovery.layer(OfficeTools).pipe(Layer.provide(OfficeToolsLive))
  *
  * const MyAssistantLive = MyAssistant.toLayer((turn) =>
- *   turn.loop({
+ *   turn.run({
  *     instructions,
  *     toolkit: Toolkit.merge(CommonTools, OfficeDiscovery)
  *   })

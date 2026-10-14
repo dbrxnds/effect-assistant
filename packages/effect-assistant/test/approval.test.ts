@@ -114,7 +114,7 @@ const ordering = (
     layer: runMemory(Ordering.toLayer(handler).pipe(Layer.provide(layer)), Scripted.layer(script))
   }))
 
-const looping = (turn: Assistant.Turn) => turn.loop({ instructions, toolkit: OrderTools })
+const looping = (turn: Assistant.Turn) => turn.run({ instructions, toolkit: OrderTools })
 
 const requested = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
   entries.flatMap(({ event }) => (Predicate.isTagged(event, "ApprovalRequested") ? [event] : []))
@@ -326,10 +326,10 @@ describe("an approved call after a crash", () => {
               providerExecuted: false
             })
           ],
-          seenThroughSeq: 2
+          seenThroughSequence: 2
         }),
         AssistantEvent.ApprovalRequested.make({ callId, tool: "place_order", params: { sku: "tote", quantity: 300 } }),
-        AssistantEvent.TurnCompleted.make({ throughSeq: 3 }),
+        AssistantEvent.TurnCompleted.make({ throughSequence: 3 }),
         ToolApproval.approve({ id: callId }),
         AssistantEvent.TurnStarted.make({ assistant: "approval" }),
         AssistantEvent.ToolStarted.make({ callId, tool: "place_order" })

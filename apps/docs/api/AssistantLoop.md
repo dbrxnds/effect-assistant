@@ -8,7 +8,7 @@ import { AssistantLoop } from "effect-assistant"
 
 Runs the agent loop, which calls the model, runs its tool calls, and repeats.
 
-Most handlers use `turn.loop` or `run.loop`. This module is for a loop of your own: `run`
+Most handlers use `turn.run` or `run.loop`. This module is for a loop of your own: `run`
 runs the loop until the model is done, and `step` is one step, as a body for
 `loop`.
 
@@ -141,7 +141,7 @@ type Event = Loop.Event
 
 Represents a chat's history as the model reads it.
 
-It holds the messages, and the last `seq` of the chat they cover.
+It holds the messages, and the last `sequence` of the chat they cover.
 
 ```ts
 type ChatHistory = Loop.ChatHistory
@@ -184,7 +184,7 @@ interface StepOptions<T extends Record<string, Tool.Any> = NoTools> {
   readonly toolkit?: Toolkit.Toolkit<T> | undefined
   /**
    * The current history, read at the start of the step. It is either messages, or a chat's
-   * history (`turn.history()`), whose `throughSeq` the step's `ModelOutput` records as how far
+   * history (`turn.history()`), whose `throughSequence` the step's `ModelOutput` records as how far
    * the model had read.
    */
   readonly history: Effect.Effect<ReadonlyArray<Prompt.Message> | ChatHistory>

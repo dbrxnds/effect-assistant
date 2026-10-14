@@ -12,7 +12,7 @@ import { collectUntil, failures, newChat, runMemory, say, turnsDone } from "./ut
 import * as Scripted from "./utils/scripted.ts"
 
 class Summary extends Schema.TaggedClass<Summary>()("Summary", {
-  throughSeq: Schema.Int,
+  throughSequence: Schema.Int,
   text: Schema.String,
   at: Schema.Date
 }) {}
@@ -41,7 +41,7 @@ const draftNotes: Assistant.HistoryView<DraftOpened> = (entries) =>
     entry.event instanceof DraftOpened ? note(`The user opened draft ${entry.event.draftId}.`) : entry
   )
 
-const summary = Summary.make({ throughSeq: 1, text: "They asked about pens.", at: new Date(0) })
+const summary = Summary.make({ throughSequence: 1, text: "They asked about pens.", at: new Date(0) })
 
 describe("the app's own events", () => {
   it.live("are stored as themselves, in JSON, and read back typed", () =>
@@ -80,7 +80,7 @@ describe("the app's own events", () => {
 
   it.effect("MyAssistant.Entry takes an entry with an app event through JSON and back, for an RPC", () =>
     Effect.gen(function* () {
-      const entry = { chatId: yield* ChatId.make(), seq: 3, at: 0, event: summary }
+      const entry = { chatId: yield* ChatId.make(), sequence: 3, at: 0, event: summary }
       const json = yield* Schema.encodeEffect(Compacting.Entry)(entry)
       const back = yield* Schema.decodeUnknownEffect(Compacting.Entry)(JSON.parse(JSON.stringify(json)))
 
@@ -107,7 +107,7 @@ describe("the app's own events", () => {
       }).pipe(
         Effect.provide(
           runMemory(
-            Compacting.toLayer((turn) => turn.loop({ instructions: "Be brief.", history: uploads })),
+            Compacting.toLayer((turn) => turn.run({ instructions: "Be brief.", history: uploads })),
             model.layer
           )
         )
@@ -136,7 +136,7 @@ describe("the app's own events", () => {
       }).pipe(
         Effect.provide(
           runMemory(
-            Compacting.toLayer((turn) => turn.loop({ instructions: "Be brief." })),
+            Compacting.toLayer((turn) => turn.run({ instructions: "Be brief." })),
             model.layer
           )
         )
@@ -160,7 +160,7 @@ describe("the app's own events", () => {
             if ((yield* chat.entries).every(({ event }) => !(event instanceof DraftOpened)))
               yield* chat.append(DraftOpened.make({ draftId: "d1" }))
 
-            return turn.loop({ instructions: "Be brief.", history: draftNotes })
+            return turn.run({ instructions: "Be brief.", history: draftNotes })
           })
         )
       )
@@ -200,7 +200,7 @@ describe("the app's own events", () => {
           })
       })
 
-      const handlers = Compacting.toLayer((turn) => turn.loop({ instructions: "Be brief.", toolkit: NoteTools })).pipe(
+      const handlers = Compacting.toLayer((turn) => turn.run({ instructions: "Be brief.", toolkit: NoteTools })).pipe(
         Layer.provide(NoteToolsLive)
       )
 
@@ -251,7 +251,7 @@ describe("the app's own events", () => {
           ? entries
           : [
               ...Prompt.make(`Earlier in this chat: ${last.event.text}`).content,
-              ...entries.filter(({ seq }) => seq > last.seq)
+              ...entries.filter(({ sequence }) => sequence > last.sequence)
             ]
       }
 
@@ -262,7 +262,7 @@ describe("the app's own events", () => {
             if ((yield* (yield* CurrentChat.CurrentChat).entries).every(({ event }) => !(event instanceof Summary)))
               yield* (yield* CurrentChat.CurrentChat).append(summary)
 
-            return turn.loop({ instructions: "Be brief.", history: sinceSummary })
+            return turn.run({ instructions: "Be brief.", history: sinceSummary })
           })
         )
       )
@@ -358,7 +358,7 @@ describe("a history built from turn.entries", () => {
 
       // The message was read and answered: the turn read through it, and completed.
       expect(end?._tag).toBe("TurnCompleted")
-      expect(end?.throughSeq).toBeGreaterThanOrEqual(2)
+      expect(end?.throughSequence).toBeGreaterThanOrEqual(2)
     })
   )
 })

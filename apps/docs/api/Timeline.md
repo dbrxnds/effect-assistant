@@ -296,11 +296,11 @@ type Activity = typeof Activity.Type
 
 Represents a chat's timeline: the chat as its user sees it, typed with the app's events it shows.
 It holds the chat's items in order, what is working in it, whether the last turn failed, and
-whether the chat was deleted. `seq` is the position in the chat's log that the timeline is up to.
+whether the chat was deleted. `sequence` is the position in the chat's log that the timeline is up to.
 
 ```ts
 interface Timeline<Events = never> {
-  readonly seq: number
+  readonly sequence: number
   readonly items: ReadonlyArray<Item<Events>>
   readonly activity: Activity
   /** Whether the last turn failed with no message after it. */
@@ -320,12 +320,12 @@ Represents a change to a chat's timeline, typed with the app's events it shows.
 
 A change holds each item that is new or changed (for example, a message whose block was
 answered or closed, or a call the user approved), in full. It also holds the current activity, whether the last turn failed,
-and whether the chat was deleted. `seq` is the position in the chat's log that the change is up
+and whether the chat was deleted. `sequence` is the position in the chat's log that the change is up
 to.
 
 ```ts
 interface Change<Events = never> {
-  readonly seq: number
+  readonly sequence: number
   readonly items: ReadonlyArray<Item<Events>>
   readonly activity: Activity
   readonly failed: boolean
@@ -376,7 +376,7 @@ interface ChangesOptions<
   Show extends ReadonlyArray<AssistantEvent.AppEventSchema> = readonly []
 > extends ShowOptions<Show> {
   /**
-   * The `seq` up to which the client already has the timeline. The result contains only the
+   * The `sequence` up to which the client already has the timeline. The result contains only the
    * changes after it. Defaults to `0`, every change.
    */
   readonly after?: number | undefined
@@ -551,9 +551,9 @@ Returns the stream of changes to a chat's timeline that its entries produce, for
 
 The entries must stream from the start of the chat's log, as `assistant.subscribe(chatId)` does
 without `after`. The fold reads every entry, because a message depends on earlier entries: its
-block is answered or closed later. `after` only skips emitting the changes up to that `seq`, so a
-client that has the timeline up to a `seq` receives only what changed since. Pass `after` here,
-not to `subscribe`: a subscription that starts after a `seq` gives the fold an incomplete log,
+block is answered or closed later. `after` only skips emitting the changes up to that `sequence`, so a
+client that has the timeline up to a `sequence` receives only what changed since. Pass `after` here,
+not to `subscribe`: a subscription that starts after a `sequence` gives the fold an incomplete log,
 and the changes it produces are wrong.
 
 Each chunk of entries becomes one change; the stored entries, for example, arrive as one chunk.
@@ -572,7 +572,7 @@ import { Assistant, type ChatId, Timeline } from "effect-assistant"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
-class Summary extends Schema.TaggedClass<Summary>()("Summary", { text: Schema.String, throughSeq: Schema.Int }) {}
+class Summary extends Schema.TaggedClass<Summary>()("Summary", { text: Schema.String, throughSequence: Schema.Int }) {}
 class DailyBudgetReached extends Schema.TaggedClass<DailyBudgetReached>()("DailyBudgetReached", {}) {}
 
 const MyAssistant = Assistant.make("my-assistant", { events: [Summary, DailyBudgetReached] })

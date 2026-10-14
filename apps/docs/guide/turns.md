@@ -13,7 +13,7 @@ run its tools, repeat, until it has nothing left to do.
 5  ModelOutput       send_user_message({ text: "Sunny in Oslo, 21°C.", wait: true })
 6  AssistantMessage  Sunny in Oslo, 21°C.
 7  ToolResult        send_user_message: sent
-8  TurnCompleted     throughSeq: 7
+8  TurnCompleted     throughSequence: 7
 ```
 
 Every line is an [event](./events) in the chat's log. The user sees two of
@@ -23,13 +23,13 @@ them: their message and the assistant's.
 
 1. `submit` appends an input (a message, a block answer, or one of your [events](./app-events)). If no turn is
    running for the chat, one starts. What a turn appends itself never starts one.
-2. The handler runs the loop, usually `turn.loop(...)`. It rebuilds the
+2. The handler runs the loop, usually `turn.run(...)`. It rebuilds the
    model's history from the log, calls the model, and runs its tool calls.
    The engine records each step in the log. Then it repeats.
 3. Before **every** model call, the loop reads the log again.
 4. The turn ends when the model ends it (a message with `wait: true`, or
    `wait`) or makes no tool call, and nothing new arrived. A step whose
-   calls failed doesn't end it: the model reads the failure first. `TurnCompleted.throughSeq` records how far it read;
+   calls failed doesn't end it: the model reads the failure first. `TurnCompleted.throughSequence` records how far it read;
    inputs after that start another turn.
 
 One turn runs per chat at a time. The [engine](./engines) sees to it.
@@ -89,7 +89,7 @@ the user must agree to starts from a block's button, through your API (see
 
 ## A reply to every message
 
-`turn.loop` ends with `turn.replyIfOwed`: if the user's latest message has no
+`turn.run` ends with `turn.replyIfOwed`: if the user's latest message has no
 reply, and nothing arrived after the loop's last read, the model gets one more
 pass in which it can only reply. If there's still no reply, the turn ends with
 `TurnFailed` ("I finished without sending a reply."). So a user's message
@@ -97,7 +97,7 @@ always gets an answer or a visible failure, from a turn that runs the loop. A
 tool call waiting for the user's [approval](./user-involvement) is an answer
 too: the user has something to decide.
 
-A handler that ends the turn without running the loop (`turn.loop` or
+A handler that ends the turn without running the loop (`turn.run` or
 `turn.replyIfOwed`) decides itself, and its turn is never failed for being
 silent. Over a daily budget, say, it records one of your events and returns
 an empty stream; the user sees that event if you `show` it in the
@@ -112,7 +112,7 @@ const MyAssistantHandlers = MyAssistant.toLayer(
       return Stream.empty
     }
 
-    return turn.loop({ instructions })
+    return turn.run({ instructions })
   })
 )
 ```
@@ -126,5 +126,5 @@ ends with `turn.replyIfOwed` too.
 A failing handler, a failing model call, or a tool that dies (a tool's
 failures are results the model reads: see [tool failures](./tools#failures))
 ends the turn with `TurnFailed`. Its
-`throughSeq` covers everything stored so far, so a failing input isn't
+`throughSequence` covers everything stored so far, so a failing input isn't
 retried forever. The next input starts a fresh turn.

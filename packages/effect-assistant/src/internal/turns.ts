@@ -140,12 +140,13 @@ const approvedCalls = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): Readonl
       : []
   )
 
-const lastSeq = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, otherwise: number) => entries.at(-1)?.seq ?? otherwise
+const lastSequence = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, otherwise: number) =>
+  entries.at(-1)?.sequence ?? otherwise
 
 // The handler's stream can end between a step's output and its tools, or while they run. An interrupted turn (a
 // shutdown) leaves its calls open instead: the next turn runs them again.
-const closeOpenCalls = Effect.fnUntraced(function* (chat: Writer, startSeq: number) {
-  const entries = (yield* chat.entries).filter(({ seq }) => seq > startSeq)
+const closeOpenCalls = Effect.fnUntraced(function* (chat: Writer, startSequence: number) {
+  const entries = (yield* chat.entries).filter(({ sequence }) => sequence > startSequence)
 
   const started = new Set(
     entries.flatMap(({ event }) => (Predicate.isTagged(event, "ToolStarted") ? [event.callId] : []))
@@ -169,18 +170,18 @@ const closeOpenCalls = Effect.fnUntraced(function* (chat: Writer, startSeq: numb
   )
 })
 
-// The inputs before the turn's `TurnStarted` (at `startSeq`) woke it; past that, what its model outputs record
+// The inputs before the turn's `TurnStarted` (at `startSequence`) woke it; past that, what its model outputs record
 // reading.
-const handledThrough = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, startSeq: number) =>
+const handledThrough = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, startSequence: number) =>
   entries.reduce(
-    (through, { seq, event }) =>
-      seq > startSeq &&
+    (through, { sequence, event }) =>
+      sequence > startSequence &&
       AssistantEvent.isLibraryEvent(event) &&
       Predicate.isTagged(event, "ModelOutput") &&
-      event.seenThroughSeq !== undefined
-        ? Math.max(through, event.seenThroughSeq)
+      event.seenThroughSequence !== undefined
+        ? Math.max(through, event.seenThroughSequence)
         : through,
-    startSeq
+    startSequence
   )
 
 // A turn that ran the loop fails visibly when the user's latest input got no reply; an input that arrived after what
@@ -190,8 +191,8 @@ const finishTurn = Effect.fnUntraced(function* (chat: Writer, read: number, ranL
 
   const end =
     ranLoop && History.owesReply(entries, read) && !History.unreadAfter(entries, read)
-      ? AssistantEvent.TurnFailed.make({ throughSeq: read, message: silentTurnMessage })
-      : AssistantEvent.TurnCompleted.make({ throughSeq: read })
+      ? AssistantEvent.TurnFailed.make({ throughSequence: read, message: silentTurnMessage })
+      : AssistantEvent.TurnCompleted.make({ throughSequence: read })
 
   yield* chat.append([end])
 })
@@ -200,15 +201,15 @@ const finishTurn = Effect.fnUntraced(function* (chat: Writer, read: number, ranL
 const failTurn = Effect.fnUntraced(function* (chat: Writer, cause: Cause.Cause<unknown>) {
   yield* Effect.logError("assistant turn failed", cause)
 
-  const last = lastSeq(yield* chat.entries, 0)
+  const last = lastSequence(yield* chat.entries, 0)
 
-  yield* chat.append([AssistantEvent.TurnFailed.make({ throughSeq: last, message: failureMessage(cause) })])
+  yield* chat.append([AssistantEvent.TurnFailed.make({ throughSequence: last, message: failureMessage(cause) })])
 })
 
 const makeTurnApi = (
   registration: Registration,
   chat: Writer,
-  startSeq: number,
+  startSequence: number,
   checkOpen: Effect.Effect<void>,
   ranLoop: Ref.Ref<boolean>
 ): Assistant.Turn<any> => {
@@ -228,7 +229,7 @@ const makeTurnApi = (
 
     const read: AssistantLoop.ChatHistory = {
       messages: History.fromEntries(view(AppEvents.decodeEntries(app, all))),
-      throughSeq: lastSeq(all, startSeq)
+      throughSequence: lastSequence(all, startSequence)
     }
 
     return read
@@ -247,7 +248,7 @@ const makeTurnApi = (
     Stream.unwrap(
       Effect.gen(function* () {
         const all = yield* chat.entries
-        const through = handledThrough(all, startSeq)
+        const through = handledThrough(all, startSequence)
 
         // Something arrived after what the loop's model read: the next turn reads it with the full loop, and replies.
         if (History.unreadAfter(all, through)) return Stream.empty
@@ -277,7 +278,7 @@ const makeTurnApi = (
                 ...History.fromEntries(options.view(AppEvents.decodeEntries(app, entries))),
                 History.userText(nudge)
               ],
-              throughSeq: lastSeq(entries, startSeq)
+              throughSequence: lastSequence(entries, startSequence)
             }
           }),
           // A second step, for a reply after a call it was refused.
@@ -300,7 +301,7 @@ const makeTurnApi = (
       })
     )
 
-  const prepare = <T extends Record<string, Tool.Any>>(options: Assistant.LoopOptions<T, any>) => {
+  const prepare = <T extends Record<string, Tool.Any>>(options: Assistant.RunOptions<T, any>) => {
     const own = Toolkits.showing(Toolkits.fromToolkitOrEmpty(options.toolkit), shownTools)
 
     return {
@@ -315,7 +316,7 @@ const makeTurnApi = (
     history,
     instructions,
     replyIfOwed,
-    loop: (options) => {
+    run: (options) => {
       const { system, toolkit, view } = prepare(options)
       const twice = Toolkits.duplicateNames(toolkit)
 
@@ -362,15 +363,15 @@ export const run = Effect.fnUntraced(
       )
     ])
 
-    const startSeq = lastSeq(started, 0)
+    const startSequence = lastSequence(started, 0)
     const ranLoop = yield* Ref.make(false)
-    const turn = makeTurnApi(options.registration, chat, startSeq, options.checkOpen, ranLoop)
+    const turn = makeTurnApi(options.registration, chat, startSequence, options.checkOpen, ranLoop)
 
     const record = (event: AssistantLoop.Event) => chat.append([event])
 
     yield* options.handler(turn).pipe(
       Stream.runForEach(record),
-      Effect.onExit((exit) => (Exit.hasInterrupts(exit) ? Effect.void : closeOpenCalls(chat, startSeq))),
+      Effect.onExit((exit) => (Exit.hasInterrupts(exit) ? Effect.void : closeOpenCalls(chat, startSequence))),
       // A loop the app writes gets the assistant's own tools too, with this turn's services.
       Effect.provideService(
         Loop.TurnTools,
@@ -383,15 +384,16 @@ export const run = Effect.fnUntraced(
         onSuccess: Effect.fnUntraced(function* () {
           const all = yield* chat.entries
 
-          yield* finishTurn(chat, handledThrough(all, startSeq), yield* Ref.get(ranLoop))
+          yield* finishTurn(chat, handledThrough(all, startSequence), yield* Ref.get(ranLoop))
         }),
         onFailure: (cause) => failTurn(chat, cause)
       })
     )
 
     // The trace's output is what the user saw this turn, and a failure if any.
-    const shown = (yield* chat.entries).flatMap(({ event, seq }) =>
-      seq > startSeq && (Predicate.isTagged(event, "AssistantMessage") || Predicate.isTagged(event, "TurnFailed"))
+    const shown = (yield* chat.entries).flatMap(({ event, sequence }) =>
+      sequence > startSequence &&
+      (Predicate.isTagged(event, "AssistantMessage") || Predicate.isTagged(event, "TurnFailed"))
         ? [event]
         : []
     )

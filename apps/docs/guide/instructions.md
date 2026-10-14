@@ -1,6 +1,6 @@
 # Instructions and prompts
 
-An assistant's instructions are what its handler passes to `turn.loop` (a
+An assistant's instructions are what its handler passes to `turn.run` (a
 specialist's, to `run.loop`): text, or [`Instructions.Resolved`](/api/Instructions)
 (text with span attributes).
 
@@ -8,7 +8,7 @@ specialist's, to `run.loop`): text, or [`Instructions.Resolved`](/api/Instructio
 
 ```ts
 const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
-  turn.loop({ instructions: "You are a colleague on the marketing team." })
+  turn.run({ instructions: "You are a colleague on the marketing team." })
 )
 ```
 
@@ -35,7 +35,7 @@ const MyAssistantHandlers = MyAssistant.toLayer(
     return Effect.fn(function* (turn: Assistant.Turn) {
       const user = yield* users.forChat(turn.chatId)
 
-      return turn.loop({ instructions: `You are a colleague of ${user.name} on the marketing team.` })
+      return turn.run({ instructions: `You are a colleague of ${user.name} on the marketing team.` })
     })
   })
 )
@@ -119,7 +119,7 @@ const MyAssistantHandlers = MyAssistant.toLayer(
     const prompts = yield* Prompts
 
     return Effect.fn(function* (turn: Assistant.Turn) {
-      return turn.loop({ instructions: yield* prompts.get("my-assistant"), toolkit: Skills })
+      return turn.run({ instructions: yield* prompts.get("my-assistant"), toolkit: Skills })
     })
   })
 ).pipe(Layer.provide(Skills.layer)) // its layer requires Prompts too

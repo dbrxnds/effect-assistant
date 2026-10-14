@@ -1,11 +1,11 @@
 # Custom loops
 
-An assistant's handler returns its turn as a stream: `turn.loop(...)` for the
+An assistant's handler returns its turn as a stream: `turn.run(...)` for the
 usual loop, or any stream of the same events. A specialist's handler does the
 same with `run.loop(...)`. Changing how an assistant works is changing that
 stream.
 
-`turn.loop` is built from pieces you can use yourself:
+`turn.run` is built from pieces you can use yourself:
 
 | Piece                                           | What it is                                                                                       |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------ |
@@ -15,7 +15,7 @@ stream.
 | [`AssistantLoop.run`](/api/AssistantLoop#run)   | The whole loop, steps until the model is done.                                                   |
 | `turn.replyIfOwed(...)`                         | One more pass, reply-only, when the user's latest message has no reply.                          |
 
-`turn.loop` is `AssistantLoop.run` with these wired in, the skill catalog,
+`turn.run` is `AssistantLoop.run` with these wired in, the skill catalog,
 and a tool call required at every step, followed by `turn.replyIfOwed`. In a
 turn, `AssistantLoop.step` and `run` add the assistant's own tools
 (`send_user_message`, `wait`, the specialist tools) to the toolkit you pass,
@@ -98,7 +98,7 @@ const lastTurns =
     return entries.slice(starts.at(-turns) ?? 0)
   }
 
-const MyAssistantHandlers = MyAssistant.toLayer((turn) => turn.loop({ instructions, history: lastTurns(10) }))
+const MyAssistantHandlers = MyAssistant.toLayer((turn) => turn.run({ instructions, history: lastTurns(10) }))
 ```
 
 Cut the entries just after a turn ended: a turn closes its tool calls before
@@ -129,7 +129,7 @@ const withBudgetNotes = (item: Assistant.Entry<Summary | DailyBudgetReached> | P
     : item
 
 const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
-  turn.loop({
+  turn.run({
     instructions,
     history: (entries) => Compaction.since(Schema.is(Summary))(entries).map(withBudgetNotes)
   })
@@ -153,7 +153,7 @@ results.
 
 ## Services
 
-A custom loop follows the same rule as `turn.loop`: it may use the turn's
+A custom loop follows the same rule as `turn.run`: it may use the turn's
 services, `LanguageModel`, and what the build Effect required (see
 [what a handler may use](./assistant#what-a-handler-may-use)). The
 `Summarizer` above is yielded in the build Effect.

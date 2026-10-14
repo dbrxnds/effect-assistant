@@ -226,7 +226,7 @@ const toStream = <R, RE>(
  *
  * export const MyAssistant = Assistant.make("my-assistant", { specialists: [Research] })
  *
- * const MyAssistantLive = MyAssistant.toLayer((turn) => turn.loop({ instructions })).pipe(
+ * const MyAssistantLive = MyAssistant.toLayer((turn) => turn.run({ instructions })).pipe(
  *   Layer.provide(ResearchLive)
  * )
  * ```

@@ -22,9 +22,9 @@ import { toJsonText } from "./internal/schema.ts"
 import * as ToolApproval from "./ToolApproval.ts"
 
 /**
- * Represents the fields a summary event must have: its text and the last `seq` it covers.
+ * Represents the fields a summary event must have: its text and the last `sequence` it covers.
  *
- * Entries after `throughSeq` are kept as they are, so an input that arrived while the summary was
+ * Entries after `throughSequence` are kept as they are, so an input that arrived while the summary was
  * being written isn't lost.
  *
  * @category models
@@ -33,7 +33,7 @@ import * as ToolApproval from "./ToolApproval.ts"
 export interface Summary {
   readonly _tag: string
   readonly text: string
-  readonly throughSeq: number
+  readonly throughSequence: number
 }
 
 /**
@@ -55,7 +55,7 @@ export const inputTokens = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): nu
 }
 
 /**
- * Returns the items that were open at `throughSeq` and are still open: blocks the user hasn't
+ * Returns the items that were open at `throughSequence` and are still open: blocks the user hasn't
  * answered, specialists that are working, and tool calls waiting for the user's approval. The result is text for
  * the model, or `None` when nothing is open.
  *
@@ -64,12 +64,12 @@ export const inputTokens = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): nu
  */
 export const openItems = (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
-  throughSeq: number
+  throughSequence: number
 ): Option.Option<string> => {
-  const seqOf = (found: (event: AssistantEvent.AnyEntry["event"]) => boolean) =>
-    entries.find(({ event }) => found(event))?.seq ?? Number.POSITIVE_INFINITY
+  const sequenceOf = (found: (event: AssistantEvent.AnyEntry["event"]) => boolean) =>
+    entries.find(({ event }) => found(event))?.sequence ?? Number.POSITIVE_INFINITY
 
-  const opened = (seq: number) => seq <= throughSeq
+  const opened = (sequence: number) => sequence <= throughSequence
 
   const blocks = [...BlockKit.fromEntries(entries)].flatMap(([messageId, state]) => {
     const shown = entries.find(
@@ -81,7 +81,7 @@ export const openItems = (
 
     return state.open &&
       shown !== undefined &&
-      opened(shown.seq) &&
+      opened(shown.sequence) &&
       message !== undefined &&
       AssistantEvent.isLibraryEvent(message) &&
       Predicate.isTagged(message, "AssistantMessage")
@@ -91,7 +91,7 @@ export const openItems = (
 
   const specialists = [...AssistantActivity.fromEntries(entries).specialists.values()].flatMap((run) =>
     opened(
-      seqOf(
+      sequenceOf(
         (event) =>
           AssistantEvent.isLibraryEvent(event) &&
           Predicate.isTagged(event, "SpecialistStarted") &&
@@ -105,7 +105,7 @@ export const openItems = (
   const approvals = [...ToolApproval.fromEntries(entries).values()].flatMap((approval) =>
     approval.status === "pending" &&
     opened(
-      seqOf(
+      sequenceOf(
         (event) =>
           AssistantEvent.isLibraryEvent(event) &&
           Predicate.isTagged(event, "ApprovalRequested") &&
@@ -126,7 +126,7 @@ export const openItems = (
 }
 
 /**
- * Returns the files the user attached up to `throughSeq`, as lines of text for the model, or
+ * Returns the files the user attached up to `throughSequence`, as lines of text for the model, or
  * `None` when there are none. A summary may leave out a file's id, which tools need.
  *
  * @category utils
@@ -134,10 +134,10 @@ export const openItems = (
  */
 export const attachedFiles = (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
-  throughSeq: number
+  throughSequence: number
 ): Option.Option<string> => {
-  const lines = entries.flatMap(({ seq, event }) =>
-    seq <= throughSeq && AssistantEvent.isLibraryEvent(event) && Predicate.isTagged(event, "UserMessage")
+  const lines = entries.flatMap(({ sequence, event }) =>
+    sequence <= throughSequence && AssistantEvent.isLibraryEvent(event) && Predicate.isTagged(event, "UserMessage")
       ? (event.attachments ?? []).map(AssistantEvent.attachmentLine)
       : []
   )
@@ -170,7 +170,7 @@ export const attachedFiles = (
  *
  * class Summary extends Schema.TaggedClass<Summary>()("Summary", {
  *   text: Schema.String,
- *   throughSeq: Schema.Int
+ *   throughSequence: Schema.Int
  * }) {}
  *
  * declare const transcript: (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => string
@@ -188,12 +188,12 @@ export const attachedFiles = (
  *       prompt: `Summarize this chat:\n\n${transcript(entries)}`
  *     })
  *
- *     yield* chat.append(Summary.make({ text, throughSeq: entries.at(-1)?.seq ?? 0 }))
+ *     yield* chat.append(Summary.make({ text, throughSequence: entries.at(-1)?.sequence ?? 0 }))
  *   })
  *
  *   // After the reply, so the user doesn't wait for the summary.
  *   return Stream.concat(
- *     turn.loop({ instructions: "Be brief.", history: Compaction.since(Schema.is(Summary)) }),
+ *     turn.run({ instructions: "Be brief.", history: Compaction.since(Schema.is(Summary)) }),
  *     Stream.drain(Stream.fromEffect(compact))
  *   )
  * })
@@ -211,18 +211,18 @@ export const since =
 
     if (last === undefined || !isSummary(last)) return entries
 
-    const open = Option.match(openItems(entries, last.throughSeq), {
+    const open = Option.match(openItems(entries, last.throughSequence), {
       onNone: () => "",
       onSome: (items) => `\n\n<still_open>\n${items}\n</still_open>`
     })
 
-    const files = Option.match(attachedFiles(entries, last.throughSeq), {
+    const files = Option.match(attachedFiles(entries, last.throughSequence), {
       onNone: () => "",
       onSome: (lines) => `\n\n<files_attached_earlier>\n${lines}\n</files_attached_earlier>`
     })
 
     return [
       userText(`<earlier_in_this_chat>\n${last.text}\n</earlier_in_this_chat>${files}${open}`),
-      ...entries.filter(({ seq, event }) => seq > last.throughSeq && !isSummary(event))
+      ...entries.filter(({ sequence, event }) => sequence > last.throughSequence && !isSummary(event))
     ]
   }

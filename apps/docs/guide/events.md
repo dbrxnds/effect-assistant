@@ -12,7 +12,7 @@ import * as Stream from "effect/Stream"
 
 const printLog = (chatId: ChatId.ChatId) =>
   MyAssistant.use((assistant) =>
-    assistant.subscribe(chatId).pipe(Stream.runForEach(({ seq, event }) => Console.log(seq, event._tag)))
+    assistant.subscribe(chatId).pipe(Stream.runForEach(({ sequence, event }) => Console.log(sequence, event._tag)))
   )
 // 1 UserMessage
 // 2 TurnStarted
@@ -20,7 +20,7 @@ const printLog = (chatId: ChatId.ChatId) =>
 // …
 ```
 
-Each event is stored as an `AssistantEvent.Entry`: the chat id, a `seq`
+Each event is stored as an `AssistantEvent.Entry`: the chat id, a `sequence`
 (1, 2, 3, … with no gaps), the time it was stored (`at`), and the `event`.
 
 ## Events
@@ -99,12 +99,12 @@ InputId.fromKey(`${orderId}:shipped`)
   then live ones, with your events decoded. It goes through the engine, so
   it works with the cluster engine too. It's for server-side code, tests,
   and debugging, not for a client. A reader that reconnects passes the last
-  `seq` it has, `subscribe(chatId, { after: seq })`, and gets only what's
+  `sequence` it has, `subscribe(chatId, { after: sequence })`, and gets only what's
   new.
 - Piped through `Timeline.changes(MyAssistant)`, it streams what the chat's
   user sees, for a [chat client](./client). It never has the assistant's
-  own work. A client that reconnects passes its `seq` there,
-  `Timeline.changes(MyAssistant, { after: seq })`, not to `subscribe`: the
+  own work. A client that reconnects passes its `sequence` there,
+  `Timeline.changes(MyAssistant, { after: sequence })`, not to `subscribe`: the
   timeline is folded from the whole log, and only the changes up to `after`
   are skipped.
 - An open chat keeps its entries in memory: turns and tools read them with
@@ -127,10 +127,10 @@ The log is the `ChatLog` service:
 ```sql
 CREATE TABLE chat_log (
   chat_id TEXT NOT NULL,
-  seq INTEGER NOT NULL,
+  sequence INTEGER NOT NULL,
   at DOUBLE PRECISION NOT NULL,
   event TEXT NOT NULL,
-  PRIMARY KEY (chat_id, seq)
+  PRIMARY KEY (chat_id, sequence)
 );
 ```
 
@@ -189,7 +189,7 @@ coherent when things arrive mid-step:
 - An input that arrives while tool calls are open waits until their results
   are in, so every tool call is directly followed by its output.
 - An input that arrives while the model is writing a step is placed after
-  that step (`ModelOutput.seenThroughSeq` records how far the model had read),
+  that step (`ModelOutput.seenThroughSequence` records how far the model had read),
   so the model doesn't read its own reply as an answer to a message it never
   saw.
 

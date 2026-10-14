@@ -12,7 +12,7 @@ import { Assistant } from "effect-assistant"
 export const MyAssistant = Assistant.make("my-assistant")
 
 export const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
-  turn.loop({ instructions: "You help a small marketing team." })
+  turn.run({ instructions: "You help a small marketing team." })
 )
 ```
 
@@ -63,11 +63,11 @@ The name is also the assistant's name in [traces](./observability)
 ## The handler
 
 A handler is a function of the [`Turn`](/api/Assistant#turn) that returns the
-turn as a stream of what the model did. Usually that's `turn.loop(...)`: the
+turn as a stream of what the model did. Usually that's `turn.run(...)`: the
 agent loop with the assistant's own tools, the colleague rules, and the chat's
 history wired in.
 
-`turn.loop` takes:
+`turn.run` takes:
 
 | Option         | What it is                                                                             |
 | -------------- | -------------------------------------------------------------------------------------- |
@@ -75,10 +75,10 @@ history wired in.
 | `toolkit`      | Its [tools](./tools) and [skills](./skills), next to its own: handlers from the layer. |
 | `maxSteps`     | Model calls per turn. Default 16.                                                      |
 
-`turn.loop` ends with `turn.replyIfOwed`, so a user who asked something gets
+`turn.run` ends with `turn.replyIfOwed`, so a user who asked something gets
 an answer (see [a reply to every message](./turns#a-reply-to-every-message)).
 
-The turn also has the pieces `turn.loop` is built from, for handlers that run
+The turn also has the pieces `turn.run` is built from, for handlers that run
 the loop themselves (see [custom loops](./loops)):
 
 | Field                  | What it is                                                                                      |
@@ -113,7 +113,7 @@ const MyAssistantHandlers = MyAssistant.toLayer(
     return Effect.fn(function* (turn: Assistant.Turn) {
       const summary = yield* catalog.summary // every turn
 
-      return turn.loop({ instructions: `You help a small marketing team. We sell: ${summary}` })
+      return turn.run({ instructions: `You help a small marketing team. We sell: ${summary}` })
     })
   })
 )
