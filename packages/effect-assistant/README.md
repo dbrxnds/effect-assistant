@@ -183,59 +183,86 @@ turn.run({ instructions, history: Compaction.since(Schema.is(Summary)) })
 ### Putting it together
 
 One assistant with all of it: tools with an approval, a skill, memory, blocks that show a tool's result, a specialist,
-and a summary after the reply once the chat is long. `PlaceOrder` and `PickOne` are as
-above, `SearchProducts` is a tool like `get_weather`, `Reorder` a [skill](https://github.com/dbrxnds/effect-assistant/tree/main/apps/docs/guide/skills.md) and `Research` a
-[specialist](https://github.com/dbrxnds/effect-assistant/tree/main/apps/docs/guide/specialists.md).
+a daily budget, and a summary after the reply once the chat is long. The budget and the summarizing are services of
+your app; the handler decides what they mean for the chat. `MyTools` holds a `search_documents` tool and a
+`send_email` tool with `needsApproval`; `ChooseOne` is a block, `WeeklyReport` a [skill](https://github.com/dbrxnds/effect-assistant/tree/main/apps/docs/guide/skills.md) and
+`Research` a [specialist](https://github.com/dbrxnds/effect-assistant/tree/main/apps/docs/guide/specialists.md).
 
 ```ts
 class Summary extends Schema.TaggedClass<Summary>()("Summary", { text: Schema.String, throughSequence: Schema.Int }) {}
+class BudgetReached extends Schema.TaggedClass<BudgetReached>()("BudgetReached", {}) {}
 
-const ShopTools = Toolkit.make(SearchProducts, PlaceOrder) // PlaceOrder has needsApproval
-const Skills = Skill.toolkit([Reorder])
+type MyEvent = Summary | BudgetReached
 
-export const Shop = Assistant.make("shop", {
-  blocks: BlockKit.make([PickOne, Block.fromToolResult(SearchProducts)]),
-  events: [Summary],
+export const MyAssistant = Assistant.make("my-assistant", {
+  blocks: BlockKit.make([ChooseOne, Block.fromToolResult(SearchDocuments)]),
+  events: [Summary, BudgetReached],
   specialists: [Research]
 })
 
-// Runs after the reply, so the user doesn't wait; only once the chat is long.
-const compact = Effect.gen(function* () {
-  const chat = yield* Shop.Chat
-  const entries = yield* chat.entries
+class AiBudget extends Context.Service<
+  AiBudget,
+  { readonly exceeded: (chatId: ChatId.ChatId) => Effect.Effect<boolean> }
+>()("AiBudget") {}
 
-  if (Compaction.inputTokens(entries) < 100_000) return
+class ChatCompaction extends Context.Service<
+  ChatCompaction,
+  {
+    readonly summarize: (
+      chat: Assistant.Chat<MyEvent>,
+      turn: Assistant.Turn<MyEvent>
+    ) => Effect.Effect<Option.Option<Summary>, AiError.AiError>
+  }
+>()("ChatCompaction") {}
 
-  const { text } = yield* LanguageModel.generateText({ prompt: `Summarize:\n\n${transcript(entries)}` })
+const Skills = Skill.toolkit([WeeklyReport])
 
-  yield* chat.append(Summary.make({ text, throughSequence: entries.at(-1)?.sequence ?? 0 }))
-}).pipe(Effect.orDie)
-
-export const ShopLive = Shop.toLayer(
+export const MyAssistantLive = MyAssistant.toLayer(
   Effect.gen(function* () {
+    const budget = yield* AiBudget
+    const compaction = yield* ChatCompaction
     const memory = yield* Memory.MemoryStore
 
-    return (turn) =>
-      Stream.unwrap(
-        Effect.map(memory.facts(turn.chatId), (facts) =>
-          turn.run({
-            instructions: `${instructions}\n\n${Memory.render(facts)}`,
-            toolkit: Toolkit.merge(ShopTools, Memory.Tools, Skills),
-            history: Compaction.since(Schema.is(Summary)),
-            maxSteps: 20
-          })
+    return Effect.fn("MyAssistant.turn")(function* (turn: Assistant.Turn<MyEvent>) {
+      const chat = yield* MyAssistant.Chat
+
+      if (yield* budget.exceeded(turn.chatId)) {
+        yield* chat.append(BudgetReached.make({}))
+
+        return Stream.empty
+      }
+
+      // After the reply, so the user doesn't wait; a failed summary leaves the chat as it is.
+      const summarized = compaction.summarize(chat, turn).pipe(
+        Effect.flatMap(Option.match({ onNone: () => Effect.void, onSome: (summary) => chat.append(summary) })),
+        Effect.catchCause((cause) => Effect.logWarning("compaction failed", cause))
+      )
+
+      return turn
+        .run({
+          instructions: `${instructions}\n\n${Memory.render(yield* memory.facts(turn.chatId))}`,
+          toolkit: Toolkit.merge(MyTools, Memory.Tools, Skills),
+          history: Compaction.since(Schema.is(Summary)),
+          maxSteps: 20
+        })
+        .pipe(
+          Stream.concat(Stream.drain(Stream.fromEffect(summarized))),
+          Stream.provideService(Memory.MemoryStore, memory)
         )
-      ).pipe(Stream.concat(Stream.drain(Stream.fromEffect(compact))), Stream.provideService(Memory.MemoryStore, memory))
+    })
   })
-).pipe(Layer.provide([ShopToolsLive, Memory.layerTools, Skills.layer, ResearchLive]), Layer.provide(MemoryStoreLive))
+).pipe(Layer.provide([MyToolsLive, Memory.layerTools, Skills.layer, ResearchLive]))
 ```
 
 ```text
+AiBudget.exceeded ─► BudgetReached ─► chat log (and no turn)
 chat log ─► Compaction.since(Summary) ─► history ──┐
 memory facts ─► instructions ──────────────────────┼─► turn.run ─► events ─► chat log
-ShopTools + Memory.Tools + Skills ─► toolkit ──────┘
-compact, after the reply ─► Summary ─► chat log
+MyTools + Memory.Tools + Skills ─► toolkit ────────┘
+ChatCompaction.summarize, after the reply ─► Summary ─► chat log
 ```
+
+The app provides `AiBudget`, `ChatCompaction` and a `Memory.MemoryStore`.
 
 ### And more
 
