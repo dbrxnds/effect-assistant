@@ -20,7 +20,7 @@ Creates a specialist from its name and a description of when to use it.
 
 **Details**
 
-The specialist's `toLayer` provides its handler, which is usually `run.loop` with the
+The specialist's `toLayer` provides its handler, which is usually `turn.run` with the
 specialist's own instructions and tools. List the specialist in `Assistant.make`'s
 `specialists`, and provide its layer to the assistant's.
 
@@ -34,8 +34,8 @@ const Research = Specialist.make("research", {
   description: "Researches past campaigns and orders. Give it the question and any context."
 })
 
-const ResearchLive = Research.toLayer((run) =>
-  run.loop({
+const ResearchLive = Research.toLayer((turn) =>
+  turn.run({
     instructions: "Answer with the findings and numbers the colleague needs, in a few lines.",
     toolkit: ResearchTools
   })
@@ -99,12 +99,12 @@ interface Specialist<Name extends string = string> {
   /** The key of the specialist's handler, as `toLayer` provides it. */
   readonly Handler: Context.Key<SpecialistHandler<Name>, Built>
   /**
-   * Provides the specialist's handler. The handler may use the {@link RunServices} and the
+   * Provides the specialist's handler. The handler may use the {@link TurnServices} and the
    * services its build Effect required (see {@link CheckServices}).
    */
   readonly toLayer: <R = never, RE = never, E = never, RX = never>(
     build: (Handler<R, RE> | Effect.Effect<Handler<R, RE>, E, RX>) &
-      CheckServices<Exclude<R | RE, RunServices | RX | Tool.Handler<string>>>
+      CheckServices<Exclude<R | RE, TurnServices | RX | Tool.Handler<string>>>
   ) => Layer.Layer<SpecialistHandler<Name>, never, Exclude<RX, Scope.Scope | CurrentChat> | ToolHandlers<R | RE>>
 }
 ```
@@ -123,12 +123,12 @@ interface SpecialistHandler<Name extends string> {
 
 <small>Since 0.1.0</small>
 
-### LoopOptions
+### RunOptions
 
-Represents the options for `run.loop`.
+Represents the options for `turn.run`.
 
 ```ts
-interface LoopOptions<T extends Record<string, Tool.Any> = Record<never, never>> {
+interface RunOptions<T extends Record<string, Tool.Any> = Record<never, never>> {
   readonly instructions: string | Instructions.Resolved
   /**
    * The loop's tools, as a native toolkit whose handlers come from the layer. Merge in a
@@ -142,12 +142,13 @@ interface LoopOptions<T extends Record<string, Tool.Any> = Record<never, never>>
 
 <small>Since 0.1.0</small>
 
-### Run
+### Turn
 
-Represents one run of a specialist on a brief, as its handler sees it.
+Represents one turn of a specialist's run, as its handler sees it. The first turn works on the
+brief, and each later one on the messages sent to the run since (follow-ups and steering).
 
 ```ts
-interface Run {
+interface Turn {
   readonly runId: RunId
   /** The chat the run belongs to, which is the chat of the turn that spawned it. */
   readonly chatId: ChatId
@@ -158,8 +159,8 @@ interface Run {
    */
   readonly history: Effect.Effect<ReadonlyArray<Prompt.Message>>
   /** Runs the agent loop over the run's history, with the given instructions and tools. */
-  readonly loop: <T extends Record<string, Tool.Any> = Record<never, never>>(
-    options: LoopOptions<T>
+  readonly run: <T extends Record<string, Tool.Any> = Record<never, never>>(
+    options: RunOptions<T>
   ) => Stream.Stream<
     AssistantLoop.Event,
     AiError.AiError,
@@ -180,7 +181,7 @@ services the Effect needs.
 
 ```ts
 type Handler<R = never, RE = R> = (
-  run: Run
+  turn: Turn
 ) =>
   | Stream.Stream<AssistantLoop.Event, unknown, R>
   | Effect.Effect<Stream.Stream<AssistantLoop.Event, unknown, R>, unknown, RE>
@@ -198,7 +199,7 @@ the handler with the layer's services already provided.
 ```ts
 interface Built {
   readonly open: Effect.Effect<
-    (run: Run) => Stream.Stream<AssistantLoop.Event, unknown, RunServices>,
+    (turn: Turn) => Stream.Stream<AssistantLoop.Event, unknown, TurnServices>,
     never,
     Scope.Scope | CurrentChat
   >
@@ -325,13 +326,13 @@ type HandlerOf<S> = S extends Specialist<infer Name> ? SpecialistHandler<Name> :
 
 <small>Since 0.1.0</small>
 
-### RunServices
+### TurnServices
 
-The services a run provides to its handler, which are its chat, the chat's runner, and the
+The services a turn provides to its handler, which are its chat, the chat's runner, and the
 model.
 
 ```ts
-type RunServices = CurrentChat | Runner | LanguageModel.LanguageModel
+type TurnServices = CurrentChat | Runner | LanguageModel.LanguageModel
 ```
 
 <small>Since 0.1.0</small>

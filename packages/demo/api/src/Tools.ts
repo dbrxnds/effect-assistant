@@ -224,8 +224,8 @@ export const layerResearch = Research.toLayer(
 
     const toolkit = Toolkit.merge(ResearchTools, Toolkit.make(OrderHistory, OfficeBudget))
 
-    return Effect.fn(function* (run) {
-      return run.loop({ instructions: yield* prompts.get("acme-specialist-research"), toolkit, maxSteps: 24 })
+    return Effect.fn(function* (turn) {
+      return turn.run({ instructions: yield* prompts.get("acme-specialist-research"), toolkit, maxSteps: 24 })
     })
   })
 ).pipe(Layer.provide(layerResearchTools))

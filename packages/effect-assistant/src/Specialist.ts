@@ -40,12 +40,12 @@ export interface Specialist<Name extends string = string> {
   /** The key of the specialist's handler, as `toLayer` provides it. */
   readonly Handler: Context.Key<SpecialistHandler<Name>, Built>
   /**
-   * Provides the specialist's handler. The handler may use the {@link RunServices} and the
+   * Provides the specialist's handler. The handler may use the {@link TurnServices} and the
    * services its build Effect required (see {@link CheckServices}).
    */
   readonly toLayer: <R = never, RE = never, E = never, RX = never>(
     build: (Handler<R, RE> | Effect.Effect<Handler<R, RE>, E, RX>) &
-      CheckServices<Exclude<R | RE, RunServices | RX | Tool.Handler<string>>>
+      CheckServices<Exclude<R | RE, TurnServices | RX | Tool.Handler<string>>>
   ) => Layer.Layer<SpecialistHandler<Name>, never, Exclude<RX, Scope.Scope | CurrentChat> | ToolHandlers<R | RE>>
 }
 
@@ -108,21 +108,21 @@ export interface SpecialistHandler<Name extends string> {
 export type HandlerOf<S> = S extends Specialist<infer Name> ? SpecialistHandler<Name> : never
 
 /**
- * The services a run provides to its handler, which are its chat, the chat's runner, and the
+ * The services a turn provides to its handler, which are its chat, the chat's runner, and the
  * model.
  *
  * @category utility types
  * @since 0.1.0
  */
-export type RunServices = CurrentChat | Runner | LanguageModel.LanguageModel
+export type TurnServices = CurrentChat | Runner | LanguageModel.LanguageModel
 
 /**
- * Represents the options for `run.loop`.
+ * Represents the options for `turn.run`.
  *
  * @category models
  * @since 0.1.0
  */
-export interface LoopOptions<T extends Record<string, Tool.Any> = Record<never, never>> {
+export interface RunOptions<T extends Record<string, Tool.Any> = Record<never, never>> {
   readonly instructions: string | Instructions.Resolved
   /**
    * The loop's tools, as a native toolkit whose handlers come from the layer. Merge in a
@@ -134,12 +134,13 @@ export interface LoopOptions<T extends Record<string, Tool.Any> = Record<never, 
 }
 
 /**
- * Represents one run of a specialist on a brief, as its handler sees it.
+ * Represents one turn of a specialist's run, as its handler sees it. The first turn works on the
+ * brief, and each later one on the messages sent to the run since (follow-ups and steering).
  *
  * @category models
  * @since 0.1.0
  */
-export interface Run {
+export interface Turn {
   readonly runId: RunId
   /** The chat the run belongs to, which is the chat of the turn that spawned it. */
   readonly chatId: ChatId
@@ -150,8 +151,8 @@ export interface Run {
    */
   readonly history: Effect.Effect<ReadonlyArray<Prompt.Message>>
   /** Runs the agent loop over the run's history, with the given instructions and tools. */
-  readonly loop: <T extends Record<string, Tool.Any> = Record<never, never>>(
-    options: LoopOptions<T>
+  readonly run: <T extends Record<string, Tool.Any> = Record<never, never>>(
+    options: RunOptions<T>
   ) => Stream.Stream<
     AssistantLoop.Event,
     AiError.AiError,
@@ -170,7 +171,7 @@ export interface Run {
  * @since 0.1.0
  */
 export type Handler<R = never, RE = R> = (
-  run: Run
+  turn: Turn
 ) =>
   | Stream.Stream<AssistantLoop.Event, unknown, R>
   | Effect.Effect<Stream.Stream<AssistantLoop.Event, unknown, R>, unknown, RE>
@@ -186,7 +187,7 @@ export type Handler<R = never, RE = R> = (
  */
 export interface Built {
   readonly open: Effect.Effect<
-    (run: Run) => Stream.Stream<AssistantLoop.Event, unknown, RunServices>,
+    (turn: Turn) => Stream.Stream<AssistantLoop.Event, unknown, TurnServices>,
     never,
     Scope.Scope | CurrentChat
   >
@@ -203,7 +204,7 @@ const toStream = <R, RE>(
  *
  * **Details**
  *
- * The specialist's `toLayer` provides its handler, which is usually `run.loop` with the
+ * The specialist's `toLayer` provides its handler, which is usually `turn.run` with the
  * specialist's own instructions and tools. List the specialist in `Assistant.make`'s
  * `specialists`, and provide its layer to the assistant's.
  *
@@ -217,8 +218,8 @@ const toStream = <R, RE>(
  *   description: "Researches past campaigns and orders. Give it the question and any context."
  * })
  *
- * const ResearchLive = Research.toLayer((run) =>
- *   run.loop({
+ * const ResearchLive = Research.toLayer((turn) =>
+ *   turn.run({
  *     instructions: "Answer with the findings and numbers the colleague needs, in a few lines.",
  *     toolkit: ResearchTools
  *   })
@@ -248,7 +249,7 @@ export const make = <const Name extends string>(
   // services.
   function toLayer<R = never, RE = never, E = never, RX = never>(
     build: (Handler<R, RE> | Effect.Effect<Handler<R, RE>, E, RX>) &
-      CheckServices<Exclude<R | RE, RunServices | RX | Tool.Handler<string>>>
+      CheckServices<Exclude<R | RE, TurnServices | RX | Tool.Handler<string>>>
   ): Layer.Layer<SpecialistHandler<Name>, never, Exclude<RX, Scope.Scope | CurrentChat> | ToolHandlers<R | RE>>
   function toLayer(
     build: Handler<any, any> | Effect.Effect<Handler<any, any>, unknown, any>
@@ -264,7 +265,7 @@ export const make = <const Name extends string>(
           open: Effect.gen(function* () {
             const handler = Effect.isEffect(build) ? yield* build : build
 
-            return (run: Run) => Stream.provideContext(toStream(handler(run)), context)
+            return (turn: Turn) => Stream.provideContext(toStream(handler(turn)), context)
           }).pipe(Effect.provideContext(context), Effect.orDie)
         }
       })

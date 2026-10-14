@@ -8,7 +8,7 @@ import { AssistantLoop } from "effect-assistant"
 
 Runs the agent loop, which calls the model, runs its tool calls, and repeats.
 
-Most handlers use `turn.run` or `run.loop`. This module is for a loop of your own: `run`
+Most handlers use `turn.run`, in an assistant or a specialist. This module is for a loop of your own: `run`
 runs the loop until the model is done, and `step` is one step, as a body for
 `loop`.
 

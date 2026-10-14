@@ -30,7 +30,7 @@ import * as Toolkits from "./toolkit.ts"
 import type { Writer } from "./writer.ts"
 
 /** @internal */
-export type RunHandler = (run: Specialist.Run) => Stream.Stream<AssistantLoop.Event, unknown, Specialist.RunServices>
+export type RunHandler = (turn: Specialist.Turn) => Stream.Stream<AssistantLoop.Event, unknown, Specialist.TurnServices>
 
 /** @internal */
 export const briefText = (brief: Specialist.Brief): string =>
@@ -75,18 +75,18 @@ export const runBrief = Effect.fnUntraced(
       return yield* Ref.get(history)
     })
 
-    const run: Specialist.Run = {
+    const turn: Specialist.Turn = {
       runId: options.runId,
       chatId: options.chatId,
       brief: options.brief,
       history: current,
       // A run can't wait for the user's approval: a call that needs it fails, and the run reads why.
-      loop: (loop) =>
+      run: (run) =>
         Loop.run({
-          instructions: loop.instructions,
-          toolkit: Toolkits.fromToolkitOrEmpty(loop.toolkit),
+          instructions: run.instructions,
+          toolkit: Toolkits.fromToolkitOrEmpty(run.toolkit),
           history: current,
-          maxSteps: loop.maxSteps ?? 8
+          maxSteps: run.maxSteps ?? 8
         }).pipe(Stream.provideService(Loop.TurnApprovals, Option.none()))
     }
 
@@ -102,7 +102,7 @@ export const runBrief = Effect.fnUntraced(
       if (text.length > 0) yield* Ref.set(answer, text)
     })
 
-    yield* Stream.runForEach(handler(run), record)
+    yield* Stream.runForEach(handler(turn), record)
 
     const text = yield* Ref.get(answer)
 

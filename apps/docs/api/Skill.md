@@ -94,7 +94,7 @@ const MyAssistantLive = MyAssistant.toLayer((turn) =>
       const skills = Skill.toolkit(allSkills.filter((skill) => allowed(role, skill)))
 
       return turn
-        .loop({ instructions, toolkit: Toolkit.merge(MyTools, skills) })
+        .run({ instructions, toolkit: Toolkit.merge(MyTools, skills) })
         .pipe(Stream.provide(skills.layer))
     })
   )
