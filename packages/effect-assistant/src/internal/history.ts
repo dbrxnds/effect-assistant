@@ -321,8 +321,9 @@ const progressMessages = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): Read
     )
   )
 
-// The model said it was on it and stopped without the result: only progress messages since the user's latest input.
-// A specialist still working doesn't count, since its report is what comes next.
+// The model said it was on it and stopped without the result: its last message since the user's latest input was
+// progress. An earlier message may have answered something else, such as an input that came before. A specialist still
+// working doesn't count, since its report is what comes next.
 /** @internal */
 export const owesDelivery = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, throughSequence: number): boolean => {
   const latest = entries.findLast(
@@ -336,7 +337,7 @@ export const owesDelivery = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, th
     sequence > latest.sequence && AssistantEvent.isLibraryEvent(event) ? [event] : []
   )
 
-  const messages = after.flatMap((event) => (Predicate.isTagged(event, "AssistantMessage") ? [event] : []))
+  const last = after.findLast((event) => Predicate.isTagged(event, "AssistantMessage"))
   const progress = progressMessages(entries)
   const started = after.flatMap((event) => (Predicate.isTagged(event, "SpecialistStarted") ? [event.runId] : []))
 
@@ -348,8 +349,9 @@ export const owesDelivery = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, th
 
   // A call waiting for the user's approval is what comes next, like a specialist's report.
   return (
-    messages.length > 0 &&
-    messages.every((message) => message.block === undefined && progress.has(message.id)) &&
+    last !== undefined &&
+    last.block === undefined &&
+    progress.has(last.id) &&
     !after.some((event) => Predicate.isTagged(event, "TurnFailed") || Predicate.isTagged(event, "ApprovalRequested")) &&
     started.every((runId) => finished.has(runId))
   )

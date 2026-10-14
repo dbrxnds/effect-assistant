@@ -4,6 +4,7 @@ import * as Response from "effect/ai/Response"
 import * as Effect from "effect/Effect"
 import { AssistantEvent, ChatId, InputId, RunId } from "../../src/index.ts"
 import * as History from "../../src/internal/history.ts"
+import * as Uuid from "../../src/internal/uuid.ts"
 import { say, storedUpdate, submittedUpdate } from "../utils/fixtures.ts"
 
 const { ModelOutput, ToolResult, ToolStarted, TurnStarted } = AssistantEvent
@@ -285,5 +286,54 @@ describe("History.needsTurn, the app's own events", () => {
 
     expect(needsTurn(after(submittedUpdate("workflow:Order", { status: "done" })))).toBe(true)
     expect(needsTurn(after(storedUpdate("workflow:Order", { status: "done" })))).toBe(false)
+  })
+})
+
+describe("History.owesDelivery", () => {
+  const send = (id: string, wait: boolean) =>
+    ModelOutput.make({
+      parts: [
+        Response.makePart("tool-call", {
+          id,
+          name: "send_user_message",
+          params: { text: id, wait },
+          providerExecuted: false
+        })
+      ],
+      seenThroughSequence: 1
+    })
+
+  const message = (callId: string) =>
+    AssistantEvent.AssistantMessage.make({ id: Uuid.fromKey(`message:${callId}`), text: callId })
+
+  const withBlock = (callId: string) =>
+    AssistantEvent.AssistantMessage.make({
+      id: Uuid.fromKey(`message:${callId}`),
+      text: callId,
+      block: AssistantEvent.MessageBlock.make({ kind: "tool_result", props: {} })
+    })
+
+  it("is owed when the last message since the input was progress, after a result for something earlier", () => {
+    const log = entries([
+      say("The dirty ones, and the maple ones?"),
+      send("result", false),
+      withBlock("result"),
+      send("progress", false),
+      message("progress")
+    ])
+
+    expect(History.owesDelivery(log, 1)).toBe(true)
+  })
+
+  it("isn't owed when the last message delivered", () => {
+    const log = entries([
+      say("The dirty ones, and the maple ones?"),
+      send("progress", false),
+      message("progress"),
+      send("result", false),
+      withBlock("result")
+    ])
+
+    expect(History.owesDelivery(log, 1)).toBe(false)
   })
 })
