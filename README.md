@@ -180,6 +180,63 @@ reads the last summary plus what came after; the log keeps everything, so the us
 turn.run({ instructions, history: Compaction.since(Schema.is(Summary)) })
 ```
 
+### Putting it together
+
+One assistant with all of it: tools with an approval, a skill, memory, blocks that show a tool's result, a specialist,
+and a summary after the reply once the chat is long. `PlaceOrder` and `PickOne` are as
+above, `SearchProducts` is a tool like `get_weather`, `Reorder` a [skill](./apps/docs/guide/skills.md) and `Research` a
+[specialist](./apps/docs/guide/specialists.md).
+
+```ts
+class Summary extends Schema.TaggedClass<Summary>()("Summary", { text: Schema.String, throughSequence: Schema.Int }) {}
+
+const ShopTools = Toolkit.make(SearchProducts, PlaceOrder) // PlaceOrder has needsApproval
+const Skills = Skill.toolkit([Reorder])
+
+export const Shop = Assistant.make("shop", {
+  blocks: BlockKit.make([PickOne, Block.fromToolResult(SearchProducts)]),
+  events: [Summary],
+  specialists: [Research]
+})
+
+// Runs after the reply, so the user doesn't wait; only once the chat is long.
+const compact = Effect.gen(function* () {
+  const chat = yield* Shop.Chat
+  const entries = yield* chat.entries
+
+  if (Compaction.inputTokens(entries) < 100_000) return
+
+  const { text } = yield* LanguageModel.generateText({ prompt: `Summarize:\n\n${transcript(entries)}` })
+
+  yield* chat.append(Summary.make({ text, throughSequence: entries.at(-1)?.sequence ?? 0 }))
+}).pipe(Effect.orDie)
+
+export const ShopLive = Shop.toLayer(
+  Effect.gen(function* () {
+    const memory = yield* Memory.MemoryStore
+
+    return (turn) =>
+      Stream.unwrap(
+        Effect.map(memory.facts(turn.chatId), (facts) =>
+          turn.run({
+            instructions: `${instructions}\n\n${Memory.render(facts)}`,
+            toolkit: Toolkit.merge(ShopTools, Memory.Tools, Skills),
+            history: Compaction.since(Schema.is(Summary)),
+            maxSteps: 20
+          })
+        )
+      ).pipe(Stream.concat(Stream.drain(Stream.fromEffect(compact))), Stream.provideService(Memory.MemoryStore, memory))
+  })
+).pipe(Layer.provide([ShopToolsLive, Memory.layerTools, Skills.layer, ResearchLive]), Layer.provide(MemoryStoreLive))
+```
+
+```text
+chat log ─► Compaction.since(Summary) ─► history ──┐
+memory facts ─► instructions ──────────────────────┼─► turn.run ─► events ─► chat log
+ShopTools + Memory.Tools + Skills ─► toolkit ──────┘
+compact, after the reply ─► Summary ─► chat log
+```
+
 ### And more
 
 - [Specialists](./apps/docs/guide/specialists.md): focused agents that do slow work in the background.
