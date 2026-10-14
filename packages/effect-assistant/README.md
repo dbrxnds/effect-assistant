@@ -13,11 +13,8 @@ effect-assistant is a TypeScript library for chat assistants that work like a co
 in the background with your tools, and it messages you back. It is built on [Effect](https://effect.website) and
 `effect/ai`.
 
-Each chat is one append-only log of events. Everything else is read from it:
-
-```text
-{ model's history, user's timeline, what to resume } = f(chat log)
-```
+Each chat is one append-only log of events. What the model reads, what the user sees, and where a turn cut off by a
+crash picks up are all read from that log.
 
 ## Quickstart
 
