@@ -151,7 +151,7 @@ const AppLive = MyAssistantLive.pipe(
   Layer.provide(ModelLive),
   Layer.provideMerge(AssistantEngine.layerCluster),
   Layer.provideMerge(
-    Layer.merge(ChatLog.layerSql, SingleRunner.layer({ runnerStorage: "sql" }).pipe(Layer.provide(NodeCrypto.layer)))
+    Layer.merge(ChatLog.layerSql(), SingleRunner.layer({ runnerStorage: "sql" }).pipe(Layer.provide(NodeCrypto.layer)))
   ),
   Layer.provide(PgClient.layerConfig({ url: Config.Redacted("DATABASE_URL") }))
 )

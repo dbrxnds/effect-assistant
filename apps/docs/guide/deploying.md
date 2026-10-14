@@ -17,7 +17,7 @@ const AppLive = Server.layer.pipe(
   Layer.provideMerge(MyAssistantLive),
   Layer.provideMerge(Layer.merge(AssistantEngine.layerCluster, ClusterWorkflowEngine.layer)),
   Layer.provide(ModelLive), // AnthropicLanguageModel.model(...): the LanguageModel
-  Layer.provideMerge(Layer.merge(ChatLog.layerSql, SingleRunner.layer({ runnerStorage: "sql" }))),
+  Layer.provideMerge(Layer.merge(ChatLog.layerSql(), SingleRunner.layer({ runnerStorage: "sql" }))),
   Layer.provide(PgLive) // one Postgres pool for the log, the entities, and workflows
 )
 ```
@@ -37,7 +37,7 @@ to set up.
 
 One `SqlClient` serves everything:
 
-- `ChatLog.layerSql` stores the log in a `chat_log` table you create (see
+- `ChatLog.layerSql()` stores the log in a `chat_log` table you create (see
   [the log](./events#storage)).
 - Your [`Chats`](./chats#which-chats-exist) can read your own chat table in
   the same database.

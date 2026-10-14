@@ -121,7 +121,7 @@ The log is the `ChatLog` service:
 
 - `ChatLog.layerMemory` keeps chats in memory, for tests and local
   runs.
-- `ChatLog.layerSql` stores them with a `SqlClient`, in a `chat_log` table
+- `ChatLog.layerSql()` stores them with a `SqlClient`, in a `chat_log` table
   you create:
 
 ```sql
