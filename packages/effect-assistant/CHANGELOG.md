@@ -1,5 +1,11 @@
 # effect-assistant
 
+## 0.8.2
+
+### Patch Changes
+
+- 1fe2c9a: The package README says what the chat log is for in a sentence.
+
 ## 0.8.1
 
 ### Patch Changes
