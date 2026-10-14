@@ -40,7 +40,7 @@ const WeatherToolsLive = WeatherTools.toLayer({
 })
 
 const MyAssistantLive = MyAssistant.toLayer((turn) =>
-  turn.loop({ instructions: "You help a small team. Be brief.", toolkit: WeatherTools })
+  turn.run({ instructions: "You help a small team. Be brief.", toolkit: WeatherTools })
 ).pipe(Layer.provide(WeatherToolsLive))
 
 const ModelLive = AnthropicLanguageModel.model("claude-sonnet-5-5").pipe(
@@ -75,8 +75,8 @@ Effect.runPromise(program.pipe(Effect.provide(AppLive)))
 | Piece                 | What it is                                                                                                           |
 | --------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | `Assistant.make`      | The definition. `yield* MyAssistant` gives `submit`, `subscribe`, `delete`.                                          |
-| `MyAssistant.toLayer` | The handler: what runs each turn, usually `turn.loop(...)`. It provides the assistant.                               |
-| `turn.loop`           | The agent loop: model call, tool calls, repeat. The model talks to the user only through a `send_user_message` tool. |
+| `MyAssistant.toLayer` | The handler: what runs each turn, usually `turn.run(...)`. It provides the assistant.                                |
+| `turn.run`            | The agent loop: model call, tool calls, repeat. The model talks to the user only through a `send_user_message` tool. |
 | `AssistantEngine`     | Runs the chats: `layerMemory` in one process, `layerCluster` with one entity per chat.                               |
 | `ChatLog`             | Stores each chat as an append-only log of events: `layerMemory`, or `layerSql`.                                      |
 
@@ -84,7 +84,7 @@ Effect.runPromise(program.pipe(Effect.provide(AppLive)))
 
 1. **`submit` stores the input and returns.** The user's message is appended to the chat's log, and a turn
    starts in the background.
-2. **The handler returns the turn as a stream.** `turn.loop(...)` is a `Stream` of what the loop does: a
+2. **The handler returns the turn as a stream.** `turn.run(...)` is a `Stream` of what the loop does: a
    `ModelOutput` per model call, then a `ToolStarted` and a `ToolResult` per tool call. The engine writes each
    event to the log before it pulls the next, so a turn cut off by a crash picks up where it stopped.
 3. **Every model call reads the log.** The model's history is rebuilt from the log before each call, so a
@@ -160,10 +160,10 @@ const AppLive = MyAssistantLive.pipe(
 ```sql
 CREATE TABLE chat_log (
   chat_id TEXT NOT NULL,
-  seq INTEGER NOT NULL,
+  sequence INTEGER NOT NULL,
   at DOUBLE PRECISION NOT NULL,
   event TEXT NOT NULL,
-  PRIMARY KEY (chat_id, seq)
+  PRIMARY KEY (chat_id, sequence)
 );
 ```
 
@@ -281,7 +281,7 @@ const ResearchLive = Research.toLayer((run) =>
 
 export const MyAssistant = Assistant.make("my-assistant", { specialists: [Research] })
 
-const MyAssistantLive = MyAssistant.toLayer((turn) => turn.loop({ instructions, toolkit: WeatherTools })).pipe(
+const MyAssistantLive = MyAssistant.toLayer((turn) => turn.run({ instructions, toolkit: WeatherTools })).pipe(
   Layer.provide([WeatherToolsLive, ResearchLive])
 )
 ```
@@ -308,7 +308,7 @@ const Discovery = ToolDiscovery.make(AllOtherTools) // search_tools and execute_
 const DiscoveryLive = ToolDiscovery.layer(AllOtherTools).pipe(Layer.provide(AllOtherToolsLive))
 
 const MyAssistantLive = MyAssistant.toLayer((turn) =>
-  turn.loop({ instructions, toolkit: Toolkit.merge(WeatherTools, Discovery, Skills) })
+  turn.run({ instructions, toolkit: Toolkit.merge(WeatherTools, Discovery, Skills) })
 ).pipe(Layer.provide([WeatherToolsLive, DiscoveryLive, Skills.layer]))
 ```
 
@@ -342,7 +342,7 @@ const shipments: Assistant.HistoryView<ShipmentUpdated> = (entries) =>
       : entry
   )
 
-const MyAssistantLive = MyAssistant.toLayer((turn) => turn.loop({ instructions, history: shipments }))
+const MyAssistantLive = MyAssistant.toLayer((turn) => turn.run({ instructions, history: shipments }))
 
 // From a webhook or a workflow. The keyed id makes a redelivery harmless.
 const onShipment = (chatId: ChatId.ChatId, orderId: string, status: string) =>
@@ -412,7 +412,7 @@ const MyAssistantLive = MyAssistant.toLayer(
     return (turn) =>
       Stream.unwrap(
         Effect.map(memory.facts(turn.chatId), (facts) =>
-          turn.loop({
+          turn.run({
             instructions: `${instructions}\n\n${Memory.render(facts)}`,
             toolkit: Toolkit.merge(WeatherTools, Memory.Tools) // remember, forget, recall
           })
@@ -433,7 +433,7 @@ reads the summary in place of everything it covers. The log keeps everything, so
 chat. When to compact and what the summary says are yours.
 
 ```ts
-class Summary extends Schema.TaggedClass<Summary>()("Summary", { text: Schema.String, throughSeq: Schema.Int }) {}
+class Summary extends Schema.TaggedClass<Summary>()("Summary", { text: Schema.String, throughSequence: Schema.Int }) {}
 
 export const MyAssistant = Assistant.make("my-assistant", { events: [Summary] })
 
@@ -446,11 +446,11 @@ const MyAssistantLive = MyAssistant.toLayer((turn) => {
 
     const { text } = yield* LanguageModel.generateText({ prompt: `Summarize:\n\n${transcript(entries)}` })
 
-    yield* chat.append(Summary.make({ text, throughSeq: entries.at(-1)?.seq ?? 0 }))
+    yield* chat.append(Summary.make({ text, throughSequence: entries.at(-1)?.sequence ?? 0 }))
   })
 
   return Stream.concat(
-    turn.loop({ instructions, history: Compaction.since(Schema.is(Summary)) }), // the last summary, then the rest
+    turn.run({ instructions, history: Compaction.since(Schema.is(Summary)) }), // the last summary, then the rest
     Stream.drain(Stream.fromEffect(compact)) // after the reply, so the user doesn't wait
   )
 })

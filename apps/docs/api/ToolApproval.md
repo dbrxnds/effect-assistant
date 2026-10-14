@@ -171,7 +171,7 @@ const MyAssistantLive = MyAssistant.toLayer(
     yield* BlockKit.closeStale({ messages: 10 })
     yield* ToolApproval.closeStale({ messages: 10 })
 
-    return turn.loop({ instructions, toolkit: MyTools })
+    return turn.run({ instructions, toolkit: MyTools })
   })
 )
 ```

@@ -31,7 +31,7 @@ export const MyAssistant = Assistant.make("my-assistant")
 
 // The handler: every turn runs the agent loop with these instructions.
 const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
-  turn.loop({ instructions: "You help a small marketing team. Be brief." })
+  turn.run({ instructions: "You help a small marketing team. Be brief." })
 )
 
 // The model: a `LanguageModel`, here Anthropic's. The loop calls whichever one the layer is given.
@@ -115,7 +115,7 @@ const printLog = (chatId: ChatId.ChatId) =>
 
     yield* assistant.subscribe(chatId).pipe(
       Stream.takeUntil(({ event }) => Predicate.isTagged(event, "TurnCompleted")),
-      Stream.runForEach(({ seq, event }) => Console.log(seq, event._tag))
+      Stream.runForEach(({ sequence, event }) => Console.log(sequence, event._tag))
     )
   })
 // 1 UserMessage
@@ -134,7 +134,7 @@ or their results: they're its own work. It sends a message by calling
 
 Tools are Effect's own (`effect/ai/Tool`): a name, a description,
 schemas for the parameters and the result. A toolkit groups them, and its
-handlers are a layer: pass the toolkit to `turn.loop`, and provide the layer.
+handlers are a layer: pass the toolkit to `turn.run`, and provide the layer.
 
 **Example** (A weather tool)
 
@@ -158,7 +158,7 @@ const WeatherToolsLive = WeatherTools.toLayer({
 })
 
 const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
-  turn.loop({ instructions: "You help a small marketing team. Be brief.", toolkit: WeatherTools })
+  turn.run({ instructions: "You help a small marketing team. Be brief.", toolkit: WeatherTools })
 ).pipe(Layer.provide(WeatherToolsLive))
 ```
 

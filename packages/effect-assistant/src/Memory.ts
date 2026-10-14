@@ -218,7 +218,7 @@ const Recall = Tool.make("recall", {
  *     return (turn) =>
  *       Stream.unwrap(
  *         Effect.map(memory.facts(turn.chatId), (facts) =>
- *           turn.loop({
+ *           turn.run({
  *             instructions: `You help a small team.\n\n${Memory.render(facts)}`,
  *             toolkit: Memory.Tools
  *           })

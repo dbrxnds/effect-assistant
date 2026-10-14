@@ -52,7 +52,7 @@ describe("AssistantEngine.layerMemory", () => {
       yield* log.append(finished, [
         say("hi"),
         AssistantEvent.TurnStarted.make({ assistant: "resumer" }),
-        AssistantEvent.TurnCompleted.make({ throughSeq: 1 })
+        AssistantEvent.TurnCompleted.make({ throughSequence: 1 })
       ])
 
       const ran = yield* Deferred.make<ChatId.ChatId>()
@@ -79,7 +79,7 @@ describe("AssistantEngine.layerMemory, the app's own events", () => {
       const before = [
         say("hi"),
         AssistantEvent.TurnStarted.make({ assistant: "resumer-updates" }),
-        AssistantEvent.TurnCompleted.make({ throughSeq: 2 })
+        AssistantEvent.TurnCompleted.make({ throughSequence: 2 })
       ]
 
       // The log alone says which came in from outside a turn.
@@ -229,13 +229,13 @@ describe("tool calls after a crash", () => {
               providerExecuted: false
             })
           ],
-          seenThroughSeq: 2
+          seenThroughSequence: 2
         }),
         AssistantEvent.ToolStarted.make({ callId: "toolu_report_1", tool: "send_report" })
       ])
 
       const handlers = Resumer.toLayer((turn) =>
-        turn.loop({ instructions: "You help a small team. Be brief.", toolkit: sendReport.toolkit })
+        turn.run({ instructions: "You help a small team. Be brief.", toolkit: sendReport.toolkit })
       ).pipe(Layer.provide(sendReport.toolkit.toLayer(sendReport.handlers)))
 
       const call = yield* Effect.scoped(
@@ -253,16 +253,16 @@ describe("tool calls after a crash", () => {
 })
 
 describe("a chat's log", () => {
-  /** Storage that's slow to find the last seq: two unlocked appends would both number after the same one. */
+  /** Storage that's slow to find the last sequence: two unlocked appends would both number after the same one. */
   const slowStorage = Effect.gen(function* () {
     const stored = yield* Ref.make<ReadonlyArray<AssistantEvent.Entry>>([])
 
     return ChatLog.make({
       read: (chatId) => Ref.get(stored).pipe(Effect.map((all) => all.filter((entry) => entry.chatId === chatId))),
-      lastSeq: (chatId) =>
+      lastSequence: (chatId) =>
         Ref.get(stored).pipe(
           Effect.delay("20 millis"),
-          Effect.map((all) => all.filter((entry) => entry.chatId === chatId).at(-1)?.seq ?? 0)
+          Effect.map((all) => all.filter((entry) => entry.chatId === chatId).at(-1)?.sequence ?? 0)
         ),
       write: (_, entries) => Ref.update(stored, (all) => [...all, ...entries]),
       lastEntries: Effect.succeed([])
@@ -296,7 +296,7 @@ describe("a chat's log", () => {
         Effect.provide(Layer.effect(ChatLog.ChatLog, slowStorage))
       )
 
-      expect(entries.map((entry) => entry.seq)).toEqual(entries.map((_, i) => i + 1))
+      expect(entries.map((entry) => entry.sequence)).toEqual(entries.map((_, i) => i + 1))
     })
   )
 
@@ -339,7 +339,7 @@ describe("a chat's log", () => {
             Effect.andThen(Ref.get(stored)),
             Effect.map((all) => all.filter((entry) => entry.chatId === chatId))
           ),
-        lastSeq: (chatId) =>
+        lastSequence: (chatId) =>
           Effect.map(Ref.get(stored), (all) => all.filter((entry) => entry.chatId === chatId).length),
         write: (_, entries) => Ref.update(stored, (all) => [...all, ...entries]),
         lastEntries: Effect.succeed([])
@@ -371,7 +371,7 @@ describe("a chat's log", () => {
     Effect.gen(function* () {
       const handler = Resumer.toLayer(() => Stream.empty)
 
-      const seqs = yield* Effect.gen(function* () {
+      const sequences = yield* Effect.gen(function* () {
         const chat = yield* ChatId.make()
         yield* (yield* Resumer).submit(chat, say("one"))
         yield* (yield* Resumer).submit(chat, say("two"))
@@ -380,15 +380,15 @@ describe("a chat's log", () => {
           Stream.filter(({ event }) => Predicate.isTagged(event, "UserMessage")),
           Stream.take(1),
           Stream.runCollect,
-          Effect.map((entries) => [...entries].map((entry) => entry.seq))
+          Effect.map((entries) => [...entries].map((entry) => entry.sequence))
         )
       }).pipe(
         Effect.provide(handler.pipe(Layer.provideMerge(AssistantEngine.layerMemory), Layer.provide(Scripted.unused))),
         Effect.provide(ChatLog.layerMemory)
       )
 
-      // "one" is seq 1, then its turn's entries; the first message after 1 is "two".
-      expect(seqs).not.toContain(1)
+      // "one" is sequence 1, then its turn's entries; the first message after 1 is "two".
+      expect(sequences).not.toContain(1)
     })
   )
 

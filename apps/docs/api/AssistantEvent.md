@@ -124,7 +124,7 @@ The folds over a chat take this type, so a client's typed entries fit too.
 ```ts
 interface AnyEntry {
   readonly chatId: ChatId
-  readonly seq: number
+  readonly sequence: number
   readonly at: number
   readonly event: { readonly _tag: string }
 }
@@ -332,7 +332,7 @@ class ModelOutput extends Schema.TaggedClass<ModelOutput>()("ModelOutput", {
    * arrived while the model was working. A turn has handled what its
    * outputs had read.
    */
-  seenThroughSeq: Schema.optional(Schema.Int),
+  seenThroughSequence: Schema.optional(Schema.Int),
   /** The model that wrote it, as the provider's id for it or the name the context gave it. */
   model: Schema.optional(Schema.String),
   /** The provider's id for the response, when it gives one. */
@@ -421,11 +421,11 @@ class TurnStarted extends Schema.TaggedClass<TurnStarted>()("TurnStarted", {
 
 Represents a turn that finished.
 
-`throughSeq` is the last entry the turn read. Inputs after it still need a turn.
+`throughSequence` is the last entry the turn read. Inputs after it still need a turn.
 
 ```ts
 class TurnCompleted extends Schema.TaggedClass<TurnCompleted>()("TurnCompleted", {
-  throughSeq: Schema.Int
+  throughSequence: Schema.Int
 })
 ```
 
@@ -435,12 +435,12 @@ class TurnCompleted extends Schema.TaggedClass<TurnCompleted>()("TurnCompleted",
 
 Represents a turn that failed.
 
-`throughSeq` covers everything stored when the turn failed, so a failing input isn't retried
+`throughSequence` covers everything stored when the turn failed, so a failing input isn't retried
 forever.
 
 ```ts
 class TurnFailed extends Schema.TaggedClass<TurnFailed>()("TurnFailed", {
-  throughSeq: Schema.Int,
+  throughSequence: Schema.Int,
   message: Schema.String
 })
 ```
@@ -576,7 +576,7 @@ const StoredAppEvent = Schema.StructWithRest( …
 
 Schema for a stored event with its position in the chat.
 
-`seq` starts at 1 and has no gaps. `at` is the time the event was stored, in epoch
+`sequence` starts at 1 and has no gaps. `at` is the time the event was stored, in epoch
 milliseconds.
 
 ```ts

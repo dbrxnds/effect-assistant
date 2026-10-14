@@ -79,20 +79,20 @@ export const withHandlers = <T extends Record<string, Tool.Any>>(
   handlers: Toolkit.HandlersFrom<T>
 ): WithHandlers<T> => ({ toolkit, handlers })
 
-/** A handler that runs `turn.loop` with these options. */
-export const simple = (options: Assistant.LoopOptions) => (turn: Assistant.Turn) => turn.loop(options)
+/** A handler that runs `turn.run` with these options. */
+export const simple = (options: Assistant.RunOptions) => (turn: Assistant.Turn) => turn.run(options)
 
-/** A handler that runs `turn.loop` with a toolkit, its handlers provided. */
+/** A handler that runs `turn.run` with a toolkit, its handlers provided. */
 export const withTools =
   <T extends Record<string, Tool.Any>>(
-    options: Omit<Assistant.LoopOptions<T>, "toolkit"> & { readonly toolkit: WithHandlers<T> }
+    options: Omit<Assistant.RunOptions<T>, "toolkit"> & { readonly toolkit: WithHandlers<T> }
   ) =>
   (turn: Assistant.Turn) => {
     const { toolkit, ...rest } = options
 
     return Stream.unwrap(
       Effect.map(toolkit.toolkit.toHandlers(toolkit.handlers), (handlers) =>
-        turn.loop({ ...rest, toolkit: toolkit.toolkit }).pipe(Stream.provideContext(handlers))
+        turn.run({ ...rest, toolkit: toolkit.toolkit }).pipe(Stream.provideContext(handlers))
       )
     )
   }
@@ -137,7 +137,7 @@ export const submittedUpdate = (source: string, payload: Record<string, string |
 /** One line per entry, for a failure message. */
 export const traceEntries = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
   entries
-    .map(({ seq, event }) => {
+    .map(({ sequence, event }) => {
       const detail =
         Predicate.isTagged(event, "UserMessage") || Predicate.isTagged(event, "AssistantMessage")
           ? event.text
@@ -149,7 +149,7 @@ export const traceEntries = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
                 ? ""
                 : toJsonText(event).slice(0, 120)
 
-      return `${seq} ${event._tag} ${detail}`
+      return `${sequence} ${event._tag} ${detail}`
     })
     .join("\n")
 

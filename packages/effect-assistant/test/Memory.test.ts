@@ -19,7 +19,7 @@ const remembering = Effect.gen(function* () {
       Effect.gen(function* () {
         const facts = yield* store.facts(turn.chatId)
 
-        return turn.loop({ instructions: `Be brief.\n\n${Memory.render(facts)}`, toolkit: Memory.Tools })
+        return turn.run({ instructions: `Be brief.\n\n${Memory.render(facts)}`, toolkit: Memory.Tools })
       })
     ).pipe(Stream.provideService(Memory.MemoryStore, store))
 })

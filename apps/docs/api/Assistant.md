@@ -81,12 +81,12 @@ const make: <
 
 ## Models
 
-### LoopOptions
+### RunOptions
 
-Represents the options accepted by `turn.loop`.
+Represents the options accepted by `turn.run`.
 
 ```ts
-interface LoopOptions<T extends Record<string, Tool.Any> = Record<never, never>, Events = never> {
+interface RunOptions<T extends Record<string, Tool.Any> = Record<never, never>, Events = never> {
   /** The assistant's role and rules. The loop places `Instructions.protocol` before them. */
   readonly instructions: string | Instructions.Resolved
   /**
@@ -152,7 +152,7 @@ const withOrders: Assistant.HistoryView<OrderPlaced> = (entries) =>
 
 // An `OrderPlaced` that the API submits wakes a turn, which reads it as this note.
 const MyAssistantLive = MyAssistant.toLayer((turn) =>
-  turn.loop({ instructions: "Be brief.", history: withOrders })
+  turn.run({ instructions: "Be brief.", history: withOrders })
 )
 ```
 
@@ -171,7 +171,7 @@ Represents an entry in a chat's log, with the assistant's own events decoded to 
 ```ts
 interface Entry<Events = never> {
   readonly chatId: ChatId
-  readonly seq: number
+  readonly sequence: number
   readonly at: number
   readonly event: AssistantEvent.AssistantEvent | Events
 }
@@ -185,7 +185,7 @@ Represents the options accepted by `turn.replyIfOwed`.
 
 ```ts
 interface ReplyOptions {
-  /** The assistant's instructions, as passed to `turn.loop`. `Instructions.protocol` is added. */
+  /** The assistant's instructions, as passed to `turn.run`. `Instructions.protocol` is added. */
   readonly instructions: string | Instructions.Resolved
   /**
    * The message given to the model after the history. Defaults to a message saying that it
@@ -226,8 +226,8 @@ interface Turn<Events = never> {
    * tools, and the instructions and tools in `options`. Every step is a tool call, and
    * the loop ends with `replyIfOwed`.
    */
-  readonly loop: <T extends Record<string, Tool.Any> = Record<never, never>>(
-    options: LoopOptions<T, Events>
+  readonly run: <T extends Record<string, Tool.Any> = Record<never, never>>(
+    options: RunOptions<T, Events>
   ) => Stream.Stream<
     AssistantLoop.Event,
     AiError.AiError,
@@ -238,7 +238,7 @@ interface Turn<Events = never> {
    * message. In this pass the model can only reply.
    *
    * The stream is empty when no reply is owed, or when an input arrived that the next turn will
-   * read. `loop` runs this pass with its own prompt and tools, so the pass reuses the cached
+   * read. `run` runs this pass with its own prompt and tools, so the pass reuses the cached
    * prompt.
    */
   readonly replyIfOwed: (
@@ -342,7 +342,7 @@ interface Service<Events = never> {
   /**
    * Streams the chat's stored entries, then live ones, with the assistant's own events decoded.
    * A reader that already has the earlier entries passes `after` and receives only the entries
-   * after that `seq`.
+   * after that `sequence`.
    *
    * For a chat client, pipe the whole log into `Timeline.changes(MyAssistant, { after })`, which
    * streams the chat's timeline, as its user sees it. Its `after` goes there, not here: a message
@@ -417,7 +417,7 @@ interface Assistant<
    * export const MyAssistant = Assistant.make("my-assistant")
    *
    * const MyAssistantLive = MyAssistant.toLayer((turn) =>
-   *   turn.loop({ instructions: "You help a small team. Be brief." })
+   *   turn.run({ instructions: "You help a small team. Be brief." })
    * )
    *
    * const AppLive = MyAssistantLive.pipe(

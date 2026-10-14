@@ -69,7 +69,7 @@ describe("Skill.toolkit", () => {
       const Skills = Skill.toolkit([onboarding, offboarding])
 
       const handlers = TestAssistant.toLayer((turn) =>
-        turn.loop({ instructions, toolkit: Toolkit.merge(OfficeTools, Skills) })
+        turn.run({ instructions, toolkit: Toolkit.merge(OfficeTools, Skills) })
       ).pipe(Layer.provide([OfficeToolsLive, Skills.layer.pipe(Layer.provide(PlaybooksLive))]))
 
       const entries = yield* Effect.gen(function* () {
@@ -98,7 +98,7 @@ describe("Skill.toolkit", () => {
       const model = yield* loading("Invoicing")
       const Skills = Skill.toolkit([onboarding])
 
-      const handlers = TestAssistant.toLayer((turn) => turn.loop({ instructions, toolkit: Skills })).pipe(
+      const handlers = TestAssistant.toLayer((turn) => turn.run({ instructions, toolkit: Skills })).pipe(
         Layer.provide(Skills.layer)
       )
 
@@ -134,7 +134,7 @@ describe("Skill.toolkit", () => {
             const Skills = Skill.toolkit([onboarding, offboarding].filter(allowed))
 
             return turn
-              .loop({ instructions, toolkit: Skills })
+              .run({ instructions, toolkit: Skills })
               .pipe(Stream.provide(Skills.layer), Stream.provideService(Playbooks, playbooks))
           }
         })

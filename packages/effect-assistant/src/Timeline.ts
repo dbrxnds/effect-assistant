@@ -246,13 +246,13 @@ export type Activity = typeof Activity.Type
 /**
  * Represents a chat's timeline: the chat as its user sees it, typed with the app's events it shows.
  * It holds the chat's items in order, what is working in it, whether the last turn failed, and
- * whether the chat was deleted. `seq` is the position in the chat's log that the timeline is up to.
+ * whether the chat was deleted. `sequence` is the position in the chat's log that the timeline is up to.
  *
  * @category models
  * @since 0.3.0
  */
 export interface Timeline<Events = never> {
-  readonly seq: number
+  readonly sequence: number
   readonly items: ReadonlyArray<Item<Events>>
   readonly activity: Activity
   /** Whether the last turn failed with no message after it. */
@@ -268,14 +268,14 @@ export interface Timeline<Events = never> {
  *
  * A change holds each item that is new or changed (for example, a message whose block was
  * answered or closed, or a call the user approved), in full. It also holds the current activity, whether the last turn failed,
- * and whether the chat was deleted. `seq` is the position in the chat's log that the change is up
+ * and whether the chat was deleted. `sequence` is the position in the chat's log that the change is up
  * to.
  *
  * @category models
  * @since 0.3.0
  */
 export interface Change<Events = never> {
-  readonly seq: number
+  readonly sequence: number
   readonly items: ReadonlyArray<Item<Events>>
   readonly activity: Activity
   readonly failed: boolean
@@ -298,7 +298,7 @@ function makeChange(events: ReadonlyArray<AssistantEvent.AppEventSchema> = []): 
   const encodeItem = Schema.encodeUnknownSync(AnyItem)
 
   return Schema.Struct({
-    seq: Schema.Int,
+    sequence: Schema.Int,
     // An item for an event this schema doesn't name, or that doesn't decode (from a newer server, say), is left out
     // rather than failing the whole change.
     items: Schema.Array(Schema.Json).pipe(
@@ -361,7 +361,7 @@ export const Change: <const Events extends ReadonlyArray<AssistantEvent.AppEvent
  * @since 0.1.0
  */
 export const empty: Timeline = {
-  seq: 0,
+  sequence: 0,
   items: [],
   activity: { working: false, specialists: [] },
   failed: false,
@@ -407,7 +407,7 @@ export const apply = <Events>(timeline: Timeline<Events>, change: Change<Events>
   const known = new Set(timeline.items.map((item) => item.id))
 
   return {
-    seq: Math.max(timeline.seq, change.seq),
+    sequence: Math.max(timeline.sequence, change.sequence),
     items: [
       ...timeline.items.map((item) => changed.get(item.id) ?? item),
       ...change.items.filter((item) => !known.has(item.id))
@@ -465,7 +465,7 @@ type AnyItem = UserMessage | AssistantMessage | AnyEventItem | ApprovalItem
 
 // What the fold below builds: the overloads that use it type its items with the events shown.
 interface AnyChange {
-  readonly seq: number
+  readonly sequence: number
   readonly items: ReadonlyArray<AnyItem>
   readonly activity: Activity
   readonly failed: boolean
@@ -622,7 +622,7 @@ const sameActivity = (a: Activity, b: Activity) =>
 const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding => {
   const shown = new Map(show.map((schema) => [AppEvents.tagOf(schema), schema]))
   let approvals: ReadonlyMap<string, ToolApproval.State> = new Map()
-  let seq = 0
+  let sequence = 0
   let failed = false
   let deleted = false
   let activity = AssistantActivity.empty
@@ -729,7 +729,7 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding =>
 
     return Option.map(event, (decoded) => ({
       _tag: decoded._tag,
-      id: `app-event:${entry.seq}`,
+      id: `app-event:${entry.sequence}`,
       at: entry.at,
       event: decoded
     }))
@@ -769,7 +769,7 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding =>
     const previous = { activity: activityOf(activity), failed, deleted }
     const { event } = entry
 
-    seq = entry.seq
+    sequence = entry.sequence
     activity = AssistantActivity.apply(activity, entry)
 
     if (!AssistantEvent.isLibraryEvent(event)) {
@@ -777,11 +777,11 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding =>
 
       return Option.match(eventItemOf(entry), {
         onNone: () =>
-          sameActivity(previous.activity, now) ? undefined : { seq, items: [], activity: now, failed, deleted },
+          sameActivity(previous.activity, now) ? undefined : { sequence, items: [], activity: now, failed, deleted },
         onSome: (item) => {
           items.set(item.id, item)
 
-          return { seq, items: [item], activity: now, failed, deleted }
+          return { sequence, items: [item], activity: now, failed, deleted }
         }
       })
     }
@@ -811,13 +811,13 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding =>
       deleted === previous.deleted &&
       sameActivity(previous.activity, now)
       ? undefined
-      : { seq, items: all, activity: now, failed, deleted }
+      : { sequence, items: all, activity: now, failed, deleted }
   }
 
   return {
     step,
     get snapshot() {
-      return { seq, items: [...items.values()], activity: activityOf(activity), failed, deleted }
+      return { sequence, items: [...items.values()], activity: activityOf(activity), failed, deleted }
     }
   }
 }
@@ -832,7 +832,7 @@ const merge = (changes: ReadonlyArray<AnyChange>): AnyChange | undefined => {
   for (const change of changes) for (const item of change.items) items.set(item.id, item)
 
   return {
-    seq: last.seq,
+    sequence: last.sequence,
     items: [...items.values()],
     activity: last.activity,
     failed: last.failed,
@@ -864,7 +864,7 @@ export interface ChangesOptions<
   Show extends ReadonlyArray<AssistantEvent.AppEventSchema> = readonly []
 > extends ShowOptions<Show> {
   /**
-   * The `seq` up to which the client already has the timeline. The result contains only the
+   * The `sequence` up to which the client already has the timeline. The result contains only the
    * changes after it. Defaults to `0`, every change.
    */
   readonly after?: number | undefined
@@ -889,7 +889,7 @@ function changesWith<E, R>(
         const changed = chunk.flatMap((entry) => {
           const change = timeline.step(entry)
 
-          return change === undefined || entry.seq <= after ? [] : [change]
+          return change === undefined || entry.sequence <= after ? [] : [change]
         })
 
         const merged = merge(changed)
@@ -907,9 +907,9 @@ function changesWith<E, R>(
  *
  * The entries must stream from the start of the chat's log, as `assistant.subscribe(chatId)` does
  * without `after`. The fold reads every entry, because a message depends on earlier entries: its
- * block is answered or closed later. `after` only skips emitting the changes up to that `seq`, so a
- * client that has the timeline up to a `seq` receives only what changed since. Pass `after` here,
- * not to `subscribe`: a subscription that starts after a `seq` gives the fold an incomplete log,
+ * block is answered or closed later. `after` only skips emitting the changes up to that `sequence`, so a
+ * client that has the timeline up to a `sequence` receives only what changed since. Pass `after` here,
+ * not to `subscribe`: a subscription that starts after a `sequence` gives the fold an incomplete log,
  * and the changes it produces are wrong.
  *
  * Each chunk of entries becomes one change; the stored entries, for example, arrive as one chunk.
@@ -928,7 +928,7 @@ function changesWith<E, R>(
  * import * as Schema from "effect/Schema"
  * import * as Stream from "effect/Stream"
  *
- * class Summary extends Schema.TaggedClass<Summary>()("Summary", { text: Schema.String, throughSeq: Schema.Int }) {}
+ * class Summary extends Schema.TaggedClass<Summary>()("Summary", { text: Schema.String, throughSequence: Schema.Int }) {}
  * class DailyBudgetReached extends Schema.TaggedClass<DailyBudgetReached>()("DailyBudgetReached", {}) {}
  *
  * const MyAssistant = Assistant.make("my-assistant", { events: [Summary, DailyBudgetReached] })

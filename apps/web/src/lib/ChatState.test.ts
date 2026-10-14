@@ -7,8 +7,8 @@ import * as ChatState from "./ChatState.ts"
 
 const user = (id: string, text: string) => Timeline.UserMessage.make({ id: InputId.fromKey(id), text, at: 0 })
 
-const change = (seq: number, items: ReadonlyArray<Timeline.Item>, working: boolean): Timeline.Change => ({
-  seq,
+const change = (sequence: number, items: ReadonlyArray<Timeline.Item>, working: boolean): Timeline.Change => ({
+  sequence,
   items,
   activity: { working, specialists: [] },
   failed: false,

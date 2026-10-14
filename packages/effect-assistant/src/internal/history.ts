@@ -140,7 +140,7 @@ const awaitingMessage = (request: AssistantEvent.ApprovalRequested): Prompt.Tool
   })
 
 const isEntry = (item: AssistantEvent.AnyEntry | Prompt.Message): item is AssistantEvent.AnyEntry =>
-  Predicate.hasProperty(item, "seq")
+  Predicate.hasProperty(item, "sequence")
 
 // In the order the model saw the entries, not the order they were stored. A message a history view put in stands
 // where it is, right after the entry before it, and waits like an input for a call's result or for the model's next
@@ -166,15 +166,15 @@ export const fromEntries = (
     const next = entries.slice(from + 1).find(({ event }) => Predicate.isTagged(event, "ModelOutput"))?.event
 
     return next !== undefined && AssistantEvent.isLibraryEvent(next) && Predicate.isTagged(next, "ModelOutput")
-      ? next.seenThroughSeq
+      ? next.seenThroughSequence
       : undefined
   }
 
-  // `index` is the last entry at or before the item, and `seq` where the item stands.
-  const input = (index: number, seq: number, item: Prompt.Message) => {
+  // `index` is the last entry at or before the item, and `sequence` where the item stands.
+  const input = (index: number, sequence: number, item: Prompt.Message) => {
     const seen = nextSeen(index)
 
-    if (open.size > 0 || (seen !== undefined && seen < seq)) held.push(item)
+    if (open.size > 0 || (seen !== undefined && seen < sequence)) held.push(item)
     else history.push(item)
   }
 
@@ -182,14 +182,14 @@ export const fromEntries = (
 
   for (const item of items) {
     if (!isEntry(item)) {
-      input(index, (entries[index]?.seq ?? 0) + 0.5, item)
+      input(index, (entries[index]?.sequence ?? 0) + 0.5, item)
 
       continue
     }
 
     index += 1
 
-    const { event, seq } = item
+    const { event, sequence } = item
     const at = index
 
     if (!AssistantEvent.isLibraryEvent(event)) continue
@@ -197,8 +197,8 @@ export const fromEntries = (
     Match.value(event).pipe(
       Match.tagsExhaustive({
         UserMessage: (message) =>
-          input(at, seq, userText(AssistantEvent.textWithAttachments(message.text, message.attachments))),
-        BlockAnswer: (answer) => input(at, seq, userText(answerText(answer))),
+          input(at, sequence, userText(AssistantEvent.textWithAttachments(message.text, message.attachments))),
+        BlockAnswer: (answer) => input(at, sequence, userText(answerText(answer))),
         ModelOutput: (output) => {
           history.push(...Prompt.fromResponseParts(output.parts).content)
 
@@ -212,11 +212,11 @@ export const fromEntries = (
           flushIfClosed()
         },
         ToolResult: (result) => {
-          if (requests.has(result.callId)) return input(at, seq, userText(approvedText(result)))
+          if (requests.has(result.callId)) return input(at, sequence, userText(approvedText(result)))
 
           // A view that starts after the call (since a summary, say) keeps its result as text: a tool result needs its
           // call right before it.
-          if (!called.has(result.callId)) return input(at, seq, userText(resultText(result)))
+          if (!called.has(result.callId)) return input(at, sequence, userText(resultText(result)))
 
           history.push(toolMessage(result))
           open.delete(result.callId)
@@ -227,7 +227,7 @@ export const fromEntries = (
         TurnStarted: () => undefined,
         TurnCompleted: () => undefined,
         TurnFailed: () => undefined,
-        SpecialistFinished: (finished) => input(at, seq, userText(finishedText(entries, at, finished))),
+        SpecialistFinished: (finished) => input(at, sequence, userText(finishedText(entries, at, finished))),
         // Every run starts in a call of the model's own (a spawn or a follow-up), whose result says so.
         SpecialistStarted: () => undefined,
         BlocksClosed: () => undefined,
@@ -235,7 +235,7 @@ export const fromEntries = (
         ApprovalRequested: (request) => {
           requests.set(request.callId, request)
 
-          if (!called.has(request.callId)) return input(at, seq, userText(awaitingText(request)))
+          if (!called.has(request.callId)) return input(at, sequence, userText(awaitingText(request)))
 
           history.push(awaitingMessage(request))
           open.delete(request.callId)
@@ -244,10 +244,10 @@ export const fromEntries = (
         // An approved call's result says so.
         ApprovalDecision: (decision) =>
           decision.decision === "rejected"
-            ? input(at, seq, userText(rejectedText(decision, toolOf(decision.callId))))
+            ? input(at, sequence, userText(rejectedText(decision, toolOf(decision.callId))))
             : undefined,
         ApprovalsExpired: (expired) =>
-          expired.callIds.forEach((callId) => input(at, seq, userText(expiredText(callId, toolOf(callId))))),
+          expired.callIds.forEach((callId) => input(at, sequence, userText(expiredText(callId, toolOf(callId))))),
         ChatDeleted: () => undefined
       })
     )
@@ -264,7 +264,7 @@ export const isInput = (event: { readonly _tag: string }): boolean =>
 export const handledThrough = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): number => {
   const last = entries.findLast(({ event }) => AssistantEvent.isTurnEnd(event))?.event
 
-  return last !== undefined && AssistantEvent.isTurnEnd(last) ? last.throughSeq : 0
+  return last !== undefined && AssistantEvent.isTurnEnd(last) ? last.throughSequence : 0
 }
 
 // A run the assistant stopped isn't an input here: it wakes nothing.
@@ -274,8 +274,10 @@ export const unhandledInputs = (
 ): ReadonlyArray<{ readonly _tag: string }> => {
   const seen = handledThrough(entries)
 
-  return entries.flatMap(({ event, seq }) =>
-    seq > seen && isInput(event) && !(AssistantEvent.isInput(event) && !AssistantEvent.isWaking(event)) ? [event] : []
+  return entries.flatMap(({ event, sequence }) =>
+    sequence > seen && isInput(event) && !(AssistantEvent.isInput(event) && !AssistantEvent.isWaking(event))
+      ? [event]
+      : []
   )
 }
 
@@ -285,16 +287,17 @@ export const needsTurn = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): bool
 
 // A failure the user was shown counts as a reply, and so does a call they're asked to approve.
 /** @internal */
-export const owesReply = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, throughSeq: number): boolean => {
+export const owesReply = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, throughSequence: number): boolean => {
   const latest = entries.findLast(
-    ({ event, seq }) => seq <= throughSeq && AssistantEvent.isInput(event) && AssistantEvent.isUserInput(event)
+    ({ event, sequence }) =>
+      sequence <= throughSequence && AssistantEvent.isInput(event) && AssistantEvent.isUserInput(event)
   )
 
   return (
     latest !== undefined &&
     !entries.some(
-      ({ event, seq }) =>
-        seq > latest.seq &&
+      ({ event, sequence }) =>
+        sequence > latest.sequence &&
         (Predicate.isTagged(event, "AssistantMessage") ||
           Predicate.isTagged(event, "TurnFailed") ||
           Predicate.isTagged(event, "ApprovalRequested"))
@@ -321,15 +324,16 @@ const progressMessages = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): Read
 // The model said it was on it and stopped without the result: only progress messages since the user's latest input.
 // A specialist still working doesn't count, since its report is what comes next.
 /** @internal */
-export const owesDelivery = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, throughSeq: number): boolean => {
+export const owesDelivery = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, throughSequence: number): boolean => {
   const latest = entries.findLast(
-    ({ event, seq }) => seq <= throughSeq && AssistantEvent.isInput(event) && AssistantEvent.isUserInput(event)
+    ({ event, sequence }) =>
+      sequence <= throughSequence && AssistantEvent.isInput(event) && AssistantEvent.isUserInput(event)
   )
 
   if (latest === undefined) return false
 
-  const after = entries.flatMap(({ seq, event }) =>
-    seq > latest.seq && AssistantEvent.isLibraryEvent(event) ? [event] : []
+  const after = entries.flatMap(({ sequence, event }) =>
+    sequence > latest.sequence && AssistantEvent.isLibraryEvent(event) ? [event] : []
   )
 
   const messages = after.flatMap((event) => (Predicate.isTagged(event, "AssistantMessage") ? [event] : []))
@@ -352,5 +356,5 @@ export const owesDelivery = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, th
 }
 
 /** @internal */
-export const unreadAfter = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, throughSeq: number): boolean =>
-  entries.some(({ event, seq }) => seq > throughSeq && isInput(event))
+export const unreadAfter = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, throughSequence: number): boolean =>
+  entries.some(({ event, sequence }) => sequence > throughSequence && isInput(event))

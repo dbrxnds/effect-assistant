@@ -87,7 +87,7 @@ const deletedChat = (entries: ReadonlyArray<AssistantEvent.Entry>): Chat => ({
   submit: () => Effect.void,
   submitInBackground: () => Effect.void,
   resume: Effect.void,
-  stream: (after) => Stream.fromIterable(entries.filter((entry) => entry.seq > after)),
+  stream: (after) => Stream.fromIterable(entries.filter((entry) => entry.sequence > after)),
   delete: Effect.void
 })
 
@@ -314,15 +314,15 @@ export const make = Effect.fnUntraced(function* (options: {
           // Subscribes before it reads, so nothing appended in between is missed.
           const subscription = yield* PubSub.subscribe(channel)
           const all = yield* chat.entries
-          const stored = all.filter((entry) => entry.seq > after)
-          const last = stored.at(-1)?.seq ?? after
+          const stored = all.filter((entry) => entry.sequence > after)
+          const last = stored.at(-1)?.sequence ?? after
 
           // Deleted: what the reader hasn't seen, then the end. Otherwise the stream ends with the `ChatDeleted`.
           if (all.some(isChatDeleted)) return Stream.fromIterable(stored)
 
           return Stream.concat(
             Stream.fromIterable(stored),
-            Stream.fromSubscription(subscription).pipe(Stream.filter((entry) => entry.seq > last))
+            Stream.fromSubscription(subscription).pipe(Stream.filter((entry) => entry.sequence > last))
           ).pipe(Stream.takeUntil(isChatDeleted))
         })
       ),

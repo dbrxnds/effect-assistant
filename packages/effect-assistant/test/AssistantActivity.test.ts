@@ -8,7 +8,7 @@ const { SpecialistFinished, SpecialistStarted, TurnCompleted, TurnFailed, TurnSt
 const chatId = Effect.runSync(ChatId.make())
 
 const entries = (events: ReadonlyArray<AssistantEvent.AssistantEvent>) =>
-  events.map((event, i) => AssistantEvent.Entry.make({ chatId, seq: i + 1, at: (i + 1) * 1000, event }))
+  events.map((event, i) => AssistantEvent.Entry.make({ chatId, sequence: i + 1, at: (i + 1) * 1000, event }))
 
 const activity = (events: ReadonlyArray<AssistantEvent.AssistantEvent>) =>
   AssistantActivity.fromEntries(entries(events))
@@ -18,11 +18,11 @@ describe("AssistantActivity", () => {
     expect(activity([say("hi")]).queued).toBe(true)
     expect(AssistantActivity.isWorking(activity([say("hi")]))).toBe(true)
 
-    // The turn read through seq 2; "two" (seq 3) arrived after, so another turn is coming.
+    // The turn read through sequence 2; "two" (sequence 3) arrived after, so another turn is coming.
     const events = [say("one"), TurnStarted.make({ assistant: "test" }), say("two")]
 
-    expect(AssistantActivity.isWorking(activity([...events, TurnCompleted.make({ throughSeq: 2 })]))).toBe(true)
-    expect(AssistantActivity.isWorking(activity([...events, TurnCompleted.make({ throughSeq: 3 })]))).toBe(false)
+    expect(AssistantActivity.isWorking(activity([...events, TurnCompleted.make({ throughSequence: 2 })]))).toBe(true)
+    expect(AssistantActivity.isWorking(activity([...events, TurnCompleted.make({ throughSequence: 3 })]))).toBe(false)
   })
 
   it("works from TurnStarted until the turn ends", () => {
@@ -32,7 +32,7 @@ describe("AssistantActivity", () => {
     expect(AssistantActivity.isWorking(running)).toBe(true)
     expect(
       AssistantActivity.isWorking(
-        activity([say("hi"), TurnStarted.make({ assistant: "test" }), TurnCompleted.make({ throughSeq: 2 })])
+        activity([say("hi"), TurnStarted.make({ assistant: "test" }), TurnCompleted.make({ throughSequence: 2 })])
       )
     ).toBe(false)
   })
@@ -42,7 +42,7 @@ describe("AssistantActivity", () => {
       say("hi"),
       TurnStarted.make({ assistant: "test" }),
       TurnStarted.make({ assistant: "test" }),
-      TurnFailed.make({ throughSeq: 3, message: "boom" })
+      TurnFailed.make({ throughSequence: 3, message: "boom" })
     ])
 
     expect(AssistantActivity.isWorking(resumed)).toBe(false)
@@ -57,7 +57,7 @@ describe("AssistantActivity", () => {
       SpecialistStarted.make({ runId, specialist: "research", goal: "Q4 budgets" })
     ]
 
-    const afterTurn = activity([...spawned, TurnCompleted.make({ throughSeq: 3 })])
+    const afterTurn = activity([...spawned, TurnCompleted.make({ throughSequence: 3 })])
 
     expect(afterTurn.turnSince).toBeUndefined()
     expect([...afterTurn.specialists.values()]).toEqual([
@@ -67,7 +67,7 @@ describe("AssistantActivity", () => {
 
     const answered = activity([
       ...spawned,
-      TurnCompleted.make({ throughSeq: 3 }),
+      TurnCompleted.make({ throughSequence: 3 }),
       SpecialistFinished.make({
         id: InputId.fromKey(`${runId}:1`),
         runId,
@@ -85,7 +85,7 @@ describe("AssistantActivity", () => {
 
     const stopped = activity([
       ...spawned,
-      TurnCompleted.make({ throughSeq: 3 }),
+      TurnCompleted.make({ throughSequence: 3 }),
       SpecialistFinished.make({
         id: InputId.fromKey(`${runId}:1`),
         runId,
@@ -103,8 +103,8 @@ describe("AssistantActivity", () => {
 
   it("counts an app event that came in through submit as an input, and not one a turn appended", () => {
     const after = (event: AssistantEvent.StoredAppEvent) =>
-      [say("order it"), TurnStarted.make({ assistant: "test" }), TurnCompleted.make({ throughSeq: 2 }), event].map(
-        (event, i) => ({ chatId, seq: i + 1, at: (i + 1) * 1000, event })
+      [say("order it"), TurnStarted.make({ assistant: "test" }), TurnCompleted.make({ throughSequence: 2 }), event].map(
+        (event, i) => ({ chatId, sequence: i + 1, at: (i + 1) * 1000, event })
       )
 
     expect(

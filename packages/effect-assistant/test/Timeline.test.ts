@@ -33,7 +33,7 @@ class Note extends Schema.TaggedClass<Note>()("Note", { text: Schema.String }) {
 const Viewing = Assistant.make("viewing", { events: [Update, Note] })
 
 const entries = (events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>) =>
-  events.map((event, i) => AssistantEvent.Entry.make({ chatId, seq: i + 1, at: (i + 1) * 1000, event }))
+  events.map((event, i) => AssistantEvent.Entry.make({ chatId, sequence: i + 1, at: (i + 1) * 1000, event }))
 
 const timeline = (events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>) =>
   Timeline.fromEntries(entries(events))
@@ -67,7 +67,7 @@ const pick = AssistantEvent.BlockAnswer.make({
 const quoting = [
   hi,
   AssistantEvent.TurnStarted.make({ assistant: "test" }),
-  AssistantEvent.ModelOutput.make({ parts: [call], seenThroughSeq: 2 }),
+  AssistantEvent.ModelOutput.make({ parts: [call], seenThroughSequence: 2 }),
   AssistantEvent.ToolStarted.make({ callId: "toolu_quote", tool: "quote_order" }),
   AssistantEvent.ToolResult.make({
     callId: "toolu_quote",
@@ -76,7 +76,7 @@ const quoting = [
     result: { total: 1200 }
   }),
   ask,
-  AssistantEvent.TurnCompleted.make({ throughSeq: 1 }),
+  AssistantEvent.TurnCompleted.make({ throughSequence: 1 }),
   pick
 ]
 
@@ -147,7 +147,7 @@ describe("Timeline.fromEntries", () => {
     const failed = timeline([
       hi,
       AssistantEvent.TurnStarted.make({ assistant: "test" }),
-      AssistantEvent.TurnFailed.make({ throughSeq: 2, message: "AnthropicError: overloaded" })
+      AssistantEvent.TurnFailed.make({ throughSequence: 2, message: "AnthropicError: overloaded" })
     ])
 
     expect(failed.activity).toEqual({ working: false, specialists: [] })
@@ -175,10 +175,10 @@ describe("Timeline.fromEntries", () => {
 
     // As `subscribe` streams them: decoded.
     const decoded = [
-      { chatId, seq: 1, at: 1000, event: hi },
-      { chatId, seq: 2, at: 2000, event: shipped },
-      { chatId, seq: 3, at: 2500, event: note },
-      { chatId, seq: 4, at: 3000, event: ask }
+      { chatId, sequence: 1, at: 1000, event: hi },
+      { chatId, sequence: 2, at: 2000, event: shipped },
+      { chatId, sequence: 3, at: 2500, event: note },
+      { chatId, sequence: 4, at: 3000, event: ask }
     ]
 
     const shown: Timeline.Timeline<Update> = Timeline.fromEntries(decoded, Viewing, { show: [Update] })
@@ -230,7 +230,7 @@ describe("Timeline.fromEntries", () => {
   it("decodes a change without the items its schema doesn't name, or that don't decode", () => {
     const change = Schema.decodeUnknownSync(Timeline.Change([Update]))(
       JSON.parse(`{
-        "seq": 4,
+        "sequence": 4,
         "items": [
           { "_tag": "UserMessage", "id": "${hi.id}", "text": "hi", "at": 1 },
           { "_tag": "Note", "id": "app-event:2", "at": 2, "event": { "_tag": "Note", "text": "hidden" } },
@@ -276,7 +276,7 @@ describe("Timeline.fromEntries", () => {
 describe("Timeline.apply", () => {
   it("replaces changed messages in place, adds new ones after, and changes nothing applied twice", () => {
     const first: Timeline.Change = {
-      seq: 2,
+      sequence: 2,
       items: [
         Timeline.UserMessage.make({ id: hi.id, text: "hi", at: 1 }),
         Timeline.AssistantMessage.make({ id: "m1", text: "Pick", at: 2 })
@@ -287,7 +287,7 @@ describe("Timeline.apply", () => {
     }
 
     const second: Timeline.Change = {
-      seq: 5,
+      sequence: 5,
       items: [
         Timeline.AssistantMessage.make({
           id: "m1",
@@ -306,13 +306,13 @@ describe("Timeline.apply", () => {
     const twice = [first, second, first, second].reduce(Timeline.apply, Timeline.empty)
 
     expect(once.items.map((item) => item.id)).toEqual([hi.id, "m1", "m2"])
-    expect(once.seq).toBe(5)
+    expect(once.sequence).toBe(5)
     expect(twice).toEqual(once)
   })
 })
 
 describe("Timeline.changes", () => {
-  it.live("folds to the log's timeline, in JSON over the wire, and after a seq streams only what came since", () =>
+  it.live("folds to the log's timeline, in JSON over the wire, and after a sequence streams only what came since", () =>
     Effect.gen(function* () {
       const model = yield* Scripted.make((request) =>
         Scripted.lastInput(request).includes("shipped") ? Scripted.reply("It shipped.") : Scripted.reply("Hi!")
@@ -334,7 +334,7 @@ describe("Timeline.changes", () => {
             Schema.decodeUnknownSync(Wire)(JSON.parse(JSON.stringify(Schema.encodeSync(Wire)(change))))
           ),
           Timeline.fold,
-          Stream.takeUntil((shown) => shown.seq >= log.at(-1)!.seq),
+          Stream.takeUntil((shown) => shown.sequence >= log.at(-1)!.sequence),
           Stream.runLast,
           Effect.map(Option.getOrThrow)
         )
@@ -342,9 +342,9 @@ describe("Timeline.changes", () => {
         // Data-first, to cover both forms.
         const since = yield* Timeline.changes((yield* Updating).subscribe(chat), Updating, {
           show: [Update],
-          after: first.at(-1)!.seq
+          after: first.at(-1)!.sequence
         }).pipe(
-          Stream.takeUntil((changes) => changes.seq >= log.at(-1)!.seq),
+          Stream.takeUntil((changes) => changes.sequence >= log.at(-1)!.sequence),
           Stream.runCollect
         )
 
@@ -352,7 +352,7 @@ describe("Timeline.changes", () => {
         const hidden = yield* (yield* Updating).subscribe(chat).pipe(
           Timeline.changes(Updating),
           Timeline.fold,
-          Stream.takeUntil((shown) => shown.seq >= log.at(-1)!.seq),
+          Stream.takeUntil((shown) => shown.sequence >= log.at(-1)!.sequence),
           Stream.runLast,
           Effect.map(Option.getOrThrow)
         )
@@ -360,7 +360,7 @@ describe("Timeline.changes", () => {
         return { log, folded, since, hidden }
       }).pipe(
         Effect.provide(
-          updatingAssistant((turn) => turn.loop({ instructions: "Be brief.", history: readUpdates }), model.layer)
+          updatingAssistant((turn) => turn.run({ instructions: "Be brief.", history: readUpdates }), model.layer)
         )
       )
 

@@ -25,7 +25,7 @@ const orderingCampaigns = Skill.make("Ordering a campaign", {
 const AssistantSkills = Skill.toolkit([orderingCampaigns, sharingAssets])
 
 const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
-  turn.loop({ instructions, toolkit: Toolkit.merge(CampaignTools, AssistantSkills) })
+  turn.run({ instructions, toolkit: Toolkit.merge(CampaignTools, AssistantSkills) })
 ).pipe(Layer.provide([CampaignToolsLive, AssistantSkills.layer]))
 ```
 

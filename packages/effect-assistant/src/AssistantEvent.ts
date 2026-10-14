@@ -280,7 +280,7 @@ export class ModelOutput extends Schema.TaggedClass<ModelOutput>()("ModelOutput"
    * arrived while the model was working. A turn has handled what its
    * outputs had read.
    */
-  seenThroughSeq: Schema.optional(Schema.Int),
+  seenThroughSequence: Schema.optional(Schema.Int),
   /** The model that wrote it, as the provider's id for it or the name the context gave it. */
   model: Schema.optional(Schema.String),
   /** The provider's id for the response, when it gives one. */
@@ -365,26 +365,26 @@ export class TurnStarted extends Schema.TaggedClass<TurnStarted>()("TurnStarted"
 /**
  * Represents a turn that finished.
  *
- * `throughSeq` is the last entry the turn read. Inputs after it still need a turn.
+ * `throughSequence` is the last entry the turn read. Inputs after it still need a turn.
  *
  * @category schemas
  * @since 0.1.0
  */
 export class TurnCompleted extends Schema.TaggedClass<TurnCompleted>()("TurnCompleted", {
-  throughSeq: Schema.Int
+  throughSequence: Schema.Int
 }) {}
 
 /**
  * Represents a turn that failed.
  *
- * `throughSeq` covers everything stored when the turn failed, so a failing input isn't retried
+ * `throughSequence` covers everything stored when the turn failed, so a failing input isn't retried
  * forever.
  *
  * @category schemas
  * @since 0.1.0
  */
 export class TurnFailed extends Schema.TaggedClass<TurnFailed>()("TurnFailed", {
-  throughSeq: Schema.Int,
+  throughSequence: Schema.Int,
   message: Schema.String
 }) {}
 
@@ -585,7 +585,7 @@ export const isAppInput = (event: { readonly _tag: string }): boolean =>
  */
 export interface AnyEntry {
   readonly chatId: ChatId
-  readonly seq: number
+  readonly sequence: number
   readonly at: number
   readonly event: { readonly _tag: string }
 }
@@ -593,7 +593,7 @@ export interface AnyEntry {
 /**
  * Schema for a stored event with its position in the chat.
  *
- * `seq` starts at 1 and has no gaps. `at` is the time the event was stored, in epoch
+ * `sequence` starts at 1 and has no gaps. `at` is the time the event was stored, in epoch
  * milliseconds.
  *
  * @category schemas
@@ -601,7 +601,7 @@ export interface AnyEntry {
  */
 export const Entry = Schema.Struct({
   chatId: ChatId,
-  seq: Schema.Int,
+  sequence: Schema.Int,
   at: Schema.Finite,
   event: Schema.Union([AssistantEvent, StoredAppEvent])
 })

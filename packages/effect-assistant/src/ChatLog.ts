@@ -33,7 +33,7 @@ export class ChatLog extends Context.Service<
       chatId: ChatId,
       events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>
     ) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
-    /** Reads a chat's stored entries in order, either all of them or only those after a `seq`. */
+    /** Reads a chat's stored entries in order, either all of them or only those after a `sequence`. */
     readonly read: (chatId: ChatId, options?: ReadOptions) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
     /**
      * Returns the chats whose last entry ends neither a turn nor the chat. After a restart, these
@@ -50,14 +50,14 @@ export class ChatLog extends Context.Service<
  * @since 0.1.0
  */
 export interface ReadOptions {
-  /** Reads only the entries after this `seq`. */
+  /** Reads only the entries after this `sequence`. */
   readonly after?: number | undefined
 }
 
 /**
  * Represents the storage that a `ChatLog` is built on.
  *
- * A storage reads a chat's entries, finds a chat's last `seq`, writes new entries, and finds every
+ * A storage reads a chat's entries, finds a chat's last `sequence`, writes new entries, and finds every
  * chat's last entry. Entries are never removed, so a deleted chat keeps its log, which ends in
  * `ChatDeleted`.
  *
@@ -66,7 +66,7 @@ export interface ReadOptions {
  */
 export interface Storage {
   readonly read: (chatId: ChatId, options?: ReadOptions) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
-  readonly lastSeq: (chatId: ChatId) => Effect.Effect<number>
+  readonly lastSequence: (chatId: ChatId) => Effect.Effect<number>
   readonly write: (chatId: ChatId, entries: ReadonlyArray<AssistantEvent.Entry>) => Effect.Effect<void>
   /** Returns the last entry of every chat. */
   readonly lastEntries: Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
@@ -74,7 +74,7 @@ export interface Storage {
 
 /**
  * Creates a `ChatLog` from a {@link Storage}. `append` numbers new entries after the chat's last
- * `seq` and stamps them with the current time.
+ * `sequence` and stamps them with the current time.
  *
  * @category constructors
  * @since 0.1.0
@@ -88,9 +88,12 @@ export const make = (storage: Storage): ChatLog["Service"] =>
     ) {
       if (events.length === 0) return []
 
-      const seq = yield* storage.lastSeq(chatId)
+      const sequence = yield* storage.lastSequence(chatId)
       const at = yield* Clock.currentTimeMillis
-      const entries = events.map((event, n) => AssistantEvent.Entry.make({ chatId, seq: seq + n + 1, at, event }))
+
+      const entries = events.map((event, n) =>
+        AssistantEvent.Entry.make({ chatId, sequence: sequence + n + 1, at, event })
+      )
 
       yield* storage.write(chatId, entries)
 
@@ -121,12 +124,12 @@ export const layerMemory: Layer.Layer<ChatLog> = Layer.effect(
       read: Effect.fnUntraced(function* (chatId: ChatId, options?: ReadOptions) {
         const all = yield* Ref.get(chats)
 
-        return (all.get(chatId) ?? []).filter((entry) => entry.seq > (options?.after ?? 0))
+        return (all.get(chatId) ?? []).filter((entry) => entry.sequence > (options?.after ?? 0))
       }),
-      lastSeq: Effect.fnUntraced(function* (chatId: ChatId) {
+      lastSequence: Effect.fnUntraced(function* (chatId: ChatId) {
         const all = yield* Ref.get(chats)
 
-        return all.get(chatId)?.at(-1)?.seq ?? 0
+        return all.get(chatId)?.at(-1)?.sequence ?? 0
       }),
       write: (chatId, entries) =>
         Ref.update(chats, (all) => new Map(all).set(chatId, [...(all.get(chatId) ?? []), ...entries])),
@@ -144,17 +147,19 @@ const EventJson = Schema.fromJsonString(Schema.Union([AssistantEvent.AssistantEv
 // Postgres returns BIGINT and DOUBLE PRECISION columns as strings; other databases as numbers.
 const SqlNumber = Schema.Union([Schema.Finite, Schema.FiniteFromString])
 
-const Row = Schema.Struct({ chat_id: ChatId, seq: SqlNumber, at: SqlNumber, event: EventJson })
+const Row = Schema.Struct({ chat_id: ChatId, sequence: SqlNumber, at: SqlNumber, event: EventJson })
 
-const decodeLastSeq = Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ seq: Schema.NullOr(SqlNumber) })))
+const decodeLastSequence = Schema.decodeUnknownEffect(
+  Schema.Array(Schema.Struct({ sequence: Schema.NullOr(SqlNumber) }))
+)
 
 /**
  * Layer that stores chats in a SQL table named `chat_log`.
  *
  * **Details**
  *
- * The table must already exist. It has the columns `chat_id`, `seq`, `at`, and `event`, with the
- * primary key `(chat_id, seq)`. The layer requires a `SqlClient`.
+ * The table must already exist. It has the columns `chat_id`, `sequence`, `at`, and `event`, with the
+ * primary key `(chat_id, sequence)`. The layer requires a `SqlClient`.
  *
  * **Example** (Storing chats in Postgres)
  *
@@ -174,10 +179,10 @@ const decodeLastSeq = Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ se
  * ```sql
  * CREATE TABLE chat_log (
  *   chat_id TEXT NOT NULL,
- *   seq INTEGER NOT NULL,
+ *   sequence INTEGER NOT NULL,
  *   at DOUBLE PRECISION NOT NULL,
  *   event TEXT NOT NULL,
- *   PRIMARY KEY (chat_id, seq)
+ *   PRIMARY KEY (chat_id, sequence)
  * );
  * ```
  *
@@ -195,7 +200,7 @@ export const layerSql: Layer.Layer<ChatLog, never, SqlClient.SqlClient> = Layer.
       return decoded.map((row) =>
         AssistantEvent.Entry.make({
           chatId: row.chat_id,
-          seq: row.seq,
+          sequence: row.sequence,
           at: row.at,
           event: row.event
         })
@@ -207,19 +212,19 @@ export const layerSql: Layer.Layer<ChatLog, never, SqlClient.SqlClient> = Layer.
     return make({
       read: Effect.fnUntraced(function* (chatId: ChatId, options?: ReadOptions) {
         const rows = yield* sql`
-          SELECT chat_id, seq, at, event FROM chat_log WHERE chat_id = ${chatId} AND seq > ${options?.after ?? 0} ORDER BY seq
+          SELECT chat_id, sequence, at, event FROM chat_log WHERE chat_id = ${chatId} AND sequence > ${options?.after ?? 0} ORDER BY sequence
         `
 
         return yield* toEntries(rows)
       }, Effect.orDie),
-      lastSeq: Effect.fnUntraced(function* (chatId: ChatId) {
+      lastSequence: Effect.fnUntraced(function* (chatId: ChatId) {
         const result = yield* sql`
-          SELECT MAX(seq) AS seq FROM chat_log WHERE chat_id = ${chatId}
+          SELECT MAX(sequence) AS sequence FROM chat_log WHERE chat_id = ${chatId}
         `
 
-        const rows = yield* decodeLastSeq(result)
+        const rows = yield* decodeLastSequence(result)
 
-        return rows[0]?.seq ?? 0
+        return rows[0]?.sequence ?? 0
       }, Effect.orDie),
       write: Effect.fnUntraced(function* (chatId: ChatId, entries: ReadonlyArray<AssistantEvent.Entry>) {
         const rows = yield* Effect.forEach(
@@ -227,7 +232,7 @@ export const layerSql: Layer.Layer<ChatLog, never, SqlClient.SqlClient> = Layer.
           Effect.fnUntraced(function* (entry: AssistantEvent.Entry) {
             const event = yield* encodeEvent(entry.event)
 
-            return { chat_id: chatId, seq: entry.seq, at: entry.at, event }
+            return { chat_id: chatId, sequence: entry.sequence, at: entry.at, event }
           })
         )
 
@@ -235,9 +240,9 @@ export const layerSql: Layer.Layer<ChatLog, never, SqlClient.SqlClient> = Layer.
       }, Effect.orDie),
       lastEntries: Effect.gen(function* () {
         const rows = yield* sql`
-          SELECT e.chat_id, e.seq, e.at, e.event FROM chat_log e
-          JOIN (SELECT chat_id, MAX(seq) AS seq FROM chat_log GROUP BY chat_id) last
-            ON last.chat_id = e.chat_id AND last.seq = e.seq
+          SELECT e.chat_id, e.sequence, e.at, e.event FROM chat_log e
+          JOIN (SELECT chat_id, MAX(sequence) AS sequence FROM chat_log GROUP BY chat_id) last
+            ON last.chat_id = e.chat_id AND last.sequence = e.sequence
         `
 
         return yield* toEntries(rows)

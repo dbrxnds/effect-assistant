@@ -14,7 +14,7 @@ for (const [name, store] of Object.entries(stores)) {
         const chat = yield* ChatId.make()
         yield* log.append(chat, [say("one"), AssistantEvent.TurnStarted.make({ assistant: "test" })])
 
-        expect((yield* log.read(chat)).map(({ seq, event }) => [seq, event._tag])).toEqual([
+        expect((yield* log.read(chat)).map(({ sequence, event }) => [sequence, event._tag])).toEqual([
           [1, "UserMessage"],
           [2, "TurnStarted"]
         ])
@@ -32,8 +32,8 @@ describe("ChatLog.layerMemory", () => {
       yield* log.append(b, [say("other")])
       const [third] = yield* log.append(a, [AssistantEvent.TurnStarted.make({ assistant: "test" })])
 
-      expect((yield* log.read(a)).map((entry) => entry.seq)).toEqual([1, 2, 3])
-      expect((yield* log.read(b)).map((entry) => entry.seq)).toEqual([1])
+      expect((yield* log.read(a)).map((entry) => entry.sequence)).toEqual([1, 2, 3])
+      expect((yield* log.read(b)).map((entry) => entry.sequence)).toEqual([1])
       expect(third?.chatId).toBe(a)
       expect(yield* log.append(a, [])).toEqual([])
     }).pipe(Effect.provide(ChatLog.layerMemory))
@@ -46,7 +46,7 @@ describe("ChatLog.layerMemory", () => {
       yield* log.append(done, [
         say("hi"),
         AssistantEvent.TurnStarted.make({ assistant: "test" }),
-        AssistantEvent.TurnCompleted.make({ throughSeq: 1 })
+        AssistantEvent.TurnCompleted.make({ throughSequence: 1 })
       ])
       yield* log.append(midTurn, [say("hi"), AssistantEvent.TurnStarted.make({ assistant: "test" })])
       yield* log.append(waiting, [say("hi")])
@@ -55,13 +55,13 @@ describe("ChatLog.layerMemory", () => {
     }).pipe(Effect.provide(ChatLog.layerMemory))
   )
 
-  it.effect("reads the entries after a seq", () =>
+  it.effect("reads the entries after a sequence", () =>
     Effect.gen(function* () {
       const log = yield* ChatLog.ChatLog
       const chat = yield* ChatId.make()
       yield* log.append(chat, [say("one"), say("two"), say("three")])
 
-      expect((yield* log.read(chat, { after: 1 })).map((entry) => entry.seq)).toEqual([2, 3])
+      expect((yield* log.read(chat, { after: 1 })).map((entry) => entry.sequence)).toEqual([2, 3])
       expect(yield* log.read(chat, { after: 3 })).toEqual([])
     }).pipe(Effect.provide(ChatLog.layerMemory))
   )

@@ -44,13 +44,13 @@ export const TurnTools = Context.Reference<Option.Option<Toolkits.Tools>>("effec
 /** @internal */
 export interface ChatHistory {
   readonly messages: ReadonlyArray<Prompt.Message>
-  readonly throughSeq: number
+  readonly throughSequence: number
 }
 
 const readHistory = (read: ReadonlyArray<Prompt.Message> | ChatHistory) =>
   "messages" in read
-    ? { messages: read.messages, throughSeq: read.throughSeq }
-    : { messages: read, throughSeq: undefined }
+    ? { messages: read.messages, throughSequence: read.throughSequence }
+    : { messages: read, throughSequence: undefined }
 
 // `AssistantLoop` takes native toolkits; turns and specialist runs come here with their tools already merged.
 /** @internal */
@@ -281,7 +281,7 @@ export const step = <R, S, E2 = never, R2 = never>(
 
   return Stream.unwrap(
     Effect.gen(function* () {
-      const { messages: history, throughSeq } = readHistory(yield* options.history)
+      const { messages: history, throughSequence } = readHistory(yield* options.history)
       // Calls a crash cut off, with no result: they run again, with the same ids, before the model goes on.
       const cutOff = History.unansweredCalls(history)
       const approvals = yield* TurnApprovals
@@ -318,7 +318,7 @@ export const step = <R, S, E2 = never, R2 = never>(
 
       const output = AssistantEvent.ModelOutput.make({
         parts: modelParts(response.content),
-        seenThroughSeq: throughSeq,
+        seenThroughSequence: throughSequence,
         model: metadata?.modelId ?? Option.getOrUndefined(name),
         responseId: metadata?.id,
         usage: response.usage,

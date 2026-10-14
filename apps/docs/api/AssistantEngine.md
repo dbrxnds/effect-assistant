@@ -39,7 +39,7 @@ declare const ModelLive: Layer.Layer<LanguageModel.LanguageModel>
 
 const MyAssistant = Assistant.make("my-assistant")
 
-const AppLive = MyAssistant.toLayer((turn) => turn.loop({ instructions: "Be brief." })).pipe(
+const AppLive = MyAssistant.toLayer((turn) => turn.run({ instructions: "Be brief." })).pipe(
   Layer.provide(ModelLive),
   Layer.provideMerge(AssistantEngine.layerMemory),
   Layer.provideMerge(ChatLog.layerMemory)
@@ -76,7 +76,7 @@ declare const ModelLive: Layer.Layer<LanguageModel.LanguageModel>
 
 const MyAssistant = Assistant.make("my-assistant")
 
-const AppLive = MyAssistant.toLayer((turn) => turn.loop({ instructions: "Be brief." })).pipe(
+const AppLive = MyAssistant.toLayer((turn) => turn.run({ instructions: "Be brief." })).pipe(
   Layer.provide(ModelLive),
   Layer.provideMerge(AssistantEngine.layerCluster),
   Layer.provideMerge(
@@ -155,7 +155,7 @@ class AssistantEngine extends Context.Service<
       chatId: ChatId,
       input: AssistantEvent.Input | AssistantEvent.StoredAppEvent
     ) => Effect.Effect<void>
-    /** Streams the chat's stored entries after the `after` seq, then live ones. */
+    /** Streams the chat's stored entries after the `after` sequence, then live ones. */
     readonly subscribe: (assistant: string, chatId: ChatId, after: number) => Stream.Stream<AssistantEvent.Entry>
     /**
      * Deletes one of the assistant's chats. The chat's log records the deletion, and everything

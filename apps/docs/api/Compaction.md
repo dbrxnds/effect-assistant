@@ -19,16 +19,16 @@ compact. The log keeps every entry, so the user still sees the whole chat.
 
 ### Summary
 
-Represents the fields a summary event must have: its text and the last `seq` it covers.
+Represents the fields a summary event must have: its text and the last `sequence` it covers.
 
-Entries after `throughSeq` are kept as they are, so an input that arrived while the summary was
+Entries after `throughSequence` are kept as they are, so an input that arrived while the summary was
 being written isn't lost.
 
 ```ts
 interface Summary {
   readonly _tag: string
   readonly text: string
-  readonly throughSeq: number
+  readonly throughSequence: number
 }
 ```
 
@@ -49,14 +49,14 @@ const inputTokens: (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => number
 
 ### openItems
 
-Returns the items that were open at `throughSeq` and are still open: blocks the user hasn't
+Returns the items that were open at `throughSequence` and are still open: blocks the user hasn't
 answered, specialists that are working, and tool calls waiting for the user's approval. The result is text for
 the model, or `None` when nothing is open.
 
 ```ts
 const openItems: (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
-  throughSeq: number
+  throughSequence: number
 ) => Option.Option<string>
 ```
 
@@ -64,13 +64,13 @@ const openItems: (
 
 ### attachedFiles
 
-Returns the files the user attached up to `throughSeq`, as lines of text for the model, or
+Returns the files the user attached up to `throughSequence`, as lines of text for the model, or
 `None` when there are none. A summary may leave out a file's id, which tools need.
 
 ```ts
 const attachedFiles: (
   entries: ReadonlyArray<AssistantEvent.AnyEntry>,
-  throughSeq: number
+  throughSequence: number
 ) => Option.Option<string>
 ```
 
@@ -102,7 +102,7 @@ import * as Stream from "effect/Stream"
 
 class Summary extends Schema.TaggedClass<Summary>()("Summary", {
   text: Schema.String,
-  throughSeq: Schema.Int
+  throughSequence: Schema.Int
 }) {}
 
 declare const transcript: (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => string
@@ -120,12 +120,12 @@ const MyAssistantLive = MyAssistant.toLayer((turn) => {
       prompt: `Summarize this chat:\n\n${transcript(entries)}`
     })
 
-    yield* chat.append(Summary.make({ text, throughSeq: entries.at(-1)?.seq ?? 0 }))
+    yield* chat.append(Summary.make({ text, throughSequence: entries.at(-1)?.sequence ?? 0 }))
   })
 
   // After the reply, so the user doesn't wait for the summary.
   return Stream.concat(
-    turn.loop({ instructions: "Be brief.", history: Compaction.since(Schema.is(Summary)) }),
+    turn.run({ instructions: "Be brief.", history: Compaction.since(Schema.is(Summary)) }),
     Stream.drain(Stream.fromEffect(compact))
   )
 })

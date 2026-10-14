@@ -43,8 +43,8 @@ export interface State {
    * to start.
    */
   readonly queued: boolean
-  /** The `seq` of the newest input. */
-  readonly lastInputSeq: number
+  /** The `sequence` of the newest input. */
+  readonly lastInputSequence: number
   /** Specialist runs that are working, by run id. */
   readonly specialists: ReadonlyMap<RunId, SpecialistRun>
 }
@@ -58,7 +58,7 @@ export interface State {
 export const empty: State = {
   turnSince: undefined,
   queued: false,
-  lastInputSeq: 0,
+  lastInputSequence: 0,
   specialists: new Map()
 }
 
@@ -89,14 +89,16 @@ export const apply = (activity: State, entry: AssistantEvent.AnyEntry): State =>
   const event = entry.event
 
   if (!AssistantEvent.isLibraryEvent(event)) {
-    return AssistantEvent.isAppInput(event) ? { ...activity, queued: true, lastInputSeq: entry.seq } : activity
+    return AssistantEvent.isAppInput(event)
+      ? { ...activity, queued: true, lastInputSequence: entry.sequence }
+      : activity
   }
 
   if (AssistantEvent.isInput(event)) {
     // A finished run's report is an input, and ends the run.
     const current = Predicate.isTagged(event, "SpecialistFinished") ? withoutRun(activity, event.runId) : activity
 
-    return AssistantEvent.isWaking(event) ? { ...current, queued: true, lastInputSeq: entry.seq } : current
+    return AssistantEvent.isWaking(event) ? { ...current, queued: true, lastInputSequence: entry.sequence } : current
   }
 
   return Match.value(event).pipe(
@@ -105,7 +107,7 @@ export const apply = (activity: State, entry: AssistantEvent.AnyEntry): State =>
     Match.tag("TurnCompleted", "TurnFailed", (ended): State => ({
       ...activity,
       turnSince: undefined,
-      queued: activity.lastInputSeq > ended.throughSeq
+      queued: activity.lastInputSequence > ended.throughSequence
     })),
     Match.tag("SpecialistStarted", (started): State => ({
       ...activity,
@@ -117,7 +119,7 @@ export const apply = (activity: State, entry: AssistantEvent.AnyEntry): State =>
       })
     })),
     // Deleting a chat stops everything in it, and nothing starts again.
-    Match.tag("ChatDeleted", (): State => ({ ...empty, lastInputSeq: activity.lastInputSeq })),
+    Match.tag("ChatDeleted", (): State => ({ ...empty, lastInputSequence: activity.lastInputSequence })),
     Match.orElse(() => activity)
   )
 }

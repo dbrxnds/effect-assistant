@@ -140,8 +140,8 @@ const MyAssistantLive = MyAssistant.toLayer(
       Stream.unwrap(
         Effect.map(users.forChat(turn.chatId), (user) =>
           (user.admin
-            ? turn.loop({ instructions, toolkit: AdminTools }) // Toolkit.make(AdminReport, Greet)
-            : turn.loop({ instructions, toolkit: UserTools })
+            ? turn.run({ instructions, toolkit: AdminTools }) // Toolkit.make(AdminReport, Greet)
+            : turn.run({ instructions, toolkit: UserTools })
           ).pipe(Stream.provideService(CurrentUser, user))
         )
       )

@@ -54,7 +54,7 @@ memory event log. That's all an engine needs. A chat is just a new id,
 ```ts
 import { describe, expect, it } from "@effect/vitest"
 
-const AssistantTest = MyAssistant.toLayer((turn) => turn.loop({ instructions, toolkit })).pipe(
+const AssistantTest = MyAssistant.toLayer((turn) => turn.run({ instructions, toolkit })).pipe(
   Layer.provide(AnthropicLanguageModel.model("claude-haiku-4-5")),
   Layer.provide(AnthropicClientLive),
   Layer.provideMerge(AssistantEngine.layerMemory),

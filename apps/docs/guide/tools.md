@@ -3,7 +3,7 @@
 Tools are how the assistant looks things up and gets things done. They're
 Effect's own tools (`effect/ai/Tool`), grouped in a toolkit
 (`effect/ai/Toolkit`), with their handlers in a layer
-(`MyToolkit.toLayer(...)`). The toolkit goes to `turn.loop` as `toolkit`,
+(`MyToolkit.toLayer(...)`). The toolkit goes to `turn.run` as `toolkit`,
 next to the assistant's own tools; the handlers' layer is provided to the
 assistant's.
 
@@ -34,7 +34,7 @@ const ProductToolsLive = ProductTools.toLayer({
   list_products: ({ category }) => Effect.succeed([{ name: "Flyers", category: category ?? "print" }])
 })
 
-const MyAssistantHandlers = MyAssistant.toLayer((turn) => turn.loop({ instructions, toolkit: ProductTools })).pipe(
+const MyAssistantHandlers = MyAssistant.toLayer((turn) => turn.run({ instructions, toolkit: ProductTools })).pipe(
   Layer.provide(ProductToolsLive)
 )
 ```
@@ -72,7 +72,7 @@ const OrderToolsLive = OrderTools.toLayer(
   })
 )
 
-const MyAssistantHandlers = MyAssistant.toLayer((turn) => turn.loop({ instructions, toolkit: OrderTools })).pipe(
+const MyAssistantHandlers = MyAssistant.toLayer((turn) => turn.run({ instructions, toolkit: OrderTools })).pipe(
   Layer.provide(OrderToolsLive)
 )
 ```
@@ -218,7 +218,7 @@ const OfficeDiscovery = ToolDiscovery.make(OfficeTools) // rare: found when need
 const OfficeDiscoveryLive = ToolDiscovery.layer(OfficeTools).pipe(Layer.provide(OfficeToolsLive))
 
 const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
-  turn.loop({
+  turn.run({
     instructions,
     toolkit: Toolkit.merge(CommonTools, OfficeDiscovery) // common: always in the prompt
   })

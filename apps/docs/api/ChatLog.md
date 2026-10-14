@@ -18,7 +18,7 @@ use another store, implement a `Storage` and pass it to `make`.
 ### make
 
 Creates a `ChatLog` from a `Storage`. `append` numbers new entries after the chat's last
-`seq` and stamps them with the current time.
+`sequence` and stamps them with the current time.
 
 ```ts
 const make: (storage: Storage) => ChatLog["Service"]
@@ -44,8 +44,8 @@ Layer that stores chats in a SQL table named `chat_log`.
 
 **Details**
 
-The table must already exist. It has the columns `chat_id`, `seq`, `at`, and `event`, with the
-primary key `(chat_id, seq)`. The layer requires a `SqlClient`.
+The table must already exist. It has the columns `chat_id`, `sequence`, `at`, and `event`, with the
+primary key `(chat_id, sequence)`. The layer requires a `SqlClient`.
 
 **Example** (Storing chats in Postgres)
 
@@ -65,10 +65,10 @@ The table, in Postgres:
 ```sql
 CREATE TABLE chat_log (
   chat_id TEXT NOT NULL,
-  seq INTEGER NOT NULL,
+  sequence INTEGER NOT NULL,
   at DOUBLE PRECISION NOT NULL,
   event TEXT NOT NULL,
-  PRIMARY KEY (chat_id, seq)
+  PRIMARY KEY (chat_id, sequence)
 );
 ```
 
@@ -93,7 +93,7 @@ class ChatLog extends Context.Service<
       chatId: ChatId,
       events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>
     ) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
-    /** Reads a chat's stored entries in order, either all of them or only those after a `seq`. */
+    /** Reads a chat's stored entries in order, either all of them or only those after a `sequence`. */
     readonly read: (chatId: ChatId, options?: ReadOptions) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
     /**
      * Returns the chats whose last entry ends neither a turn nor the chat. After a restart, these
@@ -114,7 +114,7 @@ Represents the options that select which of a chat's entries to read.
 
 ```ts
 interface ReadOptions {
-  /** Reads only the entries after this `seq`. */
+  /** Reads only the entries after this `sequence`. */
   readonly after?: number | undefined
 }
 ```
@@ -125,14 +125,14 @@ interface ReadOptions {
 
 Represents the storage that a `ChatLog` is built on.
 
-A storage reads a chat's entries, finds a chat's last `seq`, writes new entries, and finds every
+A storage reads a chat's entries, finds a chat's last `sequence`, writes new entries, and finds every
 chat's last entry. Entries are never removed, so a deleted chat keeps its log, which ends in
 `ChatDeleted`.
 
 ```ts
 interface Storage {
   readonly read: (chatId: ChatId, options?: ReadOptions) => Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>
-  readonly lastSeq: (chatId: ChatId) => Effect.Effect<number>
+  readonly lastSequence: (chatId: ChatId) => Effect.Effect<number>
   readonly write: (chatId: ChatId, entries: ReadonlyArray<AssistantEvent.Entry>) => Effect.Effect<void>
   /** Returns the last entry of every chat. */
   readonly lastEntries: Effect.Effect<ReadonlyArray<AssistantEvent.Entry>>

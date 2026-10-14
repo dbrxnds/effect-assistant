@@ -328,8 +328,10 @@ describe("specialist runs", () => {
       expect(failures(entries), traceEntries(entries)).toEqual([])
       expect(finished(entries).map((run) => run.status)).toEqual(["stopped"])
       // The turn that stopped it is the last one: a stopped run wakes nothing.
-      const stoppedAt = entries.find(({ event }) => Predicate.isTagged(event, "SpecialistFinished"))?.seq ?? 0
-      expect(entries.some(({ event, seq }) => seq > stoppedAt && Predicate.isTagged(event, "TurnStarted"))).toBe(false)
+      const stoppedAt = entries.find(({ event }) => Predicate.isTagged(event, "SpecialistFinished"))?.sequence ?? 0
+      expect(
+        entries.some(({ event, sequence }) => sequence > stoppedAt && Predicate.isTagged(event, "TurnStarted"))
+      ).toBe(false)
     })
   )
 
@@ -784,7 +786,7 @@ describe("tools found on demand, and skills", () => {
       }).pipe(
         Effect.provide(
           runMemory(
-            TestAssistant.toLayer((turn) => turn.loop({ instructions, toolkit: officeToolsDiscovery })).pipe(
+            TestAssistant.toLayer((turn) => turn.run({ instructions, toolkit: officeToolsDiscovery })).pipe(
               Layer.provide(
                 officeToolsDiscoveryLive.pipe(Layer.provide(officeTools.toolkit.toLayer(officeTools.handlers)))
               )
@@ -829,7 +831,7 @@ describe("tools found on demand, and skills", () => {
       }).pipe(
         Effect.provide(
           runMemory(
-            TestAssistant.toLayer((turn) => turn.loop({ instructions, toolkit: brokenDiscovery })).pipe(
+            TestAssistant.toLayer((turn) => turn.run({ instructions, toolkit: brokenDiscovery })).pipe(
               Layer.provide(brokenDiscoveryLive.pipe(Layer.provide(broken.toolkit.toLayer(broken.handlers))))
             ),
             model.layer

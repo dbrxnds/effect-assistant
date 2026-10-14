@@ -89,8 +89,8 @@ interface State {
    * to start.
    */
   readonly queued: boolean
-  /** The `seq` of the newest input. */
-  readonly lastInputSeq: number
+  /** The `sequence` of the newest input. */
+  readonly lastInputSequence: number
   /** Specialist runs that are working, by run id. */
   readonly specialists: ReadonlyMap<RunId, SpecialistRun>
 }
