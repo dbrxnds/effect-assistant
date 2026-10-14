@@ -3,6 +3,8 @@ name: Release
 on:
   push:
     branches: [main]
+  # GitHub sometimes drops a push event; this runs a release by hand.
+  workflow_dispatch:
 
 concurrency: release-${{ github.ref }}
 
