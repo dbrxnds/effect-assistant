@@ -59,7 +59,7 @@ const layerNodeCrypto = Layer.sync(Crypto.Crypto, () =>
   })
 )
 
-// ChatLog.layerSql expects its table; the demo creates it on start, an app would migrate it.
+// ChatLog.layerSql() expects its table; the demo creates it on start, an app would migrate it.
 const layerChatLogTable = Layer.effectDiscard(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -93,7 +93,7 @@ const layerFor = (url: Option.Option<string>, maxConnections: number): Layer.Lay
   Option.isNone(url)
     ? Layer.mergeAll(ChatLog.layerMemory, Chats.layerMemory, LiveOrders.layerMemory, TestRunner.layer)
     : Layer.mergeAll(
-        ChatLog.layerSql.pipe(Layer.provide(layerChatLogTable)),
+        ChatLog.layerSql().pipe(Layer.provide(layerChatLogTable)),
         Chats.layerSql,
         LiveOrders.layerSql,
         layerSqlRunner

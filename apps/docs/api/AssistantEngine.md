@@ -23,7 +23,7 @@ Layer that runs chats in the current process. Each chat's turns run as fibers, o
 
 **Details**
 
-With `ChatLog.layerSql`, the engine resumes chats at startup. When an assistant registers, the
+With `ChatLog.layerSql()`, the engine resumes chats at startup. When an assistant registers, the
 engine finds the chats that assistant was working on when the process stopped (a turn cut off
 partway, or an input that no turn read) and runs a turn for each. Run this engine in one process
 only, because two processes would run the same chat and write its log at the same time.
@@ -81,7 +81,7 @@ const AppLive = MyAssistant.toLayer((turn) => turn.run({ instructions: "Be brief
   Layer.provideMerge(AssistantEngine.layerCluster),
   Layer.provideMerge(
     Layer.merge(
-      ChatLog.layerSql,
+      ChatLog.layerSql(),
       SingleRunner.layer({ runnerStorage: "sql" }).pipe(Layer.provide(NodeCrypto.layer))
     )
   ),

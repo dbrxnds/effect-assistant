@@ -40,12 +40,13 @@ const layerMemory: Layer.Layer<ChatLog>
 
 ### layerSql
 
-Layer that stores chats in a SQL table named `chat_log`.
+Layer that stores chats in a SQL table, `chat_log` unless `table` names another.
 
 **Details**
 
 The table must already exist. It has the columns `chat_id`, `sequence`, `at`, and `event`, with the
-primary key `(chat_id, sequence)`. The layer requires a `SqlClient`.
+primary key `(chat_id, sequence)`. The layer requires a `SqlClient`. In MySQL, `event` needs
+`LONGTEXT`, since a tool's result can be larger than `TEXT` holds.
 
 **Example** (Storing chats in Postgres)
 
@@ -55,7 +56,7 @@ import { ChatLog } from "effect-assistant"
 import * as Config from "effect/Config"
 import * as Layer from "effect/Layer"
 
-const ChatLogLive = ChatLog.layerSql.pipe(
+const ChatLogLive = ChatLog.layerSql().pipe(
   Layer.provide(PgClient.layerConfig({ url: Config.Redacted("DATABASE_URL") }))
 )
 ```
@@ -73,7 +74,7 @@ CREATE TABLE chat_log (
 ```
 
 ```ts
-const layerSql: Layer.Layer<ChatLog, never, SqlClient.SqlClient>
+const layerSql: (options?: SqlOptions) => Layer.Layer<ChatLog, never, SqlClient.SqlClient>
 ```
 
 <small>Since 0.1.0</small>
@@ -140,3 +141,33 @@ interface Storage {
 ```
 
 <small>Since 0.1.0</small>
+
+### SqlOptions
+
+Represents the options accepted by `layerSql`.
+
+```ts
+interface SqlOptions {
+  /** The table's name. Defaults to `chat_log`. */
+  readonly table?: string | undefined
+}
+```
+
+<small>Since 0.8.0</small>
+
+## Schemas
+
+### EventJson
+
+Schema for an event as the log stores it: JSON text.
+
+**Details**
+
+`layerSql` stores events with it. A storage of your own, for `make`, can use it to store the
+same text.
+
+```ts
+const EventJson = Schema.fromJsonString( …
+```
+
+<small>Since 0.8.0</small>

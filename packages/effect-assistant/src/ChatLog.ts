@@ -142,7 +142,31 @@ export const layerMemory: Layer.Layer<ChatLog> = Layer.effect(
   })
 )
 
-const EventJson = Schema.fromJsonString(Schema.Union([AssistantEvent.AssistantEvent, AssistantEvent.StoredAppEvent]))
+/**
+ * Schema for an event as the log stores it: JSON text.
+ *
+ * **Details**
+ *
+ * `layerSql` stores events with it. A storage of your own, for `make`, can use it to store the
+ * same text.
+ *
+ * @category schemas
+ * @since 0.8.0
+ */
+export const EventJson = Schema.fromJsonString(
+  Schema.Union([AssistantEvent.AssistantEvent, AssistantEvent.StoredAppEvent])
+)
+
+/**
+ * Represents the options accepted by `layerSql`.
+ *
+ * @category models
+ * @since 0.8.0
+ */
+export interface SqlOptions {
+  /** The table's name. Defaults to `chat_log`. */
+  readonly table?: string | undefined
+}
 
 // Postgres returns BIGINT and DOUBLE PRECISION columns as strings; other databases as numbers.
 const SqlNumber = Schema.Union([Schema.Finite, Schema.FiniteFromString])
@@ -154,12 +178,13 @@ const decodeLastSequence = Schema.decodeUnknownEffect(
 )
 
 /**
- * Layer that stores chats in a SQL table named `chat_log`.
+ * Layer that stores chats in a SQL table, `chat_log` unless `table` names another.
  *
  * **Details**
  *
  * The table must already exist. It has the columns `chat_id`, `sequence`, `at`, and `event`, with the
- * primary key `(chat_id, sequence)`. The layer requires a `SqlClient`.
+ * primary key `(chat_id, sequence)`. The layer requires a `SqlClient`. In MySQL, `event` needs
+ * `LONGTEXT`, since a tool's result can be larger than `TEXT` holds.
  *
  * **Example** (Storing chats in Postgres)
  *
@@ -169,7 +194,7 @@ const decodeLastSequence = Schema.decodeUnknownEffect(
  * import * as Config from "effect/Config"
  * import * as Layer from "effect/Layer"
  *
- * const ChatLogLive = ChatLog.layerSql.pipe(
+ * const ChatLogLive = ChatLog.layerSql().pipe(
  *   Layer.provide(PgClient.layerConfig({ url: Config.Redacted("DATABASE_URL") }))
  * )
  * ```
@@ -189,64 +214,66 @@ const decodeLastSequence = Schema.decodeUnknownEffect(
  * @category layers
  * @since 0.1.0
  */
-export const layerSql: Layer.Layer<ChatLog, never, SqlClient.SqlClient> = Layer.effect(
-  ChatLog,
-  Effect.gen(function* () {
-    const sql = (yield* SqlClient.SqlClient).withoutTransforms()
+export const layerSql = (options?: SqlOptions): Layer.Layer<ChatLog, never, SqlClient.SqlClient> =>
+  Layer.effect(
+    ChatLog,
+    Effect.gen(function* () {
+      const sql = (yield* SqlClient.SqlClient).withoutTransforms()
+      const table = sql(options?.table ?? "chat_log")
 
-    const toEntries = Effect.fnUntraced(function* (rows: ReadonlyArray<unknown>) {
-      const decoded = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(rows)
+      const toEntries = Effect.fnUntraced(function* (rows: ReadonlyArray<unknown>) {
+        const decoded = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(rows)
 
-      return decoded.map((row) =>
-        AssistantEvent.Entry.make({
-          chatId: row.chat_id,
-          sequence: row.sequence,
-          at: row.at,
-          event: row.event
-        })
-      )
-    })
-
-    const encodeEvent = Schema.encodeEffect(EventJson)
-
-    return make({
-      read: Effect.fnUntraced(function* (chatId: ChatId, options?: ReadOptions) {
-        const rows = yield* sql`
-          SELECT chat_id, sequence, at, event FROM chat_log WHERE chat_id = ${chatId} AND sequence > ${options?.after ?? 0} ORDER BY sequence
-        `
-
-        return yield* toEntries(rows)
-      }, Effect.orDie),
-      lastSequence: Effect.fnUntraced(function* (chatId: ChatId) {
-        const result = yield* sql`
-          SELECT MAX(sequence) AS sequence FROM chat_log WHERE chat_id = ${chatId}
-        `
-
-        const rows = yield* decodeLastSequence(result)
-
-        return rows[0]?.sequence ?? 0
-      }, Effect.orDie),
-      write: Effect.fnUntraced(function* (chatId: ChatId, entries: ReadonlyArray<AssistantEvent.Entry>) {
-        const rows = yield* Effect.forEach(
-          entries,
-          Effect.fnUntraced(function* (entry: AssistantEvent.Entry) {
-            const event = yield* encodeEvent(entry.event)
-
-            return { chat_id: chatId, sequence: entry.sequence, at: entry.at, event }
+        return decoded.map((row) =>
+          AssistantEvent.Entry.make({
+            chatId: row.chat_id,
+            sequence: row.sequence,
+            at: row.at,
+            event: row.event
           })
         )
+      })
 
-        yield* sql`INSERT INTO chat_log ${sql.insert(rows)}`
-      }, Effect.orDie),
-      lastEntries: Effect.gen(function* () {
-        const rows = yield* sql`
-          SELECT e.chat_id, e.sequence, e.at, e.event FROM chat_log e
-          JOIN (SELECT chat_id, MAX(sequence) AS sequence FROM chat_log GROUP BY chat_id) last
+      const encodeEvent = Schema.encodeEffect(EventJson)
+
+      return make({
+        read: Effect.fnUntraced(function* (chatId: ChatId, options?: ReadOptions) {
+          const rows = yield* sql`
+          SELECT chat_id, sequence, at, event FROM ${table} WHERE chat_id = ${chatId} AND sequence > ${options?.after ?? 0} ORDER BY sequence
+        `
+
+          return yield* toEntries(rows)
+        }, Effect.orDie),
+        lastSequence: Effect.fnUntraced(function* (chatId: ChatId) {
+          const result = yield* sql`
+          SELECT MAX(sequence) AS sequence FROM ${table} WHERE chat_id = ${chatId}
+        `
+
+          const rows = yield* decodeLastSequence(result)
+
+          return rows[0]?.sequence ?? 0
+        }, Effect.orDie),
+        write: Effect.fnUntraced(function* (chatId: ChatId, entries: ReadonlyArray<AssistantEvent.Entry>) {
+          const rows = yield* Effect.forEach(
+            entries,
+            Effect.fnUntraced(function* (entry: AssistantEvent.Entry) {
+              const event = yield* encodeEvent(entry.event)
+
+              return { chat_id: chatId, sequence: entry.sequence, at: entry.at, event }
+            })
+          )
+
+          yield* sql`INSERT INTO ${table} ${sql.insert(rows)}`
+        }, Effect.orDie),
+        lastEntries: Effect.gen(function* () {
+          const rows = yield* sql`
+          SELECT e.chat_id, e.sequence, e.at, e.event FROM ${table} e
+          JOIN (SELECT chat_id, MAX(sequence) AS sequence FROM ${table} GROUP BY chat_id) last
             ON last.chat_id = e.chat_id AND last.sequence = e.sequence
         `
 
-        return yield* toEntries(rows)
-      }).pipe(Effect.orDie)
+          return yield* toEntries(rows)
+        }).pipe(Effect.orDie)
+      })
     })
-  })
-)
+  )
