@@ -57,7 +57,7 @@ const MyAssistantHandlers = MyAssistant.toLayer((turn) =>
       const skills = Skill.toolkit(allSkills.filter((skill) => allowed(role, skill)))
 
       return turn
-        .loop({ instructions, toolkit: Toolkit.merge(CampaignTools, skills) })
+        .run({ instructions, toolkit: Toolkit.merge(CampaignTools, skills) })
         .pipe(Stream.provide(skills.layer))
     })
   )
@@ -68,7 +68,7 @@ Skill instructions can be [managed prompts](./instructions): an Effect is
 resolved each time the skill is loaded. The services it needs are what the
 toolkit's `layer` requires: provide them with the layer, or, for a toolkit
 built per turn, to the loop's stream, like a user the handler
-[looked up](./chats). A specialist's `run.loop` takes the same toolkit.
+[looked up](./chats). A specialist's `turn.run` takes the same toolkit.
 
 ## Skills, tools, or specialists?
 

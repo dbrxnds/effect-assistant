@@ -154,7 +154,7 @@ describe("a turn", () => {
 
 const Research = Specialist.make("research", { description: "Answers research questions." })
 
-const ResearchLive = Research.toLayer((run) => run.loop({ instructions: "Answer in one line." }))
+const ResearchLive = Research.toLayer((turn) => turn.run({ instructions: "Answer in one line." }))
 
 const ResearchAssistant = Assistant.make("research-test", { specialists: [Research] })
 
@@ -244,8 +244,8 @@ describe("specialist runs", () => {
 
   const Archivist = Specialist.make("archivist", { description: "Looks things up in the archive." })
 
-  const ArchivistLive = Archivist.toLayer((run) =>
-    run.loop({ instructions: "Search, then answer.", toolkit: archive.toolkit })
+  const ArchivistLive = Archivist.toLayer((turn) =>
+    turn.run({ instructions: "Search, then answer.", toolkit: archive.toolkit })
   ).pipe(Layer.provide(archive.toolkit.toLayer(archive.handlers)))
 
   const ArchiveAssistant = Assistant.make("archive-test", { specialists: [Archivist] })

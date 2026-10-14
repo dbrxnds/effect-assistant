@@ -117,7 +117,7 @@ describe("with a real model", () => {
 
     const layer = runMemory(
       ResearchAssistant.toLayer(simple({ instructions })).pipe(
-        Layer.provide(Research.toLayer((run) => run.loop({ instructions: "Answer in one sentence." })))
+        Layer.provide(Research.toLayer((turn) => turn.run({ instructions: "Answer in one sentence." })))
       ),
       realModel
     )

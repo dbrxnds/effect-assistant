@@ -275,8 +275,8 @@ with its own instructions and tools, while the assistant keeps chatting.
 ```ts
 const Research = Specialist.make("research", { description: "Digs through past orders. Slow: runs in the background." })
 
-const ResearchLive = Research.toLayer((run) =>
-  run.loop({ instructions: "Answer in a few lines.", toolkit: ResearchTools })
+const ResearchLive = Research.toLayer((turn) =>
+  turn.run({ instructions: "Answer in a few lines.", toolkit: ResearchTools })
 ).pipe(Layer.provide(ResearchToolsLive))
 
 export const MyAssistant = Assistant.make("my-assistant", { specialists: [Research] })

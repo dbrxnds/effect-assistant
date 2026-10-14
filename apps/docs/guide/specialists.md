@@ -9,7 +9,7 @@ A specialist has two parts, like a workflow:
 - a **definition**, with `Specialist.make`: its name, and when to use it
   (the assistant sees this).
 - a **handler**, with `toLayer`: a function of the run that returns its loop,
-  usually `run.loop({ instructions, toolkit })`.
+  usually `turn.run({ instructions, toolkit })`.
 
 **Example** (A research specialist)
 
@@ -22,8 +22,8 @@ const Research = Specialist.make("research", {
   description: "Researches past campaigns and orders. Give it the question and any context."
 })
 
-const ResearchLive = Research.toLayer((run) =>
-  run.loop({
+const ResearchLive = Research.toLayer((turn) =>
+  turn.run({
     instructions: "Answer with the findings and numbers the colleague needs, in a few short lines.",
     toolkit: ResearchTools // a native toolkit
   })
@@ -109,13 +109,13 @@ const AnalystLive = Analyst.toLayer(
   Effect.gen(function* () {
     const permits = yield* Semaphore.make(3) // once, for every run
 
-    return (run) =>
+    return (turn) =>
       Stream.unwrap(
         Effect.gen(function* () {
           // Held until the run's stream ends; waits while three runs are going.
           yield* Effect.acquireRelease(permits.take(1), () => permits.release(1))
 
-          return run.loop({
+          return turn.run({
             instructions: "Write the report the colleague asked for, with the numbers.",
             toolkit: SpendTools, // Toolkit.make(SpendReport), its handlers' layer provided below
             maxSteps: 12 // model calls per brief; default 8
@@ -126,11 +126,11 @@ const AnalystLive = Analyst.toLayer(
 ).pipe(Layer.provide([SpendToolsLive, AnthropicLanguageModel.model("claude-haiku-4-5")])) // a model of its own
 ```
 
-- `run.loop` takes `instructions`, `toolkit` (merge in a
+- `turn.run` takes `instructions`, `toolkit` (merge in a
   [skills](./skills) toolkit for playbooks), and `maxSteps`.
 - A run calls the assistant's `LanguageModel`, unless the specialist's layer
   is given one of its own, as here.
-- The handler may use the run's services (`Specialist.RunServices`) and what
+- The handler may use the turn's services (`Specialist.TurnServices`) and what
   its build Effect required, as an assistant's handler does (see
   [what a handler may use](./assistant#what-a-handler-may-use)).
 - A run waiting for a permit already counts as working (it has

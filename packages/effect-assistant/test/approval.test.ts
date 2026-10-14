@@ -362,7 +362,7 @@ describe("a tool with needsApproval, elsewhere", () => {
 
       const handlers = WithBuyer.toLayer(simple({ instructions })).pipe(
         Layer.provide(
-          Buyer.toLayer((run) => run.loop({ instructions: "Buy it.", toolkit: OrderTools })).pipe(Layer.provide(layer))
+          Buyer.toLayer((turn) => turn.run({ instructions: "Buy it.", toolkit: OrderTools })).pipe(Layer.provide(layer))
         )
       )
 

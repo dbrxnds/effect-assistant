@@ -1,7 +1,7 @@
 /**
  * Runs the agent loop, which calls the model, runs its tool calls, and repeats.
  *
- * Most handlers use `turn.run` or `run.loop`. This module is for a loop of your own: {@link run}
+ * Most handlers use `turn.run`, in an assistant or a specialist. This module is for a loop of your own: {@link run}
  * runs the loop until the model is done, and {@link step} is one step, as a body for
  * {@link loop}.
  *

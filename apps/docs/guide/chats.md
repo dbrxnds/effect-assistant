@@ -103,7 +103,7 @@ const MyAssistantLive = MyAssistant.toLayer(
       Stream.unwrap(
         Effect.map(users.forChat(turn.chatId), (user) =>
           turn
-            .loop({ instructions: `You help ${user.name}.`, toolkit: UserTools })
+            .run({ instructions: `You help ${user.name}.`, toolkit: UserTools })
             .pipe(Stream.provideService(CurrentUser, user))
         )
       )
@@ -158,18 +158,18 @@ rest of your app enforces them.
 ## Specialists
 
 A [specialist](./specialists) run works in the chat that spawned it. Its
-handler does the same lookup from `run.chatId`:
+handler does the same lookup from `turn.chatId`:
 
 ```ts
 const ResearchLive = Research.toLayer(
   Effect.gen(function* () {
     const users = yield* ChatUsers
 
-    return (run) =>
+    return (turn) =>
       Stream.unwrap(
-        Effect.map(users.forChat(run.chatId), (user) =>
-          run
-            .loop({
+        Effect.map(users.forChat(turn.chatId), (user) =>
+          turn
+            .run({
               instructions: "Answer with the findings and numbers the colleague needs, in a few short lines.",
               toolkit: OrderTools
             })

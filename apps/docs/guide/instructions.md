@@ -1,7 +1,7 @@
 # Instructions and prompts
 
 An assistant's instructions are what its handler passes to `turn.run` (a
-specialist's, to `run.loop`): text, or [`Instructions.Resolved`](/api/Instructions)
+specialist's, to `turn.run`): text, or [`Instructions.Resolved`](/api/Instructions)
 (text with span attributes).
 
 **Example** (Fixed instructions)

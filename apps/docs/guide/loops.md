@@ -2,7 +2,7 @@
 
 An assistant's handler returns its turn as a stream: `turn.run(...)` for the
 usual loop, or any stream of the same events. A specialist's handler does the
-same with `run.loop(...)`. Changing how an assistant works is changing that
+same with `turn.run(...)`. Changing how an assistant works is changing that
 stream.
 
 `turn.run` is built from pieces you can use yourself:

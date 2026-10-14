@@ -58,8 +58,8 @@ const clerkLive = (seen: Queue.Queue<Seen>) =>
     Effect.gen(function* () {
       const users = yield* ChatUsers
 
-      return Effect.fn(function* (run: Specialist.Run) {
-        const user = yield* users.forChat(run.chatId)
+      return Effect.fn(function* (turn: Specialist.Turn) {
+        const user = yield* users.forChat(turn.chatId)
         yield* Queue.offer(seen, {
           by: "clerk",
           instructions: `You file for ${user.name}.`,
