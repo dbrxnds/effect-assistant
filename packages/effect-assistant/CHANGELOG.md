@@ -1,5 +1,11 @@
 # effect-assistant
 
+## 0.8.3
+
+### Patch Changes
+
+- ab33a35: The package README has a composed example: tools with an approval, a skill, memory, tool-result blocks, a specialist and compaction in one assistant.
+
 ## 0.8.2
 
 ### Patch Changes
