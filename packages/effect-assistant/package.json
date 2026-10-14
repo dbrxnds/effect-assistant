@@ -1,6 +1,6 @@
 {
   "name": "effect-assistant",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "A colleague assistant on Effect: an append-only event log per chat, an interruptible agent loop, specialists, skills, and UI blocks",
   "license": "MIT",
   "repository": {
