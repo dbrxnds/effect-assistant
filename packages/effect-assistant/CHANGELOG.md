@@ -1,5 +1,11 @@
 # effect-assistant
 
+## 0.8.1
+
+### Patch Changes
+
+- 410bcae: The package README is the new one: the idea, a quick start, one idea per section, and hosting.
+
 ## 0.8.0
 
 ### Minor Changes
