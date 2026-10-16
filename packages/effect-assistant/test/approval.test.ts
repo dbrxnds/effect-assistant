@@ -92,9 +92,9 @@ const Ordering = Assistant.make("approval")
 const script: Scripted.Script = (request) => {
   const last = Scripted.lastInput(request)
 
-  if (last.includes("approved your call")) return Scripted.reply("Placed: R-1.")
+  if (last.includes("approved this call")) return Scripted.reply("Placed: R-1.")
 
-  if (last.includes("rejected your call")) return Scripted.reply(last.includes("too many") ? "Fewer, then." : "OK.")
+  if (last.includes("rejected this call")) return Scripted.reply(last.includes("too many") ? "Fewer, then." : "OK.")
 
   if (last.includes("moved on without approving")) return Scripted.reply("Dropped the order.")
 
@@ -223,7 +223,7 @@ describe("a tool with needsApproval, in a turn", () => {
       expect(failures(entries)).toEqual([])
       expect(entries.filter(({ event }) => Predicate.isTagged(event, "ApprovalDecision"))).toHaveLength(1)
       expect(yield* runs).toEqual([{ sku: "tote", key: `tool-call:${callId}` }])
-      expect(Scripted.lastInput(last!)).toContain("The user approved your call to place_order")
+      expect(Scripted.lastInput(last!)).toContain("The user approved this call and it ran.")
       expect(Scripted.lastInput(last!)).toContain('"reference":"R-1"')
       // The call's own result, for the provider, says it waits.
       expect(Scripted.toolResults(last!).map(Scripted.resultText)).toContain(awaitingApprovalOutput)
