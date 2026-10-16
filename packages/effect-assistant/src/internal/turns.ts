@@ -40,7 +40,7 @@ export const defaultReplyNudge = "You haven't replied to the user's latest messa
 
 /** @internal */
 export const deliveryNudge =
-  "You said you were on it but stopped before sending the result. Send it now; if part is still running, say so. If they already have everything, call wait."
+  "You said you were on it but stopped before sending the result. Send it now; if part is still running, say so."
 
 /** @internal */
 export interface Definition {
@@ -261,10 +261,11 @@ const makeTurnApi = (
 
         return Loop.run({
           instructions: options.instructions,
-          // A reply that's owed can only be sent; a result it may have given may also be for nobody.
+          // Owed a reply, or only progress since their input: either way it can only send. Offered wait, a model that
+          // waited after its first calls takes it again.
           toolkit: Toolkits.runOnly(
             options.toolkit,
-            owed ? [Tools.sendUserMessageName] : [Tools.sendUserMessageName, Tools.waitToolName],
+            [Tools.sendUserMessageName],
             "Not now: reply with send_user_message."
           ),
           history: Effect.gen(function* () {
@@ -284,7 +285,8 @@ const makeTurnApi = (
           maxSteps: 2,
           // The pass runs because the model wrote text of its own instead of replying, which reaches nobody: it has to
           // call a tool now. Changing the choice costs a read of the history at full price, on these rare turns only.
-          toolChoice: "required"
+          // Only progress since their input: it must send the result, so the choice names the tool, not just any.
+          toolChoice: undelivered ? { tool: Tools.sendUserMessageName } : "required"
           // The loop ran the approved calls; a pass that can only reply runs none.
         }).pipe(Stream.provideService(Loop.TurnApprovals, Option.none()))
       })

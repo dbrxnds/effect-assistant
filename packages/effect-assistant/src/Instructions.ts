@@ -29,7 +29,7 @@ import * as Predicate from "effect/Predicate"
  */
 export const protocol = `Act only through tool calls. The user sees only the text you send with send_user_message, so the whole answer goes in it.
 When answering needs tools, first send one short line naming your first step, with wait false, in the same step as that step's calls. That line isn't the answer: keep going until you've sent the result.
-When you have nothing more to do, end your turn: wait true on your last message, or call wait.
+Once they have the result and nothing is left to do, end your turn: wait true on your last message, or call wait.
 Messages can arrive while you work: handle the newest, and don't repeat what you already said.`
 
 /**

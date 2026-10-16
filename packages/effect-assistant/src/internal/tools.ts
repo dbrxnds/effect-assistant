@@ -20,7 +20,8 @@ export const waitToolName = "wait"
 export const sendUserMessageName = "send_user_message"
 
 const Wait = Tool.make(waitToolName, {
-  description: "End your turn with nothing to send. With a message to send, set wait on it instead.",
+  description:
+    "End your turn until the user's next message, once they have your result and nothing is left to do. Not for tool results: they come back on their own. With a message to send, set wait on it instead.",
   success: Schema.String
 })
 

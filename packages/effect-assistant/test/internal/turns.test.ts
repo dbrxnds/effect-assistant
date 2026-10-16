@@ -393,6 +393,43 @@ describe("progress without a result", () => {
     })
   )
 
+  it.live("can't wait again in the pass to deliver, after only progress since their input", () =>
+    Effect.gen(function* () {
+      let step = 0
+
+      // It waits after its first calls, and would wait again in the pass to deliver if it still could.
+      const model = yield* Scripted.make((request) => {
+        step += 1
+
+        if (step === 1) return [Scripted.call("send_user_message", { text: "Checking.", wait: false })]
+
+        if (Scripted.lastInput(request) !== deliveryNudge || Predicate.isString(request.toolChoice))
+          return Scripted.wait()
+
+        return Scripted.reply("Two orders are open: #1041 and #1042.")
+      })
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* (yield* TestAssistant).submit(chat, say("What's still open?"))
+
+        return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
+      }).pipe(Effect.provide(memoryAssistant(simple({ instructions: "Be brief." }), model.layer)))
+
+      const delivery = (yield* model.requests).filter((request) => Scripted.lastInput(request) === deliveryNudge)
+
+      const refused = entries.flatMap(({ event }) =>
+        Predicate.isTagged(event, "ToolResult") && event.outcome === "failure" ? [event.tool] : []
+      )
+
+      // One pass to deliver, where only sending is possible; nothing was refused along the way.
+      expect(delivery.map((request) => request.toolChoice)).toEqual([{ tool: "send_user_message" }])
+      expect(refused).toEqual([])
+      expect(AssistantEvent.assistantTexts(entries)).toEqual(["Checking.", "Two orders are open: #1041 and #1042."])
+      expect(Predicate.isTagged(lastTurnEnd(entries)!, "TurnCompleted")).toBe(true)
+    })
+  )
+
   it.live("doesn't ask again when the progress message was the last word", () =>
     Effect.gen(function* () {
       let step = 0
