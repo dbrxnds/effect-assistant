@@ -839,8 +839,9 @@ describe("tools found on demand, and skills", () => {
         )
       )
 
-      // The model got another step to read the failure, stored as the tool's.
-      expect(yield* model.requests).toHaveLength(2)
+      // The model got another step to read the failure, stored as the tool's; its "Printed." went out next to a
+      // call, so it still owed the result and got the pass to deliver, whose two steps refuse its waits.
+      expect(yield* model.requests).toHaveLength(4)
       expect(
         entries.flatMap(({ event }) =>
           Predicate.isTagged(event, "ToolResult") && event.tool === "execute_tool"

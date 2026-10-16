@@ -41,7 +41,7 @@ export const defaultReplyNudge =
 
 /** @internal */
 export const deliveryNudge =
-  "You told the user you're on it, but stopped without giving them the result. Send it now with send_user_message; if part of it is still running, say what and that you'll report back. If they already have everything, call wait."
+  "You told the user you're on it, but stopped without giving them the result. Send it now with send_user_message; if part of it is still running, say what and that you'll report back."
 
 /** @internal */
 export interface Definition {
@@ -262,10 +262,11 @@ const makeTurnApi = (
 
         return Loop.run({
           instructions: options.instructions,
-          // A reply that's owed can only be sent; a result it may have given may also be for nobody.
+          // Owed a reply, or only progress since their input: either way it can only send. Offered wait, a model that
+          // waited after its first calls takes it again.
           toolkit: Toolkits.runOnly(
             options.toolkit,
-            owed ? [Tools.sendUserMessageName] : [Tools.sendUserMessageName, Tools.waitToolName],
+            [Tools.sendUserMessageName],
             "Not now: reply to the user with send_user_message."
           ),
           history: Effect.gen(function* () {
@@ -283,9 +284,8 @@ const makeTurnApi = (
           }),
           // A second step, for a reply after a call it was refused.
           maxSteps: 2,
-          // The pass runs because the model wrote text of its own instead of replying, which reaches nobody: it has to
-          // call a tool now. Changing the choice costs a read of the history at full price, on these rare turns only.
-          toolChoice: "required"
+          // Not forced: some models refuse a forced choice. Text it writes instead of a call goes out as the message.
+          toolChoice: "auto"
           // The loop ran the approved calls; a pass that can only reply runs none.
         }).pipe(Stream.provideService(Loop.TurnApprovals, Option.none()))
       })

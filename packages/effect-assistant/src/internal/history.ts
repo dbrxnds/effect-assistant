@@ -307,18 +307,22 @@ export const owesReply = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, throu
 
 const sentToWaitOn = Schema.decodeUnknownOption(Schema.Struct({ wait: Schema.Literal(false) }))
 
-// Messages sent with `wait: false` are progress while the model kept working, like "On it".
+// Progress while the model kept working, like "On it": a message sent with `wait: false`, or one sent in the same
+// step as other calls (with `wait: true` too, those calls still run and their result is still owed).
 const progressMessages = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): ReadonlySet<string> =>
   new Set(
-    entries.flatMap(({ event }) =>
-      AssistantEvent.isLibraryEvent(event) && Predicate.isTagged(event, "ModelOutput")
-        ? event.parts.flatMap((part) =>
-            part.type === "tool-call" && part.name === "send_user_message" && Option.isSome(sentToWaitOn(part.params))
-              ? [Uuid.fromKey(`message:${part.id}`)]
-              : []
-          )
-        : []
-    )
+    entries.flatMap(({ event }) => {
+      if (!AssistantEvent.isLibraryEvent(event) || !Predicate.isTagged(event, "ModelOutput")) return []
+
+      const calls = event.parts.flatMap((part) => (part.type === "tool-call" ? [part] : []))
+      const working = calls.some((call) => call.name !== "send_user_message" && call.name !== "wait")
+
+      return calls.flatMap((call) =>
+        call.name === "send_user_message" && (working || Option.isSome(sentToWaitOn(call.params)))
+          ? [Uuid.fromKey(`message:${call.id}`)]
+          : []
+      )
+    })
   )
 
 // The model said it was on it and stopped without the result: its last message since the user's latest input was
