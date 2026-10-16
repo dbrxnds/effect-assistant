@@ -58,8 +58,7 @@ export const unansweredCalls = (history: ReadonlyArray<Prompt.Message>): Readonl
 export const notRunOutput = "Not run: the turn ended before this call ran."
 
 /** @internal */
-export const mayHaveRunOutput =
-  "Stopped: the turn ended while this call ran. It may have done its work; check before doing it again."
+export const mayHaveRunOutput = "Stopped mid-run: it may have done its work; check before retrying."
 
 const ago = (millis: number) => {
   const seconds = Math.max(0, Math.round(millis / 1000))
@@ -85,15 +84,13 @@ const finishedText = (
   const wrote = since.some(({ event }) => Predicate.isTagged(event, "UserMessage"))
 
   const lines = [
-    "A report from a specialist you started. The user hasn't seen it.",
-    started === undefined
-      ? `You started it for: ${finished.goal}`
-      : `You started it ${ago(at.at - started.at)} ago for: ${finished.goal}`,
-    wrote ? "The user has written since you started it." : "The user hasn't written since you started it.",
+    "Your specialist's report. The user hasn't seen it.",
+    started === undefined ? `Goal: ${finished.goal}` : `Started ${ago(at.at - started.at)} ago for: ${finished.goal}`,
+    wrote ? "The user has written since." : "The user hasn't written since.",
     Match.value(finished.status).pipe(
       Match.when("answered", () => `Report:\n${finished.report ?? ""}`),
       Match.when("failed", () => `It failed: ${finished.error ?? ""}`),
-      Match.when("cut_off", () => "A restart cut it off before it finished. Spawn it again if it's still needed."),
+      Match.when("cut_off", () => "A restart cut it off. Spawn it again if still needed."),
       Match.when("stopped", () => "You stopped it."),
       Match.exhaustive
     )
@@ -105,26 +102,26 @@ const finishedText = (
 }
 
 const answerText = (answer: AssistantEvent.BlockAnswer) =>
-  `<answer message="${answer.messageId}" kind="${answer.kind}">\nThe user answered with the block on your message ${answer.messageId}.\n${toJsonText(answer.value)}\n</answer>`
+  `<answer message="${answer.messageId}" kind="${answer.kind}">\nThe user answered your block.\n${toJsonText(answer.value)}\n</answer>`
 
 const resultText = (result: AssistantEvent.ToolResult) =>
-  `<result tool="${result.tool}" call="${result.callId}" outcome="${result.outcome}">\nThe result of a call from earlier in this chat.\n${toJsonText(result.result)}\n</result>`
+  `<result tool="${result.tool}" call="${result.callId}" outcome="${result.outcome}">\n${toJsonText(result.result)}\n</result>`
 
 /** @internal */
 export const awaitingApprovalOutput =
-  "Waiting for the user's approval: they see this call and approve or reject it. Its outcome arrives later in this chat; don't call it again meanwhile."
+  "Awaiting the user's approval; the outcome arrives later. Don't call it again meanwhile."
 
 const awaitingText = (request: AssistantEvent.ApprovalRequested) =>
-  `<approval tool="${request.tool}" call="${request.callId}" status="pending">\nYour call to ${request.tool} from earlier in this chat waits for the user's approval.\n${toJsonText(request.params)}\n</approval>`
+  `<approval tool="${request.tool}" call="${request.callId}" status="pending">\nAwaiting the user's approval.\n${toJsonText(request.params)}\n</approval>`
 
 const approvedText = (result: AssistantEvent.ToolResult) =>
-  `<result tool="${result.tool}" call="${result.callId}" outcome="${result.outcome}">\nThe user approved your call to ${result.tool} from earlier in this chat, and it ran.\n${toJsonText(result.result)}\n</result>`
+  `<result tool="${result.tool}" call="${result.callId}" outcome="${result.outcome}">\nThe user approved this call and it ran.\n${toJsonText(result.result)}\n</result>`
 
 const rejectedText = (decision: AssistantEvent.ApprovalDecision, tool: string) =>
-  `<approval tool="${tool}" call="${decision.callId}" decision="rejected">\nThe user rejected your call to ${tool}; it didn't run.${decision.reason === undefined ? "" : `\nTheir reason: ${decision.reason}`}\n</approval>`
+  `<approval tool="${tool}" call="${decision.callId}" decision="rejected">\nThe user rejected this call; it didn't run.${decision.reason === undefined ? "" : `\nTheir reason: ${decision.reason}`}\n</approval>`
 
 const expiredText = (callId: string, tool: string) =>
-  `<approval tool="${tool}" call="${callId}" status="expired">\nThe user moved on without approving your call to ${tool}; it didn't run.\n</approval>`
+  `<approval tool="${tool}" call="${callId}" status="expired">\nThe user moved on without approving; it didn't run.\n</approval>`
 
 const awaitingMessage = (request: AssistantEvent.ApprovalRequested): Prompt.ToolMessage =>
   Prompt.toolMessage({
@@ -307,18 +304,22 @@ export const owesReply = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, throu
 
 const sentToWaitOn = Schema.decodeUnknownOption(Schema.Struct({ wait: Schema.Literal(false) }))
 
-// Messages sent with `wait: false` are progress while the model kept working, like "On it".
+// Progress while the model kept working, like "On it": a message sent with `wait: false`, or one sent in the same
+// step as other calls (with `wait: true` too, those calls still run and their result is still owed).
 const progressMessages = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): ReadonlySet<string> =>
   new Set(
-    entries.flatMap(({ event }) =>
-      AssistantEvent.isLibraryEvent(event) && Predicate.isTagged(event, "ModelOutput")
-        ? event.parts.flatMap((part) =>
-            part.type === "tool-call" && part.name === "send_user_message" && Option.isSome(sentToWaitOn(part.params))
-              ? [Uuid.fromKey(`message:${part.id}`)]
-              : []
-          )
-        : []
-    )
+    entries.flatMap(({ event }) => {
+      if (!AssistantEvent.isLibraryEvent(event) || !Predicate.isTagged(event, "ModelOutput")) return []
+
+      const calls = event.parts.flatMap((part) => (part.type === "tool-call" ? [part] : []))
+      const working = calls.some((call) => call.name !== "send_user_message" && call.name !== "wait")
+
+      return calls.flatMap((call) =>
+        call.name === "send_user_message" && (working || Option.isSome(sentToWaitOn(call.params)))
+          ? [Uuid.fromKey(`message:${call.id}`)]
+          : []
+      )
+    })
   )
 
 // The model said it was on it and stopped without the result: its last message since the user's latest input was

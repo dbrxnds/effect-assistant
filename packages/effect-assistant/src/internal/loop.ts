@@ -164,7 +164,7 @@ const unexplained = (call: AssistantEvent.ToolCallPart) =>
     callId: call.id,
     tool: call.name,
     ...Toolkits.failed(
-      `Not sent for approval: the user would see buttons without knowing what they approve. In one step, send them a message with send_user_message saying what ${call.name} will do (what, to whom, how many), and call ${call.name} again.`,
+      `Not sent for approval: the user can't approve what nobody explained. In one step, send a message saying what ${call.name} will do (what, to whom, how many) and call it again.`,
       "ApprovalNeedsMessage"
     )
   })

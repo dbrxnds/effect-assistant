@@ -175,7 +175,7 @@ describe("History.fromEntries, a finished specialist run", () => {
     expect(history.at(-1)).toMatchObject({
       content: [
         {
-          text: `<specialist name="research" run="${runId}" status="answered">\nA report from a specialist you started. The user hasn't seen it.\nYou started it 2 minutes ago for: Q4 budgets\nThe user hasn't written since you started it.\nReport:\nAmsterdam spent most.\n</specialist>`
+          text: `<specialist name="research" run="${runId}" status="answered">\nYour specialist's report. The user hasn't seen it.\nStarted 2 minutes ago for: Q4 budgets\nThe user hasn't written since.\nReport:\nAmsterdam spent most.\n</specialist>`
         }
       ]
     })
@@ -207,7 +207,7 @@ describe("History.fromEntries, block answers and earlier results", () => {
     )
 
     expect(texts(history).at(-1)).toEqual(
-      '<answer message="m" kind="choose_one">\nThe user answered with the block on your message m.\n{"choice":"blue"}\n</answer>'
+      '<answer message="m" kind="choose_one">\nThe user answered your block.\n{"choice":"blue"}\n</answer>'
     )
   })
 
@@ -333,6 +333,37 @@ describe("History.owesDelivery", () => {
       send("result", false),
       withBlock("result")
     ])
+
+    expect(History.owesDelivery(log, 1)).toBe(false)
+  })
+
+  const sendWorking = (id: string, wait: boolean) =>
+    ModelOutput.make({
+      parts: [
+        Response.makePart("tool-call", {
+          id,
+          name: "send_user_message",
+          params: { text: id, wait },
+          providerExecuted: false
+        }),
+        Response.makePart("tool-call", { id: `${id}-search`, name: "search", params: {}, providerExecuted: false })
+      ],
+      seenThroughSequence: 1
+    })
+
+  it("is owed when a message with wait true went out in the same step as other calls", () => {
+    const log = entries([
+      say("The dirty ones, and the maple ones?"),
+      sendWorking("progress", true),
+      message("progress"),
+      result("progress-search", "search")
+    ])
+
+    expect(History.owesDelivery(log, 1)).toBe(true)
+  })
+
+  it("isn't owed when a message with wait true went out alone", () => {
+    const log = entries([say("The dirty ones, and the maple ones?"), send("answer", true), message("answer")])
 
     expect(History.owesDelivery(log, 1)).toBe(false)
   })

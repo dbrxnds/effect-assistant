@@ -20,17 +20,14 @@ export const waitToolName = "wait"
 export const sendUserMessageName = "send_user_message"
 
 const Wait = Tool.make(waitToolName, {
-  description:
-    "End your turn and wait for the next message or update, when you have nothing more to do right now and no message to send (otherwise set wait on send_user_message).",
+  description: "End your turn with nothing to send. With a message to send, set wait on it instead.",
   success: Schema.String
 })
 
-const description =
-  "Send the user a chat message. It's the only way they see anything you write: text outside it is private to you."
+const description = "Send the user a chat message: the only text they see."
 
 const WaitFlag = Schema.Boolean.annotate({
-  description:
-    "true when this is your last message for now: your turn ends with it, as with the wait tool. false when you keep working after it."
+  description: "true ends your turn with this message; false when you keep working after it."
 })
 
 const endsWithMessage = Schema.decodeUnknownOption(Schema.Struct({ wait: Schema.Literal(true) }))
@@ -128,7 +125,7 @@ const blockTools = Effect.fnUntraced(function* (kit: BlockKit.BlockKit) {
     ...(shown.size === 0
       ? []
       : [
-          `- ${toolResultKind}: a tool's result, shown the way the app draws it (found items as cards, a download as a button). Results you can show have a resultId: pass it as the props. From: ${[...shown].join(", ")}.`
+          `- ${toolResultKind}: a tool's result, drawn by the app. Props: { resultId } of a result from ${[...shown].join(", ")}.`
         ])
   ].join("\n")
 
@@ -137,7 +134,7 @@ const blockTools = Effect.fnUntraced(function* (kit: BlockKit.BlockKit) {
 
   const BlockMessage = Tool.make(sendUserMessageName, {
     description: `${description}
-You can add a block to show UI with the message, e.g. a few options to pick from or a yes/no, when that makes answering easier than typing. Plain text is fine too. Using it sends you an <answer>; the user may also just type their answer instead, and then you pass that message's id in closes.
+Optionally add one block of UI under the text when it makes answering easier than typing. Using it sends you an <answer>; if they type their answer instead, pass that message's id in closes.
 Blocks:
 ${catalog}`,
     // Props are checked against their kind's schema by the handler; the model sees every kind's in the parameters.
@@ -152,7 +149,7 @@ ${catalog}`,
       ),
       closes: Schema.optional(Schema.Array(Schema.String)).annotate({
         description:
-          "Ids of your earlier messages whose block the user just answered by typing instead of using it. Those blocks close. Leave it out otherwise: a block stays open when the user talks about something else."
+          "Ids of your earlier messages whose block the user just answered by typing; those blocks close. Omit otherwise."
       })
     }),
     success: Schema.String,
@@ -167,7 +164,7 @@ ${catalog}`,
     send_user_message: Effect.fnUntraced(function* ({ text, block, closes }) {
       if (text.trim() === "") {
         return yield* ToolFailure.fail(
-          "The message has no text: the user sees only what you send here, and a block alone is an empty bubble. Send it again with the words they should read (a short lead-in for the block).",
+          "No text: a block alone is an empty bubble. Send it again with a short lead-in.",
           { reason: "EmptyMessage" }
         )
       }
