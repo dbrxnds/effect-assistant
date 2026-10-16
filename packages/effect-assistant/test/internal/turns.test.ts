@@ -331,8 +331,8 @@ describe("turn completion", () => {
       expect(AssistantEvent.assistantTexts(entries)).toEqual(["You're welcome."])
       // The loop's prompt and tools, so the system prompt and tools stay cached; the nudge comes after the history.
       expect(request?.tools).toEqual(["send_user_message", "wait"])
-      // It has to call one: text of its own reaches nobody.
-      expect(request?.toolChoice).toBe("required")
+      // Not forced, since some models refuse that: text it writes instead goes out as the reply.
+      expect(request?.toolChoice).toBe("auto")
       expect(request?.system.endsWith("Be brief.")).toBe(true)
       expect(Scripted.lastInput(request!)).toBe("Reply now.")
     })
@@ -393,20 +393,49 @@ describe("progress without a result", () => {
     })
   )
 
-  it.live("can't wait again in the pass to deliver, after only progress since their input", () =>
+  it.live("delivers what it writes as text after its progress, and the turn completes", () =>
     Effect.gen(function* () {
       let step = 0
 
-      // It waits after its first calls, and would wait again in the pass to deliver if it still could.
+      // After its first calls, it writes the answer instead of sending it.
+      const model = yield* Scripted.make(() =>
+        ++step === 1
+          ? [Scripted.call("send_user_message", { text: "Checking.", wait: false })]
+          : [Scripted.text("Two orders are open: #1041 and #1042.")]
+      )
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* (yield* TestAssistant).submit(chat, say("What's still open?"))
+
+        return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
+      }).pipe(Effect.provide(memoryAssistant(simple({ instructions: "Be brief." }), model.layer)))
+
+      const sent = entries.flatMap(({ event }) =>
+        Predicate.isTagged(event, "ToolResult") && event.tool === "send_user_message" ? [event.outcome] : []
+      )
+
+      expect(AssistantEvent.assistantTexts(entries)).toEqual(["Checking.", "Two orders are open: #1041 and #1042."])
+      // Sent the way a call sends, and the answer: no pass to deliver.
+      expect(sent).toEqual(["success", "success"])
+      expect(step).toBe(2)
+      expect(Predicate.isTagged(lastTurnEnd(entries)!, "TurnCompleted")).toBe(true)
+    })
+  )
+
+  it.live("delivers what it writes as text in the pass to deliver, where wait is refused", () =>
+    Effect.gen(function* () {
+      let step = 0
+
       const model = yield* Scripted.make((request) => {
         step += 1
 
         if (step === 1) return [Scripted.call("send_user_message", { text: "Checking.", wait: false })]
 
-        if (Scripted.lastInput(request) !== deliveryNudge || Predicate.isString(request.toolChoice))
-          return Scripted.wait()
+        if (Scripted.lastInput(request) === deliveryNudge)
+          return [Scripted.text("Two orders are open: #1041 and #1042.")]
 
-        return Scripted.reply("Two orders are open: #1041 and #1042.")
+        return Scripted.wait()
       })
 
       const entries = yield* Effect.gen(function* () {
@@ -418,14 +447,28 @@ describe("progress without a result", () => {
 
       const delivery = (yield* model.requests).filter((request) => Scripted.lastInput(request) === deliveryNudge)
 
-      const refused = entries.flatMap(({ event }) =>
-        Predicate.isTagged(event, "ToolResult") && event.outcome === "failure" ? [event.tool] : []
-      )
-
-      // One pass to deliver, where only sending is possible; nothing was refused along the way.
-      expect(delivery.map((request) => request.toolChoice)).toEqual([{ tool: "send_user_message" }])
-      expect(refused).toEqual([])
+      // One pass to deliver, not forced, where only sending runs.
+      expect(delivery.map((request) => request.toolChoice)).toEqual(["auto"])
       expect(AssistantEvent.assistantTexts(entries)).toEqual(["Checking.", "Two orders are open: #1041 and #1042."])
+      expect(Predicate.isTagged(lastTurnEnd(entries)!, "TurnCompleted")).toBe(true)
+    })
+  )
+
+  it.live("sends text next to a call as nothing more: the call's message goes out once", () =>
+    Effect.gen(function* () {
+      const model = yield* Scripted.make(() => [
+        Scripted.text("Let me answer."),
+        ...Scripted.reply("Two orders are open: #1041 and #1042.")
+      ])
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* (yield* TestAssistant).submit(chat, say("What's still open?"))
+
+        return yield* collectUntil(TestAssistant, chat, (es) => turnsDone(es) >= 1)
+      }).pipe(Effect.provide(memoryAssistant(simple({ instructions: "Be brief." }), model.layer)))
+
+      expect(AssistantEvent.assistantTexts(entries)).toEqual(["Two orders are open: #1041 and #1042."])
       expect(Predicate.isTagged(lastTurnEnd(entries)!, "TurnCompleted")).toBe(true)
     })
   )

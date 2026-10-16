@@ -2,7 +2,7 @@ import type * as AiError from "effect/ai/AiError"
 import * as LanguageModel from "effect/ai/LanguageModel"
 import * as Model from "effect/ai/Model"
 import * as Prompt from "effect/ai/Prompt"
-import type * as Response from "effect/ai/Response"
+import * as Response from "effect/ai/Response"
 import type * as Tool from "effect/ai/Tool"
 import type * as Toolkit from "effect/ai/Toolkit"
 import * as Clock from "effect/Clock"
@@ -18,7 +18,8 @@ import type * as Instructions from "../Instructions.ts"
 import * as History from "./history.ts"
 import * as Telemetry from "./telemetry.ts"
 import * as Toolkits from "./toolkit.ts"
-import { isTurnEnding, isUserMessage } from "./tools.ts"
+import { isTurnEnding, isUserMessage, sendUserMessageName } from "./tools.ts"
+import * as Uuid from "./uuid.ts"
 
 /** @internal */
 export type Event =
@@ -116,6 +117,32 @@ const modelParts = (content: ReadonlyArray<Response.AllParts<Record<string, Tool
 
 const toolCalls = (parts: ReadonlyArray<AssistantEvent.ModelPart>): ReadonlyArray<AssistantEvent.ToolCallPart> =>
   parts.flatMap((part) => (part.type === "tool-call" ? [part] : []))
+
+// A step that ends with text and no call, where the model can message the user: the text is its answer, written
+// instead of sent. It goes out as the message it meant, ending the turn, through the same call as one it sent. Text
+// next to calls stays the model's own: there it's thinking aloud, and any message it meant is one of the calls.
+const asMessage = Effect.fnUntraced(function* (
+  parts: ReadonlyArray<AssistantEvent.ModelPart>,
+  definitions: ReadonlyArray<Tool.Any>
+) {
+  const text = parts
+    .flatMap((part) => (part.type === "text" ? [part.text] : []))
+    .join("\n\n")
+    .trim()
+
+  if (text === "" || toolCalls(parts).length > 0 || !definitions.some((tool) => tool.name === sendUserMessageName)) {
+    return parts
+  }
+
+  const call = Response.makePart("tool-call", {
+    id: yield* Uuid.make,
+    name: sendUserMessageName,
+    params: { text, wait: true },
+    providerExecuted: false
+  })
+
+  return [...parts.filter((part) => part.type !== "text"), call]
+})
 
 const runCall = Effect.fnUntraced(function* <R>(tools: Toolkits.Tools<R>, call: AssistantEvent.ToolCallPart) {
   const result = yield* Effect.gen(function* () {
@@ -317,7 +344,7 @@ export const step = <R, S, E2 = never, R2 = never>(
       const metadata = response.content.find((part) => part.type === "response-metadata")
 
       const output = AssistantEvent.ModelOutput.make({
-        parts: modelParts(response.content),
+        parts: yield* asMessage(modelParts(response.content), toolkit.definitions),
         seenThroughSequence: throughSequence,
         model: metadata?.modelId ?? Option.getOrUndefined(name),
         responseId: metadata?.id,

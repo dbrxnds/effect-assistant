@@ -284,10 +284,8 @@ const makeTurnApi = (
           }),
           // A second step, for a reply after a call it was refused.
           maxSteps: 2,
-          // The pass runs because the model wrote text of its own instead of replying, which reaches nobody: it has to
-          // call a tool now. Changing the choice costs a read of the history at full price, on these rare turns only.
-          // Only progress since their input: it must send the result, so the choice names the tool, not just any.
-          toolChoice: undelivered ? { tool: Tools.sendUserMessageName } : "required"
+          // Not forced: some models refuse a forced choice. Text it writes instead of a call goes out as the message.
+          toolChoice: "auto"
           // The loop ran the approved calls; a pass that can only reply runs none.
         }).pipe(Stream.provideService(Loop.TurnApprovals, Option.none()))
       })
