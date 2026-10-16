@@ -36,11 +36,12 @@ import * as Tools from "./tools.ts"
 export const silentTurnMessage = "I finished without sending a reply."
 
 /** @internal */
-export const defaultReplyNudge = "You haven't replied to the user's latest message. Reply now with send_user_message."
+export const defaultReplyNudge =
+  "You haven't replied to the user's latest message yet. Reply now with send_user_message."
 
 /** @internal */
 export const deliveryNudge =
-  "You said you were on it but stopped before sending the result. Send it now; if part is still running, say so."
+  "You told the user you're on it, but stopped without giving them the result. Send it now with send_user_message; if part of it is still running, say what and that you'll report back."
 
 /** @internal */
 export interface Definition {
@@ -266,7 +267,7 @@ const makeTurnApi = (
           toolkit: Toolkits.runOnly(
             options.toolkit,
             [Tools.sendUserMessageName],
-            "Not now: reply with send_user_message."
+            "Not now: reply to the user with send_user_message."
           ),
           history: Effect.gen(function* () {
             yield* checkOpen

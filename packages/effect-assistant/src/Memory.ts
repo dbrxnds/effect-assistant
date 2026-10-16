@@ -95,7 +95,7 @@ const line = (fact: Fact): string =>
 export const render = (facts: ReadonlyArray<Fact>): string =>
   facts.length === 0
     ? ""
-    : `<memory>\nFrom earlier chats. Use it without citing it; current data or what they say now wins.\n${facts.map(line).join("\n")}\n</memory>`
+    : `<memory>\nWhat you remember from earlier chats. Use it without saying where it came from; when their data or what they say now disagrees, that wins.\n${facts.map(line).join("\n")}\n</memory>`
 
 const words = (text: string): ReadonlyArray<string> =>
   text
@@ -164,13 +164,13 @@ export const layerMemory: Layer.Layer<MemoryStore> = Layer.effect(
 )
 
 const Remember = Tool.make("remember", {
-  description: `Remember one fact for later chats, in one self-contained sentence: a preference, standing decision or way of working that you can't look up again. Not data your tools can read, task progress, or anything only this chat needs.`,
+  description: `Remember something for later chats. Only what you can't look up again and that will still matter: a preference, a standing decision, how they like to work ("Rotterdam's copy is always Dutch"). For something short-lived ("out of office until Friday"), pass until. Not records your tools can read (orders, locations, budgets, people), not the state of a task in progress, and nothing you'd only need in this chat. One fact per call, in one short sentence that stands on its own. When it changes one you already have, pass that one's id as replaces.`,
   parameters: Schema.Struct({
     text: Schema.String,
     until: Schema.optional(Schema.String).annotate({
-      description: "Last day it matters (YYYY-MM-DD), for short-lived facts."
+      description: "For something short-lived: the last day it matters, as YYYY-MM-DD."
     }),
-    replaces: Schema.optional(Schema.String).annotate({ description: "Id of the fact this one updates." })
+    replaces: Schema.optional(Schema.String).annotate({ description: "The id of a fact this one replaces." })
   }),
   success: Schema.String,
   failure: ToolFailure.ToolFailure,
@@ -178,7 +178,7 @@ const Remember = Tool.make("remember", {
 })
 
 const Forget = Tool.make("forget", {
-  description: "Forget a fact by id, when asked or no longer true.",
+  description: "Forget a fact you remember, by its id, when they ask or it's no longer true.",
   parameters: Schema.Struct({ id: Schema.String }),
   success: Schema.String,
   failure: ToolFailure.ToolFailure,
@@ -186,7 +186,7 @@ const Forget = Tool.make("forget", {
 })
 
 const Recall = Tool.make("recall", {
-  description: "Search remembered facts by words in them.",
+  description: "Search what you remember, by words that would be in it.",
   parameters: Schema.Struct({ query: Schema.String }),
   success: Schema.Array(Schema.String),
   failure: ToolFailure.ToolFailure,
