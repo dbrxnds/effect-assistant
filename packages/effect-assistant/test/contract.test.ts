@@ -4,7 +4,7 @@
  * history reads) is enough for it to reply, use a tool, hand work to a
  * specialist, fill in a block, go on when the user acted from a block, and
  * go on after a crash, and the provider accepts what the library sends. Needs
- * ANTHROPIC_API_KEY.
+ * ANTHROPIC_API_KEY, and is skipped without one.
  *
  * Which tool an app's model should pick for a request is the app's to test,
  * with its own prompts and tools; the mechanics are tested on a scripted
@@ -52,7 +52,7 @@ import {
   withHandlers,
   withTools
 } from "./utils/fixtures.ts"
-import { realModel } from "./utils/realModel.ts"
+import { hasApiKey, realModel } from "./utils/realModel.ts"
 
 const instructions = "You help a small team. Be brief."
 
@@ -66,7 +66,7 @@ const weather = withHandlers(Toolkit.make(GetWeather), {
   get_weather: ({ city }) => Effect.succeed({ city, weather: "hail, 3 degrees celsius" })
 })
 
-describe("with a real model", () => {
+describe.skipIf(!hasApiKey)("with a real model", () => {
   it.live("replies through send_user_message, and ends the turn", () =>
     Effect.gen(function* () {
       const chat = yield* newChat
