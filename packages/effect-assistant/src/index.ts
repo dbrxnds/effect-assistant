@@ -35,6 +35,11 @@ export * as AssistantLoop from "./AssistantLoop.ts"
 export * as AssistantToolCall from "./AssistantToolCall.ts"
 
 /**
+ * @since 0.9.0
+ */
+export * as AssistantTest from "./AssistantTest.ts"
+
+/**
  * @since 0.1.0
  */
 export * as Block from "./Block.ts"
