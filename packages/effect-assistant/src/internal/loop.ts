@@ -83,9 +83,13 @@ export interface StepResult {
   readonly historyLength: number
 }
 
+// A tool as `Tool.isUserDefined` narrows one. With `Tool.Any`, generateText's types ask for the services that encode
+// every tool's params, `unknown` for a schema of unknown type, though deferred validation encodes none.
+type RequestTool = Tool.Tool<string, any, any>
+
 // The loop runs the calls itself, after storing each as started, so the model call runs none. It also decides which
 // calls wait for approval: the model call would ask for approvals of its own.
-const requestToolkit = (definitions: ReadonlyArray<Tool.Any>): Toolkit.WithHandler<Record<string, Tool.Any>> => ({
+const requestToolkit = (definitions: ReadonlyArray<Tool.Any>): Toolkit.WithHandler<Record<string, RequestTool>> => ({
   tools: Object.fromEntries(
     definitions.map((tool) => [
       tool.name,
@@ -95,17 +99,25 @@ const requestToolkit = (definitions: ReadonlyArray<Tool.Any>): Toolkit.WithHandl
   handle: () => Effect.succeed(Stream.empty)
 })
 
-// Tool call resolution stays on with a toolkit that runs nothing: with it off, a call whose params don't fit its
-// tool's schema fails the whole model call, and here the model reads why instead.
+// Validation is deferred: a call to a tool that isn't in the toolkit (one in the history the turn no longer offers),
+// or with params that don't fit its schema, would otherwise fail the whole model call. The loop runs it instead, and
+// the model reads why it failed.
 const generate = (
   prompt: Prompt.Prompt,
   definitions: ReadonlyArray<Tool.Any>,
   toolChoice: LanguageModel.ToolChoice<string> | undefined
 ): Effect.Effect<
-  LanguageModel.GenerateTextResponse<Record<string, Tool.Any>, "opaque">,
+  LanguageModel.GenerateTextResponse<Record<string, RequestTool>, "deferred">,
   AiError.AiError,
   LanguageModel.LanguageModel
-> => LanguageModel.generateText({ prompt, toolkit: requestToolkit(definitions), toolChoice })
+> =>
+  LanguageModel.generateText({
+    prompt,
+    toolkit: requestToolkit(definitions),
+    toolChoice,
+    disableToolCallResolution: true,
+    toolCallValidation: "deferred"
+  })
 
 const decodePart = Schema.decodeUnknownOption(AssistantEvent.ModelPart)
 

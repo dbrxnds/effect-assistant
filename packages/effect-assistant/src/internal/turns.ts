@@ -4,6 +4,7 @@ import type * as Tool from "effect/ai/Tool"
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as ErrorReporter from "effect/ErrorReporter"
 import * as Exit from "effect/Exit"
 import { identity } from "effect/Function"
 import * as Option from "effect/Option"
@@ -200,6 +201,7 @@ const finishTurn = Effect.fnUntraced(function* (chat: Writer, read: number, ranL
 // Everything stored so far counts as read, so a failing input isn't retried forever.
 const failTurn = Effect.fnUntraced(function* (chat: Writer, cause: Cause.Cause<unknown>) {
   yield* Effect.logError("assistant turn failed", cause)
+  yield* ErrorReporter.report(cause)
 
   const last = lastSequence(yield* chat.entries, 0)
 
