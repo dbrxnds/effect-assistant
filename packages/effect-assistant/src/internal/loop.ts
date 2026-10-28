@@ -311,7 +311,7 @@ export const step = <R, S, E2 = never, R2 = never>(
       const started = yield* Clock.currentTimeMillis
 
       const response = yield* generate(prompt, toolkit.definitions, options.toolChoice).pipe(
-        Telemetry.chatSpan(prompt, instructions.attributes)
+        Telemetry.annotateModelCall(instructions.attributes)
       )
 
       const metadata = response.content.find((part) => part.type === "response-metadata")

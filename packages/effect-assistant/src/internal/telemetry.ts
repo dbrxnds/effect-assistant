@@ -1,8 +1,6 @@
-import type * as LanguageModel from "effect/ai/LanguageModel"
 import * as Model from "effect/ai/Model"
 import * as Prompt from "effect/ai/Prompt"
 import * as Telemetry from "effect/ai/Telemetry"
-import type * as Tool from "effect/ai/Tool"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as References from "effect/References"
@@ -49,61 +47,57 @@ const encodePrompt = Schema.encodeOption(Prompt.Prompt)
 
 const encodeParts = Schema.encodeOption(Schema.Array(AssistantEvent.ModelPart))
 
-const annotateChat = Effect.fnUntraced(function* <Tools extends Record<string, Tool.Any>>(
-  response: LanguageModel.GenerateTextResponse<Tools, "opaque">,
-  name: Option.Option<string>
-) {
-  const span = yield* Effect.currentSpan
-  const { usage } = response
+type ModelCall = Parameters<Telemetry.SpanTransformer>[0]
+
+const completionOf = (response: ModelCall["response"]) =>
+  encodeParts(response.flatMap((part) => Option.toArray(Schema.decodeUnknownOption(AssistantEvent.ModelPart)(part))))
+
+const annotateModelSpan = (
+  { span, prompt, response }: ModelCall,
+  name: Option.Option<string>,
+  attributes: SpanAttributes | undefined
+) => {
+  span.attribute("gen_ai.prompt", toJsonText(Option.map(encodePrompt(prompt), (encoded) => encoded.content)))
+  span.attribute("gen_ai.completion", toJsonText(Option.getOrUndefined(completionOf(response))))
+
+  for (const [key, value] of Object.entries(attributes ?? {})) {
+    span.attribute(key, value)
+  }
+
+  const finish = response.find((part) => part.type === "finish")
 
   Telemetry.addGenAIAnnotations(span, {
     operation: { name: "chat" },
     request: { model: Option.getOrUndefined(name) },
-    response: { finishReasons: [response.finishReason] },
+    response: { finishReasons: finish === undefined ? undefined : [finish.reason] },
     usage: {
-      inputTokens: usage.inputTokens.total,
-      outputTokens: usage.outputTokens.total
+      inputTokens: finish?.usage.inputTokens.total,
+      outputTokens: finish?.usage.outputTokens.total
     }
   })
 
-  const completion = encodeParts(
-    response.content.flatMap((part) => Option.toArray(Schema.decodeUnknownOption(AssistantEvent.ModelPart)(part)))
-  )
-
-  span.attribute("gen_ai.completion", toJsonText(Option.getOrUndefined(completion)))
-
-  if (usage.inputTokens.cacheRead !== undefined) {
-    span.attribute("gen_ai.usage.cache_read_input_tokens", usage.inputTokens.cacheRead)
+  if (finish?.usage.inputTokens.cacheRead !== undefined) {
+    span.attribute("gen_ai.usage.cache_read_input_tokens", finish.usage.inputTokens.cacheRead)
   }
 
-  if (usage.inputTokens.cacheWrite !== undefined) {
-    span.attribute("gen_ai.usage.cache_creation_input_tokens", usage.inputTokens.cacheWrite)
+  if (finish?.usage.inputTokens.cacheWrite !== undefined) {
+    span.attribute("gen_ai.usage.cache_creation_input_tokens", finish.usage.inputTokens.cacheWrite)
   }
-})
+}
 
-// Named after the model when the context has its name (`AnthropicLanguageModel.model(...)` provides it).
 /** @internal */
-export const chatSpan =
-  (prompt: Prompt.Prompt, attributes: SpanAttributes | undefined) =>
-  <Tools extends Record<string, Tool.Any>, E, R>(
-    self: Effect.Effect<LanguageModel.GenerateTextResponse<Tools, "opaque">, E, R>
-  ): Effect.Effect<LanguageModel.GenerateTextResponse<Tools, "opaque">, E, R> =>
+export const annotateModelCall =
+  (attributes: SpanAttributes | undefined) =>
+  <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
     Effect.gen(function* () {
       const name = yield* Effect.serviceOption(Model.ModelName)
+      const outer = yield* Effect.serviceOption(Telemetry.CurrentSpanTransformer)
 
-      return yield* Effect.gen(function* () {
-        const response = yield* self
+      return yield* self.pipe(
+        Effect.provideService(Telemetry.CurrentSpanTransformer, (call) => {
+          if (Option.isSome(outer)) outer.value(call)
 
-        yield* annotateChat(response, name).pipe(Effect.ignore)
-
-        return response
-      }).pipe(
-        Effect.withSpan(Option.match(name, { onNone: () => "chat", onSome: (model) => `chat ${model}` }), {
-          kind: "client",
-          attributes: {
-            "gen_ai.prompt": toJsonText(Option.map(encodePrompt(prompt), (encoded) => encoded.content)),
-            ...attributes
-          }
+          annotateModelSpan(call, name, attributes)
         })
       )
     })
