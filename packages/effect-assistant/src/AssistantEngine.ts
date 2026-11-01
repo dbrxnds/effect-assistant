@@ -105,7 +105,8 @@ const notRegistered = (assistant: string) =>
 export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.effect(
   AssistantEngine,
   Effect.gen(function* () {
-    const context = yield* Effect.context<ChatLog>()
+    // Without the layer's scope, so a chat's resources close with its entry.
+    const context = Context.omit(Scope.Scope)(yield* Effect.context<ChatLog>())
     const log = yield* ChatLog
     const registered = new Map<string, Turns.Registration>()
     // A chat's keep-alive: a hold on its entry, so it stays open while runs or turns work in the background.
@@ -311,7 +312,8 @@ const makeClusterClient = Effect.gen(function* () {
 export const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Sharding.Sharding> = Layer.effect(
   AssistantEngine,
   Effect.gen(function* () {
-    const context = yield* Effect.context<ChatLog | Sharding.Sharding>()
+    // Without the layer's scope, so a chat's resources close with its entity.
+    const context = Context.omit(Scope.Scope)(yield* Effect.context<ChatLog | Sharding.Sharding>())
     const sharding = yield* Sharding.Sharding
 
     const register = Effect.fnUntraced(function* (registration: Turns.Registration) {
