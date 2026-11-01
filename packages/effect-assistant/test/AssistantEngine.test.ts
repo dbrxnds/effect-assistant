@@ -13,6 +13,7 @@ import * as Predicate from "effect/Predicate"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import * as TestClock from "effect/testing/TestClock"
 import {
   Assistant,
   AssistantEngine,
@@ -461,6 +462,84 @@ describe("a handler's build", () => {
       )
 
       expect(builds).toEqual([chat, other])
+    })
+  )
+
+  // Released: what a build set up in its scope, closed with the chat rather than with the process.
+  const releasing = (released: Ref.Ref<number>) =>
+    Resumer.toLayer(
+      Effect.gen(function* () {
+        yield* Effect.addFinalizer(() => Ref.update(released, (count) => count + 1))
+
+        return () => Stream.empty
+      })
+    )
+
+  const oneTurn = (chat: ChatId.ChatId) =>
+    Effect.gen(function* () {
+      const resumer = yield* Resumer
+      yield* resumer.submit(chat, say("hi"))
+      yield* resumer.subscribe(chat).pipe(
+        Stream.filter(({ event }) => AssistantEvent.isTurnEnd(event)),
+        Stream.take(1),
+        Stream.runDrain
+      )
+    })
+
+  it.live("releases what it set up when the chat is deleted", () =>
+    Effect.gen(function* () {
+      const released = yield* Ref.make(0)
+      const chat = yield* ChatId.make()
+
+      yield* Effect.gen(function* () {
+        yield* oneTurn(chat)
+        yield* (yield* Resumer).delete(chat)
+        expect(yield* Ref.get(released)).toBe(1)
+      }).pipe(
+        Effect.provide(
+          releasing(released).pipe(Layer.provideMerge(AssistantEngine.layerMemory), Layer.provide(Scripted.unused))
+        ),
+        Effect.provide(ChatLog.layerMemory)
+      )
+    })
+  )
+
+  it.effect("releases what it set up when the chat closes after it was idle", () =>
+    Effect.gen(function* () {
+      const released = yield* Ref.make(0)
+      const chat = yield* ChatId.make()
+
+      yield* Effect.gen(function* () {
+        yield* oneTurn(chat)
+        yield* TestClock.adjust("6 minutes")
+        expect(yield* Ref.get(released)).toBe(1)
+      }).pipe(
+        Effect.provide(
+          releasing(released).pipe(Layer.provideMerge(AssistantEngine.layerMemory), Layer.provide(Scripted.unused))
+        ),
+        Effect.provide(ChatLog.layerMemory)
+      )
+    })
+  )
+
+  it.effect("releases what it set up when a cluster chat closes after it was idle", () =>
+    Effect.gen(function* () {
+      const released = yield* Ref.make(0)
+      const chat = yield* ChatId.make()
+
+      // The runner takes its shards on a timer, so the test clock moves on while the turn runs.
+      const ticking = Effect.forever(TestClock.adjust("1 second").pipe(Effect.andThen(Effect.yieldNow)))
+
+      yield* Effect.gen(function* () {
+        yield* Effect.raceFirst(oneTurn(chat), ticking)
+        yield* TestClock.adjust("6 minutes")
+        expect(yield* Ref.get(released)).toBe(1)
+      }).pipe(
+        Effect.provide(
+          releasing(released).pipe(Layer.provideMerge(AssistantEngine.layerCluster), Layer.provide(Scripted.unused))
+        ),
+        Effect.provide(Layer.mergeAll(ChatLog.layerMemory, TestRunner.layer))
+      )
     })
   )
 })

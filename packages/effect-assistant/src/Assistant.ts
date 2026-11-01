@@ -22,7 +22,7 @@ import * as Filter from "effect/Filter"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import type * as Scope from "effect/Scope"
+import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { AssistantEngine } from "./AssistantEngine.ts"
 import * as AssistantEvent from "./AssistantEvent.ts"
@@ -590,7 +590,8 @@ export const make = <
     return Layer.effect(
       Key,
       Effect.gen(function* () {
-        const context = yield* Effect.context()
+        // Without the layer's scope: what a build or a turn sets up lives as long as the chat or the turn.
+        const context = yield* Effect.context().pipe(Effect.map(Context.omit(Scope.Scope)))
 
         const registration = yield* Turns.register(definition, {
           // The build runs per chat activation, in the chat; here it only keeps the layer's services for it.
@@ -601,8 +602,8 @@ export const make = <
               const handler = Effect.isEffect(build) ? yield* Effect.provideService(build, ChatKey, chat) : build
 
               return (turn: Turn<any>) =>
-                Stream.provideContext(toStream(handler(turn)), context).pipe(Stream.provideService(ChatKey, chat))
-            }).pipe(Effect.provideContext(context), Effect.orDie)
+                Stream.provide(toStream(handler(turn)), context).pipe(Stream.provideService(ChatKey, chat))
+            }).pipe(Effect.provide(context), Effect.orDie)
         })
 
         yield* (yield* AssistantEngine).register(registration)

@@ -16,7 +16,7 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
-import type * as Scope from "effect/Scope"
+import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import type * as AssistantLoop from "./AssistantLoop.ts"
 import type { ChatId } from "./ChatId.ts"
@@ -257,7 +257,8 @@ export const make = <const Name extends string>(
     return Layer.effect(
       Handler,
       Effect.gen(function* () {
-        const context = yield* Effect.context()
+        // Without the layer's scope: what a build or a turn sets up lives as long as the chat or the turn.
+        const context = yield* Effect.context().pipe(Effect.map(Context.omit(Scope.Scope)))
 
         return {
           // The build runs per chat activation, in the chat; here it only keeps the layer's
@@ -265,8 +266,8 @@ export const make = <const Name extends string>(
           open: Effect.gen(function* () {
             const handler = Effect.isEffect(build) ? yield* build : build
 
-            return (turn: Turn) => Stream.provideContext(toStream(handler(turn)), context)
-          }).pipe(Effect.provideContext(context), Effect.orDie)
+            return (turn: Turn) => Stream.provide(toStream(handler(turn)), context)
+          }).pipe(Effect.provide(context), Effect.orDie)
         }
       })
     )
