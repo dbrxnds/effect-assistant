@@ -591,7 +591,7 @@ export const make = <
       Key,
       Effect.gen(function* () {
         // Without the layer's scope: what a build or a turn sets up lives as long as the chat or the turn.
-        const context = Context.omit(Scope.Scope)(yield* Effect.context())
+        const context = yield* Effect.context().pipe(Effect.map(Context.omit(Scope.Scope)))
 
         const registration = yield* Turns.register(definition, {
           // The build runs per chat activation, in the chat; here it only keeps the layer's services for it.
