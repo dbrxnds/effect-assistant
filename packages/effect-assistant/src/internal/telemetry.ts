@@ -57,7 +57,10 @@ const annotateModelSpan = (
   name: Option.Option<string>,
   attributes: SpanAttributes | undefined
 ) => {
-  span.attribute("gen_ai.prompt", toJsonText(Option.map(encodePrompt(prompt), (encoded) => encoded.content)))
+  span.attribute(
+    "gen_ai.prompt",
+    toJsonText(Option.getOrUndefined(Option.map(encodePrompt(prompt), (encoded) => encoded.content)))
+  )
   span.attribute("gen_ai.completion", toJsonText(Option.getOrUndefined(completionOf(response))))
 
   for (const [key, value] of Object.entries(attributes ?? {})) {
