@@ -151,6 +151,10 @@ describe("AssistantLoop.run's trace", () => {
 
       for (const span of modelCalls) {
         expect(span.attributes.get("gen_ai.prompt")).toContain("Be brief.")
+        expect(JSON.parse(String(span.attributes.get("gen_ai.prompt")))).toMatchObject([
+          { role: "system" },
+          { role: "user", content: "Hi." }
+        ])
         expect(span.attributes.get("gen_ai.completion")).toContain("Hello.")
         expect(span.attributes.get("prompt.name")).toBe("brief")
       }
