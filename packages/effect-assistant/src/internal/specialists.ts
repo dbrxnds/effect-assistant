@@ -16,6 +16,7 @@ import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Semaphore from "effect/Semaphore"
 import * as Stream from "effect/Stream"
+import type * as Tracer from "effect/Tracer"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import type * as AssistantLoop from "../AssistantLoop.ts"
 import * as Loop from "./loop.ts"
@@ -237,6 +238,7 @@ export const makeRunner = Effect.fnUntraced(function* (options: {
     readonly handler: RunHandler
   }>
   readonly model: Context.Context<LanguageModel.LanguageModel>
+  readonly tracer: Option.Option<Tracer.Tracer>
   // An interruption keeps the hold.
   readonly holding: (effect: Effect.Effect<void>) => Effect.Effect<void>
   readonly report: (finished: AssistantEvent.SpecialistFinished) => Effect.Effect<void>
@@ -264,6 +266,7 @@ export const makeRunner = Effect.fnUntraced(function* (options: {
       inbox: run.inbox,
       chatId: chat.chatId
     }).pipe(
+      Telemetry.onTracer(options.tracer),
       Effect.provideContext(Context.merge(options.model, services)),
       // Spawned from a turn, a run would inherit the turn's own tools: a run can't message the user.
       Effect.provideService(Loop.TurnTools, Option.none()),

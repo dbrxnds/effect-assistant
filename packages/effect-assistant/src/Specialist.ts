@@ -22,6 +22,7 @@ import type * as AssistantLoop from "./AssistantLoop.ts"
 import type { ChatId } from "./ChatId.ts"
 import type { CurrentChat } from "./CurrentChat.ts"
 import type * as Instructions from "./Instructions.ts"
+import * as Telemetry from "./internal/telemetry.ts"
 import type { RunId } from "./RunId.ts"
 
 const TypeId = "~effect-assistant/Specialist"
@@ -258,7 +259,10 @@ export const make = <const Name extends string>(
       Handler,
       Effect.gen(function* () {
         // Without the layer's scope: what a build or a turn sets up lives as long as the chat or the turn.
-        const context = yield* Effect.context().pipe(Effect.map(Context.omit(Scope.Scope)))
+        const context = yield* Effect.context().pipe(
+          Effect.map(Context.omit(Scope.Scope)),
+          Effect.map(Telemetry.withoutTracing)
+        )
 
         return {
           // The build runs per chat activation, in the chat; here it only keeps the layer's

@@ -25,6 +25,21 @@ const LookupToolsLive = LookupTools.toLayer({ lookup: ({ id }) => Effect.succeed
 
 const Own = Assistant.make("own-loop-tools")
 
+function recorder() {
+  const spans: Array<Tracer.NativeSpan> = []
+
+  const tracer = Tracer.make({
+    span: (options) => {
+      const span = new Tracer.NativeSpan(options)
+      spans.push(span)
+
+      return span
+    }
+  })
+
+  return { spans, tracer }
+}
+
 describe("AssistantLoop.run in a turn", () => {
   it.live("runs the app's native toolkit, with the assistant's own tools next to it", () =>
     Effect.gen(function* () {
@@ -158,6 +173,47 @@ describe("AssistantLoop.run's trace", () => {
         expect(span.attributes.get("gen_ai.completion")).toContain("Hello.")
         expect(span.attributes.get("prompt.name")).toBe("brief")
       }
+    })
+  )
+
+  it.live("records a turn on the TurnTracer the layer was given, with the turn span as the trace's root", () =>
+    Effect.gen(function* () {
+      const app = recorder()
+      const agent = recorder()
+
+      const handlers = Own.toLayer((turn) =>
+        AssistantLoop.run({
+          instructions: turn.instructions("Be brief."),
+          toolkit: LookupTools,
+          history: turn.history()
+        })
+      ).pipe(
+        Layer.provide(LookupToolsLive),
+        Layer.provide(Layer.succeed(Assistant.TurnTracer, Option.some(agent.tracer)))
+      )
+
+      yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* (yield* Own).submit(chat, say("Hi."))
+
+        return yield* collectUntil(Own, chat, (es) => turnsDone(es) >= 1, "10 seconds")
+      }).pipe(
+        Effect.provide(
+          runMemory(
+            handlers,
+            Scripted.layer(() => Scripted.reply("Hello."))
+          )
+        ),
+        Effect.withTracer(app.tracer)
+      )
+
+      const turn = agent.spans.find((span) => span.name === `invoke_agent ${Own.name}`)
+
+      expect(turn?.parent).toEqual(Option.none())
+      expect(agent.spans.filter((span) => span.name === "LanguageModel.generateText").length).toBeGreaterThan(0)
+      expect(agent.spans.every((span) => span.traceId === turn?.traceId)).toBe(true)
+      expect(app.spans.filter((span) => span.name.startsWith("invoke_agent"))).toEqual([])
+      expect(app.spans.filter((span) => span.name === "LanguageModel.generateText")).toEqual([])
     })
   )
 })

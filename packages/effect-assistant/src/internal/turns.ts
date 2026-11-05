@@ -12,6 +12,7 @@ import * as Predicate from "effect/Predicate"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
+import type * as Tracer from "effect/Tracer"
 import * as Stream from "effect/Stream"
 import type * as Assistant from "../Assistant.ts"
 import type { ChatId } from "../ChatId.ts"
@@ -71,6 +72,7 @@ export interface TypedChat {
 export interface Registration {
   readonly definition: Definition
   readonly model: Context.Context<LanguageModel.LanguageModel>
+  readonly tracer: Option.Option<Tracer.Tracer>
   readonly open: (chat: TypedChat) => Effect.Effect<TurnHandler, never, Scope.Scope | CurrentChat>
   readonly specialists: ReadonlyArray<{
     readonly specialist: Specialist.Any
@@ -84,7 +86,8 @@ export const register = Effect.fnUntraced(function* (
   definition: Definition,
   options: { readonly open: Registration["open"] }
 ) {
-  const model = yield* Effect.context<LanguageModel.LanguageModel>()
+  const model = yield* Effect.context<LanguageModel.LanguageModel>().pipe(Effect.map(Telemetry.withoutTracing))
+  const tracer = yield* Telemetry.TurnTracer
 
   const specialists = yield* Effect.forEach(
     definition.specialists,
@@ -109,6 +112,7 @@ export const register = Effect.fnUntraced(function* (
   const registration: Registration = {
     definition,
     model,
+    tracer,
     open: options.open,
     specialists,
     builtins
@@ -407,6 +411,7 @@ export const run = Effect.fnUntraced(
       Telemetry.agentSpan(options.registration.definition.name, {
         chatId: options.chat.chatId,
         root: true
-      })
+      }),
+      Telemetry.onTracer(options.registration.tracer)
     )
 )
