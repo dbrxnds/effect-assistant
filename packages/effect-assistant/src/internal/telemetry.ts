@@ -1,6 +1,7 @@
 import * as Model from "effect/ai/Model"
 import * as Prompt from "effect/ai/Prompt"
 import * as Telemetry from "effect/ai/Telemetry"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as References from "effect/References"
@@ -26,6 +27,21 @@ export const agentSpan = (name: string, options: { readonly chatId: string; read
       "session.id": options.chatId
     }
   })
+
+/** @internal */
+export const TurnTracer = Context.Reference<Option.Option<Tracer.Tracer>>("effect-assistant/Assistant/TurnTracer", {
+  defaultValue: Option.none
+})
+
+// A layer's context carries the tracer and span it was built with: a turn's own must not be replaced by them.
+/** @internal */
+export const withoutTracing = Context.omit(Tracer.ParentSpan, Tracer.Tracer)
+
+/** @internal */
+export const onTracer =
+  (tracer: Option.Option<Tracer.Tracer>) =>
+  <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+    Option.match(tracer, { onNone: () => self, onSome: (tracer) => self.pipe(Effect.withTracer(tracer)) })
 
 // None when tracing is off, or when the tracer is Effect's own, which exports nothing.
 /** @internal */

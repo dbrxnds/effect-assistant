@@ -254,6 +254,7 @@ export const make = Effect.fnUntraced(function* (options: {
       handle,
       specialists,
       model: registration.model,
+      tracer: registration.tracer,
       holding,
       report: Effect.fnUntraced(function* (finished) {
         yield* store(finished)

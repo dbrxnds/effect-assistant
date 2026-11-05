@@ -20,10 +20,12 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Filter from "effect/Filter"
 import * as Layer from "effect/Layer"
+import type * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
+import type * as Tracer from "effect/Tracer"
 import { AssistantEngine } from "./AssistantEngine.ts"
 import * as AssistantEvent from "./AssistantEvent.ts"
 import type * as AssistantLoop from "./AssistantLoop.ts"
@@ -33,6 +35,7 @@ import * as Chats from "./Chats.ts"
 import type { CurrentChat } from "./CurrentChat.ts"
 import type * as Instructions from "./Instructions.ts"
 import * as AppEvents from "./internal/events.ts"
+import * as Telemetry from "./internal/telemetry.ts"
 import * as Turns from "./internal/turns.ts"
 import type * as Specialist from "./Specialist.ts"
 
@@ -236,6 +239,29 @@ const toStream = <R, RE>(
     | Stream.Stream<AssistantLoop.Event, unknown, R>
     | Effect.Effect<Stream.Stream<AssistantLoop.Event, unknown, R>, unknown, RE>
 ): Stream.Stream<AssistantLoop.Event, unknown, R | RE> => (Effect.isEffect(result) ? Stream.unwrap(result) : result)
+
+/**
+ * Sets the tracer that an assistant's turns and specialist runs record their spans with. Each
+ * turn's `invoke_agent` span is then the root of a trace on that tracer, with the turn's model
+ * calls and tool calls below it. By default they use the tracer of the fiber that runs them.
+ *
+ * Provide it to the assistant's layer to send the agent's work to its own backend, such as an LLM
+ * observability tool, while the rest of the app traces elsewhere.
+ *
+ * @example
+ * ```ts
+ * const AgentTracer = Layer.effect(
+ *   Assistant.TurnTracer,
+ *   OtlpTracer.make({ url: "https://llm-observability.example.com/v1/traces" }).pipe(Effect.map(Option.some))
+ * )
+ *
+ * const MyAssistantLive = MyAssistant.toLayer(handler).pipe(Layer.provide(AgentTracer))
+ * ```
+ *
+ * @category references
+ * @since 0.12.0
+ */
+export const TurnTracer: Context.Reference<Option.Option<Tracer.Tracer>> = Telemetry.TurnTracer
 
 /**
  * Identifies an assistant's service in a context. Each assistant has its own identifier, keyed by
@@ -591,7 +617,10 @@ export const make = <
       Key,
       Effect.gen(function* () {
         // Without the layer's scope: what a build or a turn sets up lives as long as the chat or the turn.
-        const context = yield* Effect.context().pipe(Effect.map(Context.omit(Scope.Scope)))
+        const context = yield* Effect.context().pipe(
+          Effect.map(Context.omit(Scope.Scope)),
+          Effect.map(Telemetry.withoutTracing)
+        )
 
         const registration = yield* Turns.register(definition, {
           // The build runs per chat activation, in the chat; here it only keeps the layer's services for it.
