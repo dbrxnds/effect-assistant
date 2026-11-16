@@ -81,7 +81,7 @@ const quoting = [
 ]
 
 describe("Timeline.fromEntries", () => {
-  it("has the messages and their blocks, with the user's answer, and nothing internal", () => {
+  it("has the messages and their blocks, with the user's answer and when it came, and nothing internal", () => {
     const shown = timeline(quoting)
 
     expect(shown.items).toEqual([
@@ -94,7 +94,8 @@ describe("Timeline.fromEntries", () => {
           kind: "choose_one",
           props: { options: ["red", "blue"] },
           status: "answered",
-          answer: { choice: "blue" }
+          answer: { choice: "blue" },
+          answeredAt: 8000
         }
       })
     ])
