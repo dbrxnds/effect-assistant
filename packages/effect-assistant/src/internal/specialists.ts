@@ -26,6 +26,7 @@ import * as RunId from "../RunId.ts"
 import * as Specialist from "../Specialist.ts"
 import * as ToolFailure from "../ToolFailure.ts"
 import { toolMessage, userText } from "./history.ts"
+import * as Live from "./live.ts"
 import * as Telemetry from "./telemetry.ts"
 import * as Toolkits from "./toolkit.ts"
 import type { Writer } from "./writer.ts"
@@ -270,6 +271,8 @@ export const makeRunner = Effect.fnUntraced(function* (options: {
       Effect.provideContext(Context.merge(options.model, services)),
       // Spawned from a turn, a run would inherit the turn's own tools: a run can't message the user.
       Effect.provideService(Loop.TurnTools, Option.none()),
+      // Nor show the user a status or typing: its turn may have ended.
+      Effect.provideService(Live.TurnLive, Option.none()),
       Effect.matchCause({
         onSuccess: (answer): Outcome => ({ status: "answered", report: answer }),
         onFailure: unanswered

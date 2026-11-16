@@ -21,6 +21,7 @@ import * as ChatId from "effect-assistant/ChatId"
 import { CurrentChat } from "effect-assistant/CurrentChat"
 import * as RunId from "effect-assistant/RunId"
 import * as ToolFailure from "effect-assistant/ToolFailure"
+import * as ToolStatus from "effect-assistant/ToolStatus"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Tool from "effect/ai/Tool"
@@ -217,15 +218,17 @@ const check = Effect.fn(function* ({ campaignId, office, audience, budget }: typ
  * @category tools
  * @since 0.1.0
  */
-export const StartCampaign = Tool.make("start_campaign", {
-  description:
-    "Starts a campaign. The user approves it first: they see the campaign, office, audience, and budget and approve or reject it, your turn ends meanwhile, and the outcome arrives later. Say in the same step what you're asking them to approve, in one line.",
-  parameters: StartCampaignParams,
-  success: Schema.Struct({ reference: Schema.String }),
-  failure: ToolFailure.ToolFailure,
-  needsApproval: true,
-  dependencies: [CurrentChat, AssistantToolCall.AssistantToolCall]
-})
+export const StartCampaign = ToolStatus.described(
+  Tool.make("start_campaign", {
+    description:
+      "Starts a campaign. The user approves it first: they see the campaign, office, audience, and budget and approve or reject it, your turn ends meanwhile, and the outcome arrives later. Say in the same step what you're asking them to approve, in one line.",
+    parameters: StartCampaignParams,
+    success: Schema.Struct({ reference: Schema.String }),
+    failure: ToolFailure.ToolFailure,
+    needsApproval: true,
+    dependencies: [CurrentChat, AssistantToolCall.AssistantToolCall]
+  })
+)
 
 /**
  * The campaign tools.

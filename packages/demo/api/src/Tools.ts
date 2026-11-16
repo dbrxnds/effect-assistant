@@ -10,6 +10,7 @@ import * as Locations from "@acme/demo-shared/Locations"
 import * as Orders from "@acme/demo-shared/Orders"
 import * as Performance from "@acme/demo-shared/Performance"
 import * as ToolFailure from "effect-assistant/ToolFailure"
+import * as ToolStatus from "effect-assistant/ToolStatus"
 import * as Config from "effect/Config"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -31,20 +32,22 @@ const OfficeInput = Schema.optional(Schema.String).annotate({ description: "Offi
  * @category tools
  * @since 0.1.0
  */
-export const OrderHistory = Tool.make("order_history", {
-  description:
-    "Recent product and campaign orders, newest first, including the ones placed through you. Optionally for one office or one kind.",
-  parameters: Schema.Struct({
-    office: OfficeInput,
-    kind: Schema.optional(Schema.Literals(["product", "campaign"])),
-    limit: Schema.optional(Schema.Int)
-  }),
-  success: Schema.Struct({
-    placedThroughAcme: Schema.Array(LiveOrders.LiveOrder),
-    history: Schema.Array(Orders.Order)
-  }),
-  failure: ToolFailure.ToolFailure
-})
+export const OrderHistory = ToolStatus.described(
+  Tool.make("order_history", {
+    description:
+      "Recent product and campaign orders, newest first, including the ones placed through you. Optionally for one office or one kind.",
+    parameters: Schema.Struct({
+      office: OfficeInput,
+      kind: Schema.optional(Schema.Literals(["product", "campaign"])),
+      limit: Schema.optional(Schema.Int)
+    }),
+    success: Schema.Struct({
+      placedThroughAcme: Schema.Array(LiveOrders.LiveOrder),
+      history: Schema.Array(Orders.Order)
+    }),
+    failure: ToolFailure.ToolFailure
+  })
+)
 
 /**
  * Returns where an order is.
@@ -81,13 +84,15 @@ export const Offices = Tool.make("offices", {
  * @category tools
  * @since 0.1.0
  */
-export const OfficeBudget = Tool.make("office_budget", {
-  description:
-    "An office's marketing budget this quarter: total, spent (including orders placed through you), and left.",
-  parameters: Schema.Struct({ office: Schema.String.annotate({ description: "Office name, like Amsterdam." }) }),
-  success: Budgets.OfficeBudget,
-  failure: ToolFailure.ToolFailure
-})
+export const OfficeBudget = ToolStatus.described(
+  Tool.make("office_budget", {
+    description:
+      "An office's marketing budget this quarter: total, spent (including orders placed through you), and left.",
+    parameters: Schema.Struct({ office: Schema.String.annotate({ description: "Office name, like Amsterdam." }) }),
+    success: Budgets.OfficeBudget,
+    failure: ToolFailure.ToolFailure
+  })
+)
 
 /**
  * Acme's lookups: orders, offices, and budgets.

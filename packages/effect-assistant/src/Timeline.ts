@@ -29,6 +29,7 @@ import type * as Assistant from "./Assistant.ts"
 import * as AssistantActivity from "./AssistantActivity.ts"
 import * as AssistantEvent from "./AssistantEvent.ts"
 import * as BlockKit from "./BlockKit.ts"
+import * as ChatSignal from "./ChatSignal.ts"
 import { InputId } from "./InputId.ts"
 import * as AppEvents from "./internal/events.ts"
 import * as ToolApproval from "./ToolApproval.ts"
@@ -227,12 +228,19 @@ export type SpecialistWorking = typeof SpecialistWorking.Type
  * something that arrived. `specialists` lists the specialists that are working. When the chat is
  * idle, nothing is working, even if a workflow is waiting on a timer or on the user.
  *
+ * On a live subscription (`subscribe(chatId, { live: true })`), `status` is a short line about what
+ * the running turn is doing, and `typing` is true while the model writes a message to the user. Both
+ * come from the chat's signals (see `ChatSignal`): they go when the turn ends, and a timeline
+ * folded from the log alone has neither.
+ *
  * @category schemas
  * @since 0.1.0
  */
 export const Activity = Schema.Struct({
   working: Schema.Boolean,
-  specialists: Schema.Array(SpecialistWorking)
+  specialists: Schema.Array(SpecialistWorking),
+  status: Schema.optional(Schema.String),
+  typing: Schema.Boolean
 })
 
 /**
@@ -363,7 +371,7 @@ export const Change: <const Events extends ReadonlyArray<AssistantEvent.AppEvent
 export const empty: Timeline = {
   sequence: 0,
   items: [],
-  activity: { working: false, specialists: [] },
+  activity: { working: false, specialists: [], typing: false },
   failed: false,
   deleted: false
 }
@@ -599,19 +607,45 @@ interface Schemas {
 
 interface Folding {
   readonly step: (entry: AssistantEvent.AnyEntry) => AnyChange | undefined
+  readonly signal: (signal: ChatSignal.ChatSignal) => AnyChange | undefined
   readonly snapshot: AnyChange
 }
 
-const activityOf = (activity: AssistantActivity.State): Activity => ({
-  working: activity.turnSince !== undefined || activity.queued,
-  specialists: [...activity.specialists.values()].map((run) => ({
-    specialist: run.specialist,
-    since: run.since
-  }))
-})
+interface LiveState {
+  readonly status: string | undefined
+  readonly typing: boolean
+}
+
+const noLive: LiveState = { status: undefined, typing: false }
+
+const applySignal = (live: LiveState, signal: ChatSignal.ChatSignal): LiveState =>
+  Match.value(signal).pipe(
+    Match.tagsExhaustive({
+      Status: ({ text }): LiveState => ({ ...live, status: text }),
+      TypingStarted: (): LiveState => ({ status: undefined, typing: true }),
+      TypingStopped: (): LiveState => ({ ...live, typing: false })
+    })
+  )
+
+const activityOf = (activity: AssistantActivity.State, live: LiveState): Activity => {
+  const { status } = live
+
+  const shown: Activity = {
+    working: activity.turnSince !== undefined || activity.queued,
+    specialists: [...activity.specialists.values()].map((run) => ({
+      specialist: run.specialist,
+      since: run.since
+    })),
+    typing: live.typing
+  }
+
+  return status === undefined ? shown : { ...shown, status }
+}
 
 const sameActivity = (a: Activity, b: Activity) =>
   a.working === b.working &&
+  a.status === b.status &&
+  a.typing === b.typing &&
   a.specialists.length === b.specialists.length &&
   a.specialists.every((run, i) => {
     const other = b.specialists[i]
@@ -626,6 +660,7 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding =>
   let failed = false
   let deleted = false
   let activity = AssistantActivity.empty
+  let live = noLive
   let blocks: ReadonlyMap<string, BlockKit.State> = new Map()
   // The items in order, and the assistant's messages as stored: their blocks change as the chat goes on.
   const items = new Map<string, AnyItem>()
@@ -765,15 +800,37 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding =>
       return [item]
     })
 
+  // A turn's end clears what it showed, also when a signal didn't arrive.
+  const settle = (event: { readonly _tag: string }) => {
+    if (
+      Predicate.isTagged(event, "TurnCompleted") ||
+      Predicate.isTagged(event, "TurnFailed") ||
+      Predicate.isTagged(event, "ChatDeleted")
+    ) {
+      live = noLive
+    }
+  }
+
+  const signal = (received: ChatSignal.ChatSignal): AnyChange | undefined => {
+    const previous = activityOf(activity, live)
+
+    live = applySignal(live, received)
+
+    const now = activityOf(activity, live)
+
+    return sameActivity(previous, now) ? undefined : { sequence, items: [], activity: now, failed, deleted }
+  }
+
   const step = (entry: AssistantEvent.AnyEntry): AnyChange | undefined => {
-    const previous = { activity: activityOf(activity), failed, deleted }
+    const previous = { activity: activityOf(activity, live), failed, deleted }
     const { event } = entry
 
     sequence = entry.sequence
     activity = AssistantActivity.apply(activity, entry)
+    settle(event)
 
     if (!AssistantEvent.isLibraryEvent(event)) {
-      const now = activityOf(activity)
+      const now = activityOf(activity, live)
 
       return Option.match(eventItemOf(entry), {
         onNone: () =>
@@ -804,7 +861,7 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding =>
     })
 
     const all = [...changed, ...approvalItems(event, decidedBefore)]
-    const now = activityOf(activity)
+    const now = activityOf(activity, live)
 
     return all.length === 0 &&
       failed === previous.failed &&
@@ -816,8 +873,9 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding =>
 
   return {
     step,
+    signal,
     get snapshot() {
-      return { sequence, items: [...items.values()], activity: activityOf(activity), failed, deleted }
+      return { sequence, items: [...items.values()], activity: activityOf(activity, live), failed, deleted }
     }
   }
 }
@@ -871,12 +929,12 @@ export interface ChangesOptions<
 }
 
 function changesWith<E, R, Events, const Show extends Shown<Events> = readonly []>(
-  entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
+  entries: Stream.Stream<AssistantEvent.AnyEntry | ChatSignal.ChatSignal, E, R>,
   definition: Definition<Events>,
   options?: ChangesOptions<Show>
 ): Stream.Stream<Change<Show[number]["Type"]>, E, R>
 function changesWith<E, R>(
-  entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
+  entries: Stream.Stream<AssistantEvent.AnyEntry | ChatSignal.ChatSignal, E, R>,
   _definition: Schemas,
   options?: ChangesOptions<ReadonlyArray<AssistantEvent.AppEventSchema>>
 ): Stream.Stream<AnyChange, E, R> {
@@ -886,10 +944,12 @@ function changesWith<E, R>(
     Stream.mapAccumArray(
       () => folding(options?.show ?? []),
       (timeline, chunk) => {
-        const changed = chunk.flatMap((entry) => {
-          const change = timeline.step(entry)
+        const changed = chunk.flatMap((item) => {
+          if (ChatSignal.isChatSignal(item)) return Option.toArray(Option.fromUndefinedOr(timeline.signal(item)))
 
-          return change === undefined || entry.sequence <= after ? [] : [change]
+          const change = timeline.step(item)
+
+          return change === undefined || item.sequence <= after ? [] : [change]
         })
 
         const merged = merge(changed)
@@ -951,9 +1011,11 @@ export const changes: {
   <Events, const Show extends Shown<Events> = readonly []>(
     definition: Definition<Events>,
     options?: ChangesOptions<Show>
-  ): <E, R>(entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>) => Stream.Stream<Change<Show[number]["Type"]>, E, R>
+  ): <E, R>(
+    entries: Stream.Stream<AssistantEvent.AnyEntry | ChatSignal.ChatSignal, E, R>
+  ) => Stream.Stream<Change<Show[number]["Type"]>, E, R>
   <E, R, Events, const Show extends Shown<Events> = readonly []>(
-    entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
+    entries: Stream.Stream<AssistantEvent.AnyEntry | ChatSignal.ChatSignal, E, R>,
     definition: Definition<Events>,
     options?: ChangesOptions<Show>
   ): Stream.Stream<Change<Show[number]["Type"]>, E, R>

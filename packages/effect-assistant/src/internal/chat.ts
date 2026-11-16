@@ -15,6 +15,7 @@ import * as SynchronizedRef from "effect/SynchronizedRef"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import type { ChatId } from "../ChatId.ts"
 import { ChatLog } from "../ChatLog.ts"
+import * as ChatSignal from "../ChatSignal.ts"
 import { CurrentChat } from "../CurrentChat.ts"
 import * as Chats from "../Chats.ts"
 import * as SpecialistService from "../Specialist.ts"
@@ -34,7 +35,11 @@ const idOf = (event: { readonly _tag: string }): string | undefined =>
       ? event.id
       : undefined
 
-const makeChannelPubSub = Effect.acquireRelease(PubSub.unbounded<AssistantEvent.Entry>(), PubSub.shutdown)
+/** @internal */
+export type Item = AssistantEvent.Entry | ChatSignal.ChatSignal
+
+// Entries and signals share it, so a live subscriber gets them in the order they happened.
+const makeChannelPubSub = Effect.acquireRelease(PubSub.unbounded<Item>(), PubSub.shutdown)
 
 const makeHolding = Effect.fnUntraced(function* (keepAlive: (enabled: boolean) => Effect.Effect<void>) {
   const holds = yield* SynchronizedRef.make(0)
@@ -77,17 +82,22 @@ export interface Chat {
   // For inputs no turn has read, like a report stored during a shutdown.
   readonly resume: Effect.Effect<void>
   readonly stream: (after: number) => Stream.Stream<AssistantEvent.Entry>
+  // With the signals sent while it streams; a signal sent before isn't sent again.
+  readonly live: (after: number) => Stream.Stream<Item>
   // Stops what works in the chat and ends its subscribers' streams; its log stays.
   readonly delete: Effect.Effect<void>
 }
 
-const isChatDeleted = (entry: AssistantEvent.Entry) => Predicate.isTagged(entry.event, "ChatDeleted")
+const isChatDeleted = (item: Item) => !ChatSignal.isChatSignal(item) && Predicate.isTagged(item.event, "ChatDeleted")
+
+const isEntry = (item: Item): item is AssistantEvent.Entry => !ChatSignal.isChatSignal(item)
 
 const deletedChat = (entries: ReadonlyArray<AssistantEvent.Entry>): Chat => ({
   submit: () => Effect.void,
   submitInBackground: () => Effect.void,
   resume: Effect.void,
   stream: (after) => Stream.fromIterable(entries.filter((entry) => entry.sequence > after)),
+  live: (after) => Stream.fromIterable(entries.filter((entry) => entry.sequence > after)),
   delete: Effect.void
 })
 
@@ -155,7 +165,11 @@ export const make = Effect.fnUntraced(function* (options: {
   const chat: Writer = {
     chatId,
     entries: Ref.get(entries),
-    append: (events) => Semaphore.withPermit(writes)(write(events))
+    append: (events) => Semaphore.withPermit(writes)(write(events)),
+    signal: (signal) =>
+      Effect.gen(function* () {
+        if (!(yield* isDeleted)) yield* PubSub.publish(channel, signal)
+      })
   }
 
   const toStored = (event: {
@@ -297,6 +311,27 @@ export const make = Effect.fnUntraced(function* (options: {
   // A chat the app deleted while it was closed is deleted now, so its subscribers hear it.
   yield* checkAvailable
 
+  const subscribe = (after: number): Stream.Stream<Item> =>
+    Stream.unwrap(
+      Effect.gen(function* () {
+        // Subscribes before it reads, so nothing appended in between is missed.
+        const subscription = yield* PubSub.subscribe(channel)
+        const all = yield* chat.entries
+        const stored = all.filter((entry) => entry.sequence > after)
+        const last = stored.at(-1)?.sequence ?? after
+
+        // Deleted: what the reader hasn't seen, then the end. Otherwise the stream ends with the `ChatDeleted`.
+        if (all.some(isChatDeleted)) return Stream.fromIterable(stored)
+
+        return Stream.concat(
+          Stream.fromIterable<Item>(stored),
+          Stream.fromSubscription(subscription).pipe(
+            Stream.filter((item) => ChatSignal.isChatSignal(item) || item.sequence > last)
+          )
+        ).pipe(Stream.takeUntil(isChatDeleted))
+      })
+    )
+
   const chatApi: Chat = {
     submit: Effect.fnUntraced(function* (input) {
       yield* store(input)
@@ -309,24 +344,8 @@ export const make = Effect.fnUntraced(function* (options: {
     resume: Effect.gen(function* () {
       if (History.needsTurn(yield* chat.entries)) yield* inBackground(drain)
     }),
-    stream: (after) =>
-      Stream.unwrap(
-        Effect.gen(function* () {
-          // Subscribes before it reads, so nothing appended in between is missed.
-          const subscription = yield* PubSub.subscribe(channel)
-          const all = yield* chat.entries
-          const stored = all.filter((entry) => entry.sequence > after)
-          const last = stored.at(-1)?.sequence ?? after
-
-          // Deleted: what the reader hasn't seen, then the end. Otherwise the stream ends with the `ChatDeleted`.
-          if (all.some(isChatDeleted)) return Stream.fromIterable(stored)
-
-          return Stream.concat(
-            Stream.fromIterable(stored),
-            Stream.fromSubscription(subscription).pipe(Stream.filter((entry) => entry.sequence > last))
-          ).pipe(Stream.takeUntil(isChatDeleted))
-        })
-      ),
+    stream: (after) => subscribe(after).pipe(Stream.filter(isEntry)),
+    live: subscribe,
     delete: remove
   }
 

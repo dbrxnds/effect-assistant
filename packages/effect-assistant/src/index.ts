@@ -60,6 +60,11 @@ export * as ChatId from "./ChatId.ts"
 export * as ChatLog from "./ChatLog.ts"
 
 /**
+ * @since 0.13.0
+ */
+export * as ChatSignal from "./ChatSignal.ts"
+
+/**
  * @since 0.1.0
  */
 export * as Chats from "./Chats.ts"
@@ -105,6 +110,11 @@ export * as Skill from "./Skill.ts"
 export * as Specialist from "./Specialist.ts"
 
 /**
+ * @since 0.13.0
+ */
+export * as StatusSummary from "./StatusSummary.ts"
+
+/**
  * @since 0.3.0
  */
 export * as Timeline from "./Timeline.ts"
@@ -128,3 +138,8 @@ export * as ToolFailure from "./ToolFailure.ts"
  * @since 0.5.0
  */
 export * as ToolResult from "./ToolResult.ts"
+
+/**
+ * @since 0.13.0
+ */
+export * as ToolStatus from "./ToolStatus.ts"

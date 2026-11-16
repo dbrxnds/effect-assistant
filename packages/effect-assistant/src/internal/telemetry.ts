@@ -10,6 +10,7 @@ import * as Tracer from "effect/Tracer"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import type { SpanAttributes } from "../Instructions.ts"
 import { toJsonText } from "./schema.ts"
+import { collect } from "./stream.ts"
 
 type Traced = string | ReadonlyArray<{ readonly _tag: string }>
 
@@ -65,8 +66,11 @@ const encodeParts = Schema.encodeOption(Schema.Array(AssistantEvent.ModelPart))
 
 type ModelCall = Parameters<Telemetry.SpanTransformer>[0]
 
+// A streamed call's response is its stream's parts: joined first, as the log stores them.
 const completionOf = (response: ModelCall["response"]) =>
-  encodeParts(response.flatMap((part) => Option.toArray(Schema.decodeUnknownOption(AssistantEvent.ModelPart)(part))))
+  encodeParts(
+    collect(response).flatMap((part) => Option.toArray(Schema.decodeUnknownOption(AssistantEvent.ModelPart)(part)))
+  )
 
 const annotateModelSpan = (
   { span, prompt, response }: ModelCall,
