@@ -12,13 +12,17 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
+import * as SchemaAST from "effect/SchemaAST"
 import * as Stream from "effect/Stream"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import type * as Instructions from "../Instructions.ts"
+import * as ToolStatus from "../ToolStatus.ts"
 import * as History from "./history.ts"
+import * as Live from "./live.ts"
+import * as Streamed from "./stream.ts"
 import * as Telemetry from "./telemetry.ts"
 import * as Toolkits from "./toolkit.ts"
-import { isTurnEnding, isUserMessage } from "./tools.ts"
+import { isTurnEnding, isUserMessage, sendUserMessageName } from "./tools.ts"
 
 /** @internal */
 export type Event =
@@ -87,41 +91,85 @@ export interface StepResult {
 // every tool's params, `unknown` for a schema of unknown type, though deferred validation encodes none.
 type RequestTool = Tool.Tool<string, any, any>
 
+const statusParameter = Schema.String.annotate({ description: ToolStatus.parameterDescription }).pipe(
+  Schema.optionalKey
+)
+
+// What the model reads of a described tool: its parameters with the status one. Only the request has it; the call
+// runs without it (see `withoutStatus`). A record of no keys (a tool without parameters) becomes an object with it.
+const withStatusParameter = (tool: Tool.Any): Tool.Any => {
+  const ast = tool.parametersSchema.ast
+
+  if (!ToolStatus.isDescribed(tool) || !SchemaAST.isObjects(ast)) return tool
+
+  if (ast.propertySignatures.some((property) => property.name === ToolStatus.parameterName)) {
+    throw new Error(
+      `${tool.name} has a parameter named ${ToolStatus.parameterName} already, so it can't show a status: rename it.`
+    )
+  }
+
+  const added = Schema.Struct({ [ToolStatus.parameterName]: statusParameter }).ast.propertySignatures
+
+  return tool.setParameters(
+    Schema.make<Schema.Top>(
+      new SchemaAST.Objects(
+        [...ast.propertySignatures, ...added],
+        ast.indexSignatures.filter((index) => !SchemaAST.isNever(index.type)),
+        ast.annotations
+      )
+    )
+  )
+}
+
 // The loop runs the calls itself, after storing each as started, so the model call runs none. It also decides which
 // calls wait for approval: the model call would ask for approvals of its own.
 const requestToolkit = (definitions: ReadonlyArray<Tool.Any>): Toolkit.WithHandler<Record<string, RequestTool>> => ({
   tools: Object.fromEntries(
-    definitions.map((tool) => [
-      tool.name,
-      tool.needsApproval === undefined || tool.needsApproval === false ? tool : tool.setNeedsApproval(false)
-    ])
+    definitions.map((tool) => {
+      const requested = withStatusParameter(tool)
+
+      return [
+        tool.name,
+        requested.needsApproval === undefined || requested.needsApproval === false
+          ? requested
+          : requested.setNeedsApproval(false)
+      ]
+    })
   ),
   handle: () => Effect.succeed(Stream.empty)
 })
 
+// The model starts a message to the user: a `send_user_message` call, or text of its own, which the reply pass turns
+// into one.
+const startsMessage = (part: Response.AnyPart) =>
+  part.type === "text-start" || (part.type === "tool-params-start" && part.name === sendUserMessageName)
+
 // Validation is deferred: a call to a tool that isn't in the toolkit (one in the history the turn no longer offers),
 // or with params that don't fit its schema, would otherwise fail the whole model call. The loop runs it instead, and
 // the model reads why it failed.
+// Streamed, so the chat can show the user that a message is on its way while the model writes it.
 const generate = (
   prompt: Prompt.Prompt,
   definitions: ReadonlyArray<Tool.Any>,
   toolChoice: LanguageModel.ToolChoice<string> | undefined
-): Effect.Effect<
-  LanguageModel.GenerateTextResponse<Record<string, RequestTool>, "deferred">,
-  AiError.AiError,
-  LanguageModel.LanguageModel
-> =>
-  LanguageModel.generateText({
-    prompt,
-    toolkit: requestToolkit(definitions),
-    toolChoice,
-    disableToolCallResolution: true,
-    toolCallValidation: "deferred"
-  })
+): Effect.Effect<ReadonlyArray<Response.AnyPart>, AiError.AiError, LanguageModel.LanguageModel> =>
+  Stream.suspend(() =>
+    LanguageModel.streamText({
+      prompt,
+      toolkit: requestToolkit(definitions),
+      toolChoice,
+      disableToolCallResolution: true,
+      toolCallValidation: "deferred"
+    })
+  ).pipe(
+    Stream.tap((part) => (startsMessage(part) ? Live.use((live) => live.typing(true)) : Effect.void)),
+    Stream.runCollect,
+    Effect.map(Streamed.collect)
+  )
 
 const decodePart = Schema.decodeUnknownOption(AssistantEvent.ModelPart)
 
-const modelParts = (content: ReadonlyArray<Response.AllParts<Record<string, Tool.Any>>>) =>
+const modelParts = (content: ReadonlyArray<Response.AnyPart>) =>
   content.flatMap((part) =>
     Option.toArray(decodePart(part)).filter((decoded) => !(decoded.type === "tool-call" && decoded.providerExecuted))
   )
@@ -129,14 +177,43 @@ const modelParts = (content: ReadonlyArray<Response.AllParts<Record<string, Tool
 const toolCalls = (parts: ReadonlyArray<AssistantEvent.ModelPart>): ReadonlyArray<AssistantEvent.ToolCallPart> =>
   parts.flatMap((part) => (part.type === "tool-call" ? [part] : []))
 
+const decodeParams = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Json))
+
+const isDescribedCall = <R>(tools: Toolkits.Tools<R>, call: AssistantEvent.ToolCallPart) =>
+  tools.definitions.some((tool) => tool.name === call.name && ToolStatus.isDescribed(tool))
+
+// The status the model wrote for a described tool's call, and the call as the tool's handler gets it.
+const splitStatus = (call: AssistantEvent.ToolCallPart): readonly [string | undefined, AssistantEvent.ToolCallPart] => {
+  const params = decodeParams(call.params)
+
+  if (Option.isNone(params) || !Object.hasOwn(params.value, ToolStatus.parameterName)) return [undefined, call]
+
+  const { [ToolStatus.parameterName]: written, ...rest } = params.value
+  const status = Predicate.isString(written) ? written.trim() : ""
+
+  return [status === "" ? undefined : status, { ...call, params: rest }]
+}
+
+// A call's status shows while it runs; a message's typing stops once the message is stored.
 const runCall = Effect.fnUntraced(function* <R>(tools: Toolkits.Tools<R>, call: AssistantEvent.ToolCallPart) {
+  const [status, run] = isDescribedCall(tools, call) ? splitStatus(call) : [undefined, call]
+
   const result = yield* Effect.gen(function* () {
-    const result = yield* tools.run(call)
+    if (status !== undefined) yield* Live.use((live) => live.show(call.id, status, "tool"))
+
+    const result = yield* tools.run(run)
 
     yield* Telemetry.toolOutput(result.result)
 
     return result
-  }).pipe(Telemetry.toolSpan(call))
+  }).pipe(
+    Telemetry.toolSpan(call),
+    Effect.ensuring(
+      Live.use((live) =>
+        Effect.andThen(live.clear(call.id), call.name === sendUserMessageName ? live.typing(false) : Effect.void)
+      )
+    )
+  )
 
   return AssistantEvent.ToolResult.make({ callId: call.id, tool: call.name, ...result })
 })
@@ -204,6 +281,7 @@ const runCalls = <R, S, E, R2>(
             Effect.gen(function* () {
               const explained = pending.some(({ call }) => isUserMessage(call))
 
+              // Text that became no message, or a message that failed, stops the typing too.
               const done = yield* Effect.forEach(
                 pending,
                 ({ call }, i): Effect.Effect<Event, never, R> =>
@@ -213,7 +291,7 @@ const runCalls = <R, S, E, R2>(
                       ? awaitApproval(call)
                       : Effect.succeed(unexplained(call)),
                 { concurrency: "unbounded" }
-              )
+              ).pipe(Effect.ensuring(Live.use((live) => live.typing(false))))
 
               return Stream.fromIterable(done.map(value)).pipe(
                 Stream.concat(
@@ -322,18 +400,19 @@ export const step = <R, S, E2 = never, R2 = never>(
       const name = yield* Effect.serviceOption(Model.ModelName)
       const started = yield* Clock.currentTimeMillis
 
-      const response = yield* generate(prompt, toolkit.definitions, options.toolChoice).pipe(
+      const content = yield* generate(prompt, toolkit.definitions, options.toolChoice).pipe(
         Telemetry.annotateModelCall(instructions.attributes)
       )
 
-      const metadata = response.content.find((part) => part.type === "response-metadata")
+      const metadata = content.find((part) => part.type === "response-metadata")
+      const finish = content.find((part) => part.type === "finish")
 
       const output = AssistantEvent.ModelOutput.make({
-        parts: modelParts(response.content),
+        parts: modelParts(content),
         seenThroughSequence: throughSequence,
         model: metadata?.modelId ?? Option.getOrUndefined(name),
         responseId: metadata?.id,
-        usage: response.usage,
+        usage: finish?.usage,
         durationMillis: (yield* Clock.currentTimeMillis) - started
       })
 

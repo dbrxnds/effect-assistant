@@ -18,6 +18,7 @@ import * as ChatId from "effect-assistant/ChatId"
 import { CurrentChat } from "effect-assistant/CurrentChat"
 import * as RunId from "effect-assistant/RunId"
 import * as ToolFailure from "effect-assistant/ToolFailure"
+import * as ToolStatus from "effect-assistant/ToolStatus"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
@@ -172,20 +173,22 @@ export const quote = Effect.fn(function* ({ office, product, quantity }: typeof 
  * @category tools
  * @since 0.1.0
  */
-export const QuoteOrder = Tool.make("quote_order", {
-  description:
-    "What an order of branded products comes to for an office: units (rounded up to whole packs and the minimum), total, budget left after it, and lead time. Places nothing.",
-  parameters: OrderInput,
-  success: Schema.Struct({
-    office: Schema.String,
-    product: Schema.String,
-    quantity: Schema.Int,
-    total: Schema.Finite,
-    remainingBudget: Schema.Finite,
-    leadTimeDays: Schema.Int
-  }),
-  failure: ToolFailure.ToolFailure
-})
+export const QuoteOrder = ToolStatus.described(
+  Tool.make("quote_order", {
+    description:
+      "What an order of branded products comes to for an office: units (rounded up to whole packs and the minimum), total, budget left after it, and lead time. Places nothing.",
+    parameters: OrderInput,
+    success: Schema.Struct({
+      office: Schema.String,
+      product: Schema.String,
+      quantity: Schema.Int,
+      total: Schema.Finite,
+      remainingBudget: Schema.Finite,
+      leadTimeDays: Schema.Int
+    }),
+    failure: ToolFailure.ToolFailure
+  })
+)
 
 /**
  * What `place_order` places: a product order, as `quote_order` returned it.
@@ -207,15 +210,17 @@ export const PlaceOrderParams = Schema.Struct({
  * @category tools
  * @since 0.1.0
  */
-export const PlaceOrder = Tool.make("place_order", {
-  description:
-    "Places a product order, with exactly what quote_order returned. The user approves it first: they see the order and approve or reject it, your turn ends meanwhile, and the outcome arrives later. Say in the same step what you're asking them to approve, in one line.",
-  parameters: PlaceOrderParams,
-  success: Schema.Struct({ reference: Schema.String }),
-  failure: ToolFailure.ToolFailure,
-  needsApproval: true,
-  dependencies: [CurrentChat, AssistantToolCall.AssistantToolCall]
-})
+export const PlaceOrder = ToolStatus.described(
+  Tool.make("place_order", {
+    description:
+      "Places a product order, with exactly what quote_order returned. The user approves it first: they see the order and approve or reject it, your turn ends meanwhile, and the outcome arrives later. Say in the same step what you're asking them to approve, in one line.",
+    parameters: PlaceOrderParams,
+    success: Schema.Struct({ reference: Schema.String }),
+    failure: ToolFailure.ToolFailure,
+    needsApproval: true,
+    dependencies: [CurrentChat, AssistantToolCall.AssistantToolCall]
+  })
+)
 
 /**
  * The product ordering tools.

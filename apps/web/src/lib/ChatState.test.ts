@@ -10,7 +10,7 @@ const user = (id: string, text: string) => Timeline.UserMessage.make({ id: Input
 const change = (sequence: number, items: ReadonlyArray<Timeline.Item>, working: boolean): Timeline.Change => ({
   sequence,
   items,
-  activity: { working, specialists: [] },
+  activity: { working, specialists: [], typing: false },
   failed: false,
   deleted: false
 })
@@ -21,7 +21,7 @@ test("works while the timeline says the assistant or a specialist works", () => 
 
   const researching: Timeline.Change = {
     ...change(4, [], false),
-    activity: { working: false, specialists: [{ specialist: "research", since: 0 }] }
+    activity: { working: false, specialists: [{ specialist: "research", since: 0 }], typing: false }
   }
 
   assert.equal(ChatState.apply(ChatState.initial, researching).working, true)

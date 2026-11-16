@@ -140,7 +140,8 @@ describe("Timeline.fromEntries", () => {
 
     expect(working.activity).toEqual({
       working: true,
-      specialists: [{ specialist: "research", since: 3000 }]
+      specialists: [{ specialist: "research", since: 3000 }],
+      typing: false
     })
     expect(JSON.stringify(working)).not.toContain("internal brief")
 
@@ -150,7 +151,7 @@ describe("Timeline.fromEntries", () => {
       AssistantEvent.TurnFailed.make({ throughSequence: 2, message: "AnthropicError: overloaded" })
     ])
 
-    expect(failed.activity).toEqual({ working: false, specialists: [] })
+    expect(failed.activity).toEqual({ working: false, specialists: [], typing: false })
     expect(failed.failed).toBe(true)
     expect(JSON.stringify(failed)).not.toContain("overloaded")
     expect(Timeline.isIdle(failed)).toBe(true)
@@ -237,7 +238,7 @@ describe("Timeline.fromEntries", () => {
           { "_tag": "Update", "id": "app-event:3", "at": 3, "event": { "_tag": "Update", "source": 7 } },
           { "_tag": "Update", "id": "app-event:4", "at": 4, "event": { "_tag": "Update", "id": "u", "source": "s", "payload": {} } }
         ],
-        "activity": { "working": false, "specialists": [] },
+        "activity": { "working": false, "specialists": [], "typing": false },
         "failed": false,
         "deleted": false
       }`)
@@ -281,7 +282,7 @@ describe("Timeline.apply", () => {
         Timeline.UserMessage.make({ id: hi.id, text: "hi", at: 1 }),
         Timeline.AssistantMessage.make({ id: "m1", text: "Pick", at: 2 })
       ],
-      activity: { working: true, specialists: [] },
+      activity: { working: true, specialists: [], typing: false },
       failed: false,
       deleted: false
     }
@@ -297,7 +298,7 @@ describe("Timeline.apply", () => {
         }),
         Timeline.AssistantMessage.make({ id: "m2", text: "Done", at: 5 })
       ],
-      activity: { working: false, specialists: [] },
+      activity: { working: false, specialists: [], typing: false },
       failed: false,
       deleted: false
     }

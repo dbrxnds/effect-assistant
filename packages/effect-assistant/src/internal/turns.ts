@@ -22,13 +22,16 @@ import * as Loop from "./loop.ts"
 import * as BlockKit from "../BlockKit.ts"
 import type { CurrentChat } from "../CurrentChat.ts"
 import * as Instructions from "../Instructions.ts"
+import { StatusSummary } from "../StatusSummary.ts"
 import * as ToolApproval from "../ToolApproval.ts"
 import type * as Specialist from "../Specialist.ts"
 import * as AppEvents from "./events.ts"
 import * as History from "./history.ts"
 import { mapText } from "./instructions.ts"
+import * as Live from "./live.ts"
 import { toJsonText } from "./schema.ts"
 import * as Specialists from "./specialists.ts"
+import * as Summary from "./summary.ts"
 import * as Telemetry from "./telemetry.ts"
 import * as Toolkits from "./toolkit.ts"
 import type { Writer } from "./writer.ts"
@@ -79,6 +82,8 @@ export interface Registration {
     readonly built: Specialist.Built
   }>
   readonly builtins: Toolkits.Tools<Assistant.TurnServices>
+  // Writes a status for a turn that has been working a while with nothing to show.
+  readonly summary: Option.Option<StatusSummary["Service"]>
 }
 
 /** @internal */
@@ -115,7 +120,8 @@ export const register = Effect.fnUntraced(function* (
     tracer,
     open: options.open,
     specialists,
-    builtins
+    builtins,
+    summary: yield* Effect.serviceOption(StatusSummary)
   }
 
   return registration
@@ -374,10 +380,20 @@ export const run = Effect.fnUntraced(
     const turn = makeTurnApi(options.registration, chat, startSequence, options.checkOpen, ranLoop)
 
     const record = (event: AssistantLoop.Event) => chat.append([event])
+    const live = yield* Live.make(chat.signal)
+
+    // The summary runs beside the turn's work and stops with it.
+    const summarizing = <A, E, R>(work: Effect.Effect<A, E, R>) =>
+      Option.match(options.registration.summary, {
+        onNone: () => work,
+        onSome: (summary) =>
+          Effect.forkScoped(Summary.run(summary, live, chat)).pipe(Effect.andThen(work), Effect.scoped)
+      })
 
     yield* options.handler(turn).pipe(
       Stream.runForEach(record),
       Effect.onExit((exit) => (Exit.hasInterrupts(exit) ? Effect.void : closeOpenCalls(chat, startSequence))),
+      Effect.provideService(Live.TurnLive, Option.some(live)),
       // A loop the app writes gets the assistant's own tools too, with this turn's services.
       Effect.provideService(
         Loop.TurnTools,
@@ -386,6 +402,9 @@ export const run = Effect.fnUntraced(
       // A turn's loop waits for the user's approval, and runs the calls they approved.
       Effect.provideService(Loop.TurnApprovals, Option.some({ approved: Effect.map(chat.entries, approvedCalls) })),
       Effect.provideContext(options.services),
+      summarizing,
+      // Nothing the turn showed outlives it, also when it fails.
+      Effect.ensuring(live.reset),
       Effect.matchCauseEffect({
         onSuccess: Effect.fnUntraced(function* () {
           const all = yield* chat.entries

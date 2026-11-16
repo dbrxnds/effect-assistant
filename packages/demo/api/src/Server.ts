@@ -30,7 +30,8 @@ const layerRpcHandlers = AcmeRpcs.toLayer(
     return AcmeRpcs.of({
       // No `show`: Acme's own events are for the model, so none reach the user. Its orders and campaigns waiting for
       // the user's approval are on the timeline anyway.
-      Subscribe: ({ chatId }) => acme.subscribe(chatId).pipe(Timeline.changes(AcmeAssistant)),
+      // Live: the timeline also says what a turn is doing, and when Acme is writing to the user.
+      Subscribe: ({ chatId }) => acme.subscribe(chatId, { live: true }).pipe(Timeline.changes(AcmeAssistant)),
       Submit: ({ chatId, input }) =>
         (Predicate.isTagged(input, "UserMessage") ? chats.titleFromMessage(chatId, input.text) : Effect.void).pipe(
           Effect.andThen(acme.submit(chatId, input))

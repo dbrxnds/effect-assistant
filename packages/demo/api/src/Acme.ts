@@ -9,6 +9,7 @@ import * as AnthropicLanguageModel from "@effect/ai-anthropic/AnthropicLanguageM
 import type * as Assistant from "effect-assistant/Assistant"
 import * as BlockKit from "effect-assistant/BlockKit"
 import * as Skill from "effect-assistant/Skill"
+import * as StatusSummary from "effect-assistant/StatusSummary"
 import * as ToolApproval from "effect-assistant/ToolApproval"
 import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
@@ -50,8 +51,27 @@ const history: Assistant.HistoryView<WorkflowStep.WorkflowStep> = (entries) =>
     entry.event instanceof WorkflowStep.WorkflowStep ? note(WorkflowStep.render(entry.event)) : entry
   )
 
+/** The small model that writes a turn's status when nothing else shows: `ACME_STATUS_MODEL`, default `claude-haiku-5-5`. */
+export const statusModel = Config.String("ACME_STATUS_MODEL").pipe(Config.withDefault("claude-haiku-5-5"))
+
 /** The model Acme and its specialists use: `ACME_MODEL`, default `claude-sonnet-5`. */
 export const model = Config.String("ACME_MODEL").pipe(Config.withDefault("claude-sonnet-5"))
+
+/**
+ * Layer for the status of a turn that works a while with nothing to show, written by the small
+ * model.
+ */
+const layerStatusSummary = Layer.unwrap(
+  Effect.gen(function* () {
+    const apiKey = yield* Config.Redacted("ANTHROPIC_API_KEY")
+
+    return StatusSummary.layer().pipe(
+      Layer.provide(AnthropicLanguageModel.model(yield* statusModel)),
+      Layer.provide(AnthropicClient.layer({ apiKey })),
+      Layer.provide(FetchHttpClient.layer)
+    )
+  })
+)
 
 /**
  * Layer for Acme: registers its handler, with the research specialist's,
@@ -79,7 +99,7 @@ export const layer = AcmeAssistant.toLayer(
       })
     })
   })
-).pipe(Layer.provide(Tools.layerResearch), Layer.provide(layerTools))
+).pipe(Layer.provide(Tools.layerResearch), Layer.provide(layerTools), Layer.provide(layerStatusSummary))
 
 /**
  * Layer for the model: Anthropic's `ACME_MODEL` with `ANTHROPIC_API_KEY`, and

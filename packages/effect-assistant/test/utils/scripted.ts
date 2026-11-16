@@ -5,6 +5,7 @@
  */
 import * as LanguageModel from "effect/ai/LanguageModel"
 import type * as Prompt from "effect/ai/Prompt"
+import * as Tool from "effect/ai/Tool"
 import type * as Response from "effect/ai/Response"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -25,6 +26,8 @@ export interface Request {
   readonly tools: ReadonlyArray<string>
   /** The tools' descriptions, as the model reads them. */
   readonly descriptions: ReadonlyMap<string, string>
+  /** The tools' parameters, as the JSON schemas the model reads. */
+  readonly parameters: ReadonlyMap<string, unknown>
   readonly toolChoice: LanguageModel.ToolChoice<string>
 }
 
@@ -35,6 +38,8 @@ export type Script = (request: Request) => ReadonlyArray<Response.PartEncoded>
 export type Json = string | number | boolean | null | ReadonlyArray<Json> | { readonly [key: string]: Json }
 
 let calls = 0
+
+let blocks = 0
 
 /** The model id the scripted model reports. */
 export const model = "scripted-model"
@@ -117,8 +122,42 @@ export const spawnedRunId = (request: Request): Option.Option<string> =>
       .at(-1)
   )
 
+/** A part as a provider streams it: text and reasoning in blocks, a tool call's params before the call. */
+const streamed = (part: Response.PartEncoded): ReadonlyArray<Response.StreamPartEncoded> => {
+  switch (part.type) {
+    case "text":
+    case "reasoning": {
+      const id = `block_${++blocks}`
+      const metadata = part.metadata ?? {}
+
+      return part.type === "text"
+        ? [
+            { type: "text-start", id },
+            { type: "text-delta", id, delta: part.text },
+            { type: "text-end", id, metadata }
+          ]
+        : [
+            { type: "reasoning-start", id },
+            { type: "reasoning-delta", id, delta: part.text },
+            { type: "reasoning-end", id, metadata }
+          ]
+    }
+
+    case "tool-call":
+      return [
+        { type: "tool-params-start", id: part.id, name: part.name },
+        { type: "tool-params-delta", id: part.id, delta: toJsonText(part.params) },
+        { type: "tool-params-end", id: part.id },
+        part
+      ]
+    default:
+      return [part]
+  }
+}
+
 /**
- * A `LanguageModel` that answers with the script, and records every request.
+ * A `LanguageModel` that answers with the script, and records every request. The loop streams its
+ * calls: the model streams what the script answers.
  */
 export const make = Effect.fn(function* (script: Script) {
   const requests = yield* Ref.make<ReadonlyArray<Request>>([])
@@ -132,6 +171,7 @@ export const make = Effect.fn(function* (script: Script) {
       history: first !== undefined && first.role === "system" ? rest : options.prompt.content,
       tools: options.tools.map((tool) => tool.name),
       descriptions: new Map(options.tools.map((tool) => [tool.name, tool.description ?? ""])),
+      parameters: new Map(options.tools.map((tool) => [tool.name, Tool.getJsonSchema(tool)])),
       toolChoice: options.toolChoice
     }
 
@@ -167,7 +207,8 @@ export const make = Effect.fn(function* (script: Script) {
 
   const service = yield* LanguageModel.make({
     generateText: generate,
-    streamText: () => Stream.die("The scripted model doesn't stream.")
+    streamText: (options) =>
+      Stream.unwrap(Effect.map(generate(options), (parts) => Stream.fromIterable(parts.flatMap(streamed))))
   })
 
   return { layer: Layer.succeed(LanguageModel.LanguageModel, service), requests: Ref.get(requests) }

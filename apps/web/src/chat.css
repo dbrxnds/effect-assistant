@@ -419,6 +419,23 @@ body,
   border-bottom-left-radius: 6px;
 }
 
+.status {
+  padding: 10px 14px;
+  color: #6e6e73;
+  font-size: 14px;
+  background: linear-gradient(90deg, #6e6e73 0%, #c7c7cc 50%, #6e6e73 100%) 0 0 / 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: acme-shimmer 1.6s linear infinite;
+}
+
+@keyframes acme-shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
 .typing i {
   width: 7px;
   height: 7px;

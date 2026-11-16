@@ -20,7 +20,7 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Filter from "effect/Filter"
 import * as Layer from "effect/Layer"
-import type * as Option from "effect/Option"
+import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
@@ -31,6 +31,7 @@ import * as AssistantEvent from "./AssistantEvent.ts"
 import type * as AssistantLoop from "./AssistantLoop.ts"
 import type * as BlockKit from "./BlockKit.ts"
 import { ChatId } from "./ChatId.ts"
+import * as ChatSignal from "./ChatSignal.ts"
 import * as Chats from "./Chats.ts"
 import type { CurrentChat } from "./CurrentChat.ts"
 import type * as Instructions from "./Instructions.ts"
@@ -311,6 +312,17 @@ export interface Chat<Events = never> {
 }
 
 /**
+ * Represents the options accepted by an assistant's `subscribe`.
+ *
+ * @category models
+ * @since 0.13.0
+ */
+export interface SubscribeOptions {
+  /** The `sequence` after which the stream starts. Defaults to `0`, the whole log. */
+  readonly after?: number | undefined
+}
+
+/**
  * Represents the service that `yield* MyAssistant` returns. It gives code outside a chat, such as
  * a server or a workflow, access to the assistant's chats. Code that runs inside a chat uses
  * `CurrentChat` instead.
@@ -342,10 +354,18 @@ export interface Service<Events = never> {
    * on the timeline depends on earlier entries. The timeline shows only the app events named in its
    * `show`, none by default (see `Timeline.changes`).
    */
-  readonly subscribe: (
-    chatId: ChatId,
-    options?: { readonly after?: number | undefined }
-  ) => Stream.Stream<Entry<Events>>
+  readonly subscribe: {
+    (chatId: ChatId, options?: SubscribeOptions & { readonly live?: false | undefined }): Stream.Stream<Entry<Events>>
+    /**
+     * With `live: true`, the stream also has the chat's signals (see `ChatSignal`): the status of
+     * what a turn is doing, and whether a message to the user is on its way. They come in order
+     * with the entries, only while the stream runs, and are never stored.
+     */
+    (
+      chatId: ChatId,
+      options: SubscribeOptions & { readonly live: true }
+    ): Stream.Stream<Entry<Events> | ChatSignal.ChatSignal>
+  }
   /**
    * Deletes a chat by storing a `ChatDeleted` event and stopping everything that works in it.
    *
@@ -578,20 +598,35 @@ export const make = <
     const engine = yield* AssistantEngine
     const chats = yield* Chats.Chats
 
+    const decode = (
+      item: AssistantEvent.Entry | ChatSignal.ChatSignal
+    ): Option.Option<Entry<OwnEvents> | ChatSignal.ChatSignal> =>
+      ChatSignal.isChatSignal(item) ? Option.some(item) : AppEvents.decodeEntry(definition.app, item)
+
+    function subscribe(
+      chatId: ChatId,
+      options?: SubscribeOptions & { readonly live?: false | undefined }
+    ): Stream.Stream<Entry<OwnEvents>>
+    function subscribe(
+      chatId: ChatId,
+      options: SubscribeOptions & { readonly live: true }
+    ): Stream.Stream<Entry<OwnEvents> | ChatSignal.ChatSignal>
+    function subscribe(
+      chatId: ChatId,
+      options?: SubscribeOptions & { readonly live?: boolean | undefined }
+    ): Stream.Stream<Entry<OwnEvents> | ChatSignal.ChatSignal> {
+      return engine
+        .subscribe(name, chatId, options?.after ?? 0, options?.live === true)
+        .pipe(Stream.filterMap(Filter.fromPredicateOption(decode)))
+    }
+
     return Key.of({
       submit: Effect.fn("Assistant.submit")(function* (chatId: ChatId, input: AssistantEvent.Input | OwnEvents) {
         // Checked here, where the caller can handle it: the chat checks again when it stores the input.
         yield* chats.get(chatId)
         yield* engine.submit(name, chatId, yield* stored(input))
       }),
-      subscribe: (chatId, options) =>
-        engine
-          .subscribe(name, chatId, options?.after ?? 0)
-          .pipe(
-            Stream.filterMap(
-              Filter.fromPredicateOption((entry: AssistantEvent.Entry) => AppEvents.decodeEntry(definition.app, entry))
-            )
-          ),
+      subscribe,
       delete: (chatId) => engine.delete(name, chatId)
     })
   })

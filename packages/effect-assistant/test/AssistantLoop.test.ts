@@ -159,7 +159,7 @@ describe("AssistantLoop.run's trace", () => {
         return yield* collectUntil(Own, chat, (es) => turnsDone(es) >= 1, "10 seconds")
       }).pipe(Effect.provide(runMemory(handlers, model)), Effect.withTracer(recording))
 
-      const modelCalls = spans.filter((span) => span.name === "LanguageModel.generateText")
+      const modelCalls = spans.filter((span) => span.name === "LanguageModel.streamText")
 
       expect(spans.filter((span) => span.name.startsWith("chat"))).toEqual([])
       expect(modelCalls.length).toBeGreaterThan(0)
@@ -210,10 +210,10 @@ describe("AssistantLoop.run's trace", () => {
       const turn = agent.spans.find((span) => span.name === `invoke_agent ${Own.name}`)
 
       expect(turn?.parent).toEqual(Option.none())
-      expect(agent.spans.filter((span) => span.name === "LanguageModel.generateText").length).toBeGreaterThan(0)
+      expect(agent.spans.filter((span) => span.name === "LanguageModel.streamText").length).toBeGreaterThan(0)
       expect(agent.spans.every((span) => span.traceId === turn?.traceId)).toBe(true)
       expect(app.spans.filter((span) => span.name.startsWith("invoke_agent"))).toEqual([])
-      expect(app.spans.filter((span) => span.name === "LanguageModel.generateText")).toEqual([])
+      expect(app.spans.filter((span) => span.name === "LanguageModel.streamText")).toEqual([])
     })
   )
 })
