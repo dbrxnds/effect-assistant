@@ -228,7 +228,7 @@ describe("ChatSignal", () => {
     })
   )
 
-  it.effect("offers the status parameter only on described tools", () =>
+  it.effect("offers the status parameter, required, only on described tools", () =>
     Effect.gen(function* () {
       const model = yield* Scripted.make(reportThenAnswer)
       const gate = yield* Deferred.make<void>()
@@ -241,7 +241,10 @@ describe("ChatSignal", () => {
       const [first] = yield* model.requests
       const schemas = first?.parameters ?? new Map<string, unknown>()
 
-      expect(JSON.stringify(schemas.get("campaign_report"))).toContain(ToolStatus.parameterName)
+      expect(schemas.get("campaign_report")).toMatchObject({
+        properties: { [ToolStatus.parameterName]: { type: "string" } },
+        required: expect.arrayContaining(["campaignId", ToolStatus.parameterName])
+      })
       expect(JSON.stringify(schemas.get("lookup"))).not.toContain(ToolStatus.parameterName)
     })
   )
