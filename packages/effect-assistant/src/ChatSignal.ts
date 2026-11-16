@@ -3,7 +3,7 @@
  * status of what the assistant is doing, and whether it is writing a message to the user.
  *
  * Signals are never stored. They reach only the subscribers that are listening when they are sent
- * (`assistant.subscribe(chatId, { live: true })`), between the chat's entries and in order with
+ * (`assistant.subscribe(chatId, { signals: true })`), between the chat's entries and in order with
  * them. A turn's model never reads them, compaction never sees them, and a client that loads the
  * chat again starts without them. The turn itself shows in the log, from its `TurnStarted` to its
  * `TurnCompleted` or `TurnFailed`.

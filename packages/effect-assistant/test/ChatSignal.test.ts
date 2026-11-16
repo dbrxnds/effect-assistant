@@ -103,7 +103,7 @@ const liveTurn = Effect.fnUntraced(function* (gate: Deferred.Deferred<void>, tex
   const assistant = yield* TestAssistant
   const chat = yield* newChat
 
-  const watching = yield* assistant.subscribe(chat, { live: true }).pipe(
+  const watching = yield* assistant.subscribe(chat, { signals: true }).pipe(
     Stream.tap(() => Deferred.succeed(gate, undefined)),
     Stream.takeUntil(isTurnEnd),
     Stream.runCollect,
