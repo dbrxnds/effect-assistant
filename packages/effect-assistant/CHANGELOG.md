@@ -1,5 +1,11 @@
 # effect-assistant
 
+## 0.14.0
+
+### Minor Changes
+
+- 57875e9: `subscribe`'s `live` option is now `signals`: `assistant.subscribe(chatId, { signals: true })` streams the chat's signals with its entries. The cluster's `Subscribe` RPC payload field is renamed the same way.
+
 ## 0.13.2
 
 ### Patch Changes
