@@ -66,6 +66,8 @@ export const Block = Schema.Struct({
   props: Schema.Json,
   status: BlockStatus,
   answer: Schema.optional(Schema.Json),
+  /** When the user answered, in epoch milliseconds, once the block is answered. */
+  answeredAt: Schema.optional(Schema.Finite),
   /** For a block that shows a tool's result (`Block.fromToolResult`): the result, as the tool's success schema encodes it. */
   result: Schema.optional(Schema.Json)
 })
@@ -662,6 +664,7 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding =>
   let activity = AssistantActivity.empty
   let live = noLive
   let blocks: ReadonlyMap<string, BlockKit.State> = new Map()
+  const answeredAt = new Map<string, number>()
   // The items in order, and the assistant's messages as stored: their blocks change as the chat goes on.
   const items = new Map<string, AnyItem>()
   const sent = new Map<string, AssistantEvent.AssistantMessage>()
@@ -678,7 +681,12 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding =>
     const result = resultId === undefined ? undefined : results.get(resultId)
     const shown = result === undefined ? block : { ...block, result }
 
-    return state?.answer === undefined ? shown : { ...shown, answer: toJson(state.answer.value) }
+    if (state?.answer === undefined) return shown
+
+    const answered = { ...shown, answer: toJson(state.answer.value) }
+    const at = answeredAt.get(message.id)
+
+    return at === undefined ? answered : { ...answered, answeredAt: at }
   }
 
   const itemOf = (message: AssistantEvent.AssistantMessage, at: number): AssistantMessage => {
@@ -844,6 +852,10 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding =>
     }
 
     blocks = BlockKit.apply(blocks, event)
+
+    if (Predicate.isTagged(event, "BlockAnswer") && blocks.get(event.messageId)?.answer === event) {
+      answeredAt.set(event.messageId, entry.at)
+    }
 
     const decidedBefore = approvals
     approvals = ToolApproval.apply(approvals, entry)
