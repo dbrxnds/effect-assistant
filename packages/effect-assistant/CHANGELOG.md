@@ -1,5 +1,11 @@
 # effect-assistant
 
+## 0.13.2
+
+### Patch Changes
+
+- d08493a: A timeline block now has `answeredAt` once it's answered: when the user answered, in epoch milliseconds, so a client can show when the answer was given.
+
 ## 0.13.1
 
 ### Patch Changes
