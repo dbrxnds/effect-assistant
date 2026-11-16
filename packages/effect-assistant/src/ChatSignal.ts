@@ -8,56 +8,29 @@
  * chat again starts without them. The turn itself shows in the log, from its `TurnStarted` to its
  * `TurnCompleted` or `TurnFailed`.
  *
- * A turn clears what it showed before it ends, also when it fails: a status and the typing
- * indicator never outlive their turn.
+ * There is no signal that clears a status: the next one replaces it, typing hides it, and the
+ * turn's end clears it. Typing stops before the turn ends, also when it fails, so neither
+ * outlives its turn.
  *
  * @since 0.13.0
  */
 import * as Schema from "effect/Schema"
 
 /**
- * Schema for where a status comes from: a tool call that is running (`tool`), or a short summary of
- * the turn so far, for a turn that runs a while with nothing else to show (`summary`).
+ * Represents the line the chat shows next to the assistant while a turn works, like "Checking
+ * last summer's campaign budget". The latest one shows until the next, until the model starts
+ * writing to the user, or until the turn ends.
  *
  * @category schemas
  * @since 0.13.0
  */
-export const StatusSource = Schema.Literals(["tool", "summary"])
-
-/**
- * Represents where a status comes from.
- *
- * @category models
- * @since 0.13.0
- */
-export type StatusSource = typeof StatusSource.Type
-
-/**
- * Represents a status the chat shows next to the assistant, like "Checking last summer's campaign
- * budget". `key` names it until a {@link StatusCleared} with the same key: a tool call's status has
- * the call's id.
- *
- * @category schemas
- * @since 0.13.0
- */
-export class StatusShown extends Schema.TaggedClass<StatusShown>()("StatusShown", {
-  key: Schema.String,
-  text: Schema.String,
-  source: StatusSource
+export class Status extends Schema.TaggedClass<Status>()("Status", {
+  text: Schema.String
 }) {}
 
 /**
- * Represents a status that no longer applies, because its call ended or a message arrived.
- *
- * @category schemas
- * @since 0.13.0
- */
-export class StatusCleared extends Schema.TaggedClass<StatusCleared>()("StatusCleared", {
-  key: Schema.String
-}) {}
-
-/**
- * Represents the model starting to write a message to the user.
+ * Represents the model starting to write a message to the user. The status line goes: the user
+ * sees the message coming instead.
  *
  * @category schemas
  * @since 0.13.0
@@ -78,7 +51,7 @@ export class TypingStopped extends Schema.TaggedClass<TypingStopped>()("TypingSt
  * @category schemas
  * @since 0.13.0
  */
-export const ChatSignal = Schema.Union([StatusShown, StatusCleared, TypingStarted, TypingStopped])
+export const ChatSignal = Schema.Union([Status, TypingStarted, TypingStopped])
 
 /**
  * Represents any of a chat's signals.

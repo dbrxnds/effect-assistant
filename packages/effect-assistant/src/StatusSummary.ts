@@ -1,13 +1,14 @@
 /**
- * This module provides the status a turn shows when nothing else says what it is doing: after a
- * while with no tool status and no message on its way, a model reads the turn so far and writes a
- * few words about it, like "Comparing last year's budgets".
+ * This module provides the status a turn shows when nothing else says what it is doing: when the
+ * line stays empty for a while, or a call's status still shows after that call ended, a model reads
+ * the turn so far and writes a few words about it, like "Comparing last year's budgets".
  *
  * Provide {@link layer} next to the assistant's `toLayer`, with a small, fast model of its own.
  * Without it, a turn shows only the statuses its tool calls write (see `ToolStatus`). The summary
- * is a `ChatSignal.StatusShown` with the `summary` source: it is never stored, the turn's model
- * never reads it, and it goes as soon as the model starts a message, a tool shows its own status,
- * or the turn ends.
+ * is a `ChatSignal.Status` like any other: it is never stored and the turn's model never reads it.
+ * It never replaces the status of a described call that still runs, never shows while the model
+ * writes to the user, and never after the turn's message unless the model starts new work. A
+ * summary that says what the line says already isn't sent.
  *
  * @since 0.13.0
  */
@@ -35,10 +36,10 @@ export const defaultInstructions =
  * @since 0.13.0
  */
 export interface Options {
-  /** How long a turn runs with nothing to show before the first summary. Defaults to 2 seconds. */
+  /** How long the line may stay empty before a summary fills it. Defaults to 2 seconds. */
   readonly after?: Duration.Input | undefined
-  /** The least time between two summaries of the same turn. Defaults to 4 seconds. */
-  readonly every?: Duration.Input | undefined
+  /** How long a line may stay unchanged before a summary refreshes it. Defaults to 5 seconds. */
+  readonly staleAfter?: Duration.Input | undefined
   /** The summary model's instructions. Defaults to {@link defaultInstructions}. */
   readonly instructions?: string | undefined
 }
@@ -53,7 +54,7 @@ export class StatusSummary extends Context.Service<
   StatusSummary,
   {
     readonly after: Duration.Duration
-    readonly every: Duration.Duration
+    readonly staleAfter: Duration.Duration
     /**
      * Returns the status for a turn, from its transcript: the user's input and what the assistant
      * did since. `None` when the model wrote nothing usable or its call failed.
@@ -113,7 +114,7 @@ export const layer = (options?: Options): Layer.Layer<StatusSummary, never, Lang
 
       return StatusSummary.of({
         after: Duration.fromInputUnsafe(options?.after ?? "2 seconds"),
-        every: Duration.fromInputUnsafe(options?.every ?? "4 seconds"),
+        staleAfter: Duration.fromInputUnsafe(options?.staleAfter ?? "5 seconds"),
         summarize: (transcript) =>
           summarize(transcript).pipe(
             Effect.catchCause((cause) =>

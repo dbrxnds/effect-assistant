@@ -194,12 +194,12 @@ const splitStatus = (call: AssistantEvent.ToolCallPart): readonly [string | unde
   return [status === "" ? undefined : status, { ...call, params: rest }]
 }
 
-// A call's status shows while it runs; a message's typing stops once the message is stored.
+// A call's status shows when it starts; a message's typing stops once the message is stored.
 const runCall = Effect.fnUntraced(function* <R>(tools: Toolkits.Tools<R>, call: AssistantEvent.ToolCallPart) {
   const [status, run] = isDescribedCall(tools, call) ? splitStatus(call) : [undefined, call]
 
   const result = yield* Effect.gen(function* () {
-    if (status !== undefined) yield* Live.use((live) => live.show(call.id, status, "tool"))
+    if (status !== undefined) yield* Live.use((live) => live.callStarted(call.id, status))
 
     const result = yield* tools.run(run)
 
@@ -210,7 +210,7 @@ const runCall = Effect.fnUntraced(function* <R>(tools: Toolkits.Tools<R>, call: 
     Telemetry.toolSpan(call),
     Effect.ensuring(
       Live.use((live) =>
-        Effect.andThen(live.clear(call.id), call.name === sendUserMessageName ? live.typing(false) : Effect.void)
+        Effect.andThen(live.callEnded(call.id), call.name === sendUserMessageName ? live.typing(false) : Effect.void)
       )
     )
   )

@@ -4,9 +4,9 @@
  *
  * Mark the tools that take a while or act on something with {@link described}: workflows, reports
  * from other systems, orders, specialists. The model then sees an optional `description` parameter
- * on them and fills it in the chat's language. While the call runs, the chat sends the description
- * as a `ChatSignal.StatusShown`, and clears it when the call ends. The tool's handler never
- * receives the parameter. Quick reads need no label: the chat shows its generic working state for
+ * on them and fills it in the chat's language. When the call starts, the chat sends the
+ * description as a `ChatSignal.Status`; it shows until the next status, so it stays after the call
+ * ends. The tool's handler never receives the parameter. Quick reads need no label: the chat shows its generic working state for
  * them.
  *
  * @since 0.13.0

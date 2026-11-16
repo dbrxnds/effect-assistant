@@ -5,24 +5,31 @@ import * as Option from "effect/Option"
 import * as SynchronizedRef from "effect/SynchronizedRef"
 import * as ChatSignal from "../ChatSignal.ts"
 
-/** @internal */
-export const summaryKey = "summary"
+interface Labelled {
+  readonly callId: string
+  readonly text: string
+}
 
 /** @internal */
 export interface State {
-  readonly statuses: ReadonlyMap<string, ChatSignal.StatusShown>
+  /** The described calls still running, oldest first. */
+  readonly running: ReadonlyArray<Labelled>
+  /** The line the user sees; none before the first status and after typing started. */
+  readonly shown: string | undefined
+  /** When the line last changed, or the turn started, in epoch milliseconds. */
+  readonly shownAt: number
   readonly typing: boolean
-  /** When anything was last shown or cleared, in epoch milliseconds. */
-  readonly changedAt: number
 }
 
 /** @internal */
 export interface Live {
-  readonly show: (key: string, text: string, source: ChatSignal.StatusSource) => Effect.Effect<void>
-  readonly clear: (key: string) => Effect.Effect<void>
+  readonly callStarted: (callId: string, text: string) => Effect.Effect<void>
+  readonly callEnded: (callId: string) => Effect.Effect<void>
+  // A summary's line: shown unless the model started a message, or the line says it already.
+  readonly summarized: (text: string) => Effect.Effect<void>
   readonly typing: (typing: boolean) => Effect.Effect<void>
   readonly state: Effect.Effect<State>
-  // Clears everything still shown: a turn ends with nothing showing.
+  // The turn ends: typing stops. Its end, in the log, clears the line.
   readonly reset: Effect.Effect<void>
 }
 
@@ -39,20 +46,23 @@ export const use = Effect.fnUntraced(function* (f: (live: Live) => Effect.Effect
   if (Option.isSome(live)) yield* f(live.value)
 })
 
+type Change = readonly [ReadonlyArray<ChatSignal.ChatSignal>, State] | undefined
+
 /** @internal */
 export const make = Effect.fnUntraced(function* (send: (signal: ChatSignal.ChatSignal) => Effect.Effect<void>) {
   const state = yield* SynchronizedRef.make<State>({
-    statuses: new Map(),
-    typing: false,
-    changedAt: yield* Clock.currentTimeMillis
+    running: [],
+    shown: undefined,
+    shownAt: yield* Clock.currentTimeMillis,
+    typing: false
   })
 
   // Under the ref's lock, so signals go out in the order the state changed.
-  const change = (f: (current: State) => readonly [ReadonlyArray<ChatSignal.ChatSignal>, State] | undefined) =>
+  const change = (f: (current: State, now: number) => Change) =>
     SynchronizedRef.updateEffect(
       state,
       Effect.fnUntraced(function* (current) {
-        const changed = f(current)
+        const changed = f(current, yield* Clock.currentTimeMillis)
 
         if (changed === undefined) return current
 
@@ -60,64 +70,63 @@ export const make = Effect.fnUntraced(function* (send: (signal: ChatSignal.ChatS
 
         yield* Effect.forEach(signals, send, { discard: true })
 
-        return { ...next, changedAt: yield* Clock.currentTimeMillis }
+        return next
       })
     )
 
-  const withStatuses = (current: State, f: (statuses: Map<string, ChatSignal.StatusShown>) => void) => {
-    const statuses = new Map(current.statuses)
-
-    f(statuses)
-
-    return { ...current, statuses }
-  }
-
-  // A tool's own status, or a message on its way, says more than the summary: it goes.
-  const withoutSummary = (current: State): readonly [ReadonlyArray<ChatSignal.ChatSignal>, State] =>
-    current.statuses.has(summaryKey)
-      ? [
-          [ChatSignal.StatusCleared.make({ key: summaryKey })],
-          withStatuses(current, (statuses) => statuses.delete(summaryKey))
-        ]
-      : [[], current]
+  const show = (current: State, text: string, now: number): readonly [ReadonlyArray<ChatSignal.ChatSignal>, State] =>
+    current.shown === text
+      ? [[], current]
+      : [[ChatSignal.Status.make({ text })], { ...current, shown: text, shownAt: now }]
 
   const live: Live = {
-    show: (key, text, source) =>
-      change((current) => {
-        const shown = ChatSignal.StatusShown.make({ key, text, source })
-        const before = current.statuses.get(key)
+    callStarted: (callId, text) =>
+      change((current, now) => {
+        const running = { ...current, running: [...current.running, { callId, text }] }
 
-        if (before !== undefined && before.text === text && before.source === source) return undefined
-
-        const [cleared, rest] = source === "tool" ? withoutSummary(current) : [[], current]
-
-        return [[...cleared, shown], withStatuses(rest, (statuses) => statuses.set(key, shown))]
+        return current.typing ? [[], running] : show(running, text, now)
       }),
-    clear: (key) =>
-      change((current) =>
-        current.statuses.has(key)
-          ? [[ChatSignal.StatusCleared.make({ key })], withStatuses(current, (statuses) => statuses.delete(key))]
-          : undefined
+    // The line stays when the last labelled call ends; while another runs, the line says that one.
+    callEnded: (callId) =>
+      change((current, now) => {
+        const ended = current.running.find((call) => call.callId === callId)
+
+        if (ended === undefined) return undefined
+
+        const next = { ...current, running: current.running.filter((call) => call.callId !== callId) }
+        const still = next.running.at(-1)
+
+        return still === undefined || current.typing || current.shown !== ended.text
+          ? [[], next]
+          : show(next, still.text, now)
+      }),
+    summarized: (text) =>
+      change((current, now) =>
+        current.typing
+          ? undefined
+          : current.shown === text
+            ? [[], { ...current, shownAt: now }]
+            : show(current, text, now)
       ),
     typing: (typing) =>
-      change((current) => {
+      change((current, now) => {
         if (current.typing === typing) return undefined
 
-        if (!typing) return [[ChatSignal.TypingStopped.make({})], { ...current, typing }]
+        if (typing) {
+          return [[ChatSignal.TypingStarted.make({})], { ...current, typing, shown: undefined, shownAt: now }]
+        }
 
-        const [cleared, rest] = withoutSummary(current)
+        // A call that runs on after the message still says what it does.
+        const stopped = { ...current, typing, shownAt: now }
+        const still = current.running.at(-1)
+        const [signals, next] = still === undefined ? [[], stopped] : show(stopped, still.text, now)
 
-        return [[...cleared, ChatSignal.TypingStarted.make({})], { ...rest, typing }]
+        return [[ChatSignal.TypingStopped.make({}), ...signals], next]
       }),
     state: SynchronizedRef.get(state),
-    reset: change((current) => {
-      const signals: ReadonlyArray<ChatSignal.ChatSignal> = [
-        ...(current.typing ? [ChatSignal.TypingStopped.make({})] : []),
-        ...[...current.statuses.keys()].map((key) => ChatSignal.StatusCleared.make({ key }))
-      ]
-
-      return signals.length === 0 ? undefined : [signals, { ...current, statuses: new Map(), typing: false }]
-    })
+    reset: change((current) =>
+      current.typing ? [[ChatSignal.TypingStopped.make({})], { ...current, typing: false }] : undefined
+    )
   }
 
   return live

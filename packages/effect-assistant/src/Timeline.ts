@@ -612,30 +612,23 @@ interface Folding {
 }
 
 interface LiveState {
-  readonly statuses: ReadonlyMap<string, ChatSignal.StatusShown>
+  readonly status: string | undefined
   readonly typing: boolean
 }
 
-const noLive: LiveState = { statuses: new Map(), typing: false }
-
-const withoutStatus = (live: LiveState, keep: (status: ChatSignal.StatusShown) => boolean): LiveState => ({
-  ...live,
-  statuses: new Map([...live.statuses].filter(([, status]) => keep(status)))
-})
+const noLive: LiveState = { status: undefined, typing: false }
 
 const applySignal = (live: LiveState, signal: ChatSignal.ChatSignal): LiveState =>
   Match.value(signal).pipe(
     Match.tagsExhaustive({
-      StatusShown: (shown): LiveState => ({ ...live, statuses: new Map(live.statuses).set(shown.key, shown) }),
-      StatusCleared: (cleared): LiveState => withoutStatus(live, (status) => status.key !== cleared.key),
-      TypingStarted: (): LiveState => ({ ...live, typing: true }),
+      Status: ({ text }): LiveState => ({ ...live, status: text }),
+      TypingStarted: (): LiveState => ({ status: undefined, typing: true }),
       TypingStopped: (): LiveState => ({ ...live, typing: false })
     })
   )
 
-// The latest status shows.
 const activityOf = (activity: AssistantActivity.State, live: LiveState): Activity => {
-  const status = [...live.statuses.values()].at(-1)?.text
+  const { status } = live
 
   const shown: Activity = {
     working: activity.turnSince !== undefined || activity.queued,
@@ -807,7 +800,7 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding =>
       return [item]
     })
 
-  // A turn's end clears what it showed, and a message the summary: also when a signal didn't arrive.
+  // A turn's end clears what it showed, also when a signal didn't arrive.
   const settle = (event: { readonly _tag: string }) => {
     if (
       Predicate.isTagged(event, "TurnCompleted") ||
@@ -815,8 +808,6 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding =>
       Predicate.isTagged(event, "ChatDeleted")
     ) {
       live = noLive
-    } else if (Predicate.isTagged(event, "AssistantMessage")) {
-      live = withoutStatus(live, (status) => status.source !== "summary")
     }
   }
 
