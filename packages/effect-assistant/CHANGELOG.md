@@ -1,5 +1,12 @@
 # effect-assistant
 
+## 0.13.1
+
+### Patch Changes
+
+- fe63400: A described tool's `description` parameter is required in what the model reads: models left the optional one out, so calls showed no status. A call without it still runs, with no status, and the handler still never gets it.
+- cf9d783: `StatusSummary.layer({ after: 0 })` summarizes as soon as the turn starts; its checks run at least 100 ms apart, so a zero `after` or `staleAfter` doesn't spin.
+
 ## 0.13.0
 
 ### Minor Changes
