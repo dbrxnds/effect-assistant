@@ -3,7 +3,7 @@
  * short line about what the assistant is doing, like "Checking last summer's campaign budget".
  *
  * Mark the tools that take a while or act on something with {@link described}: workflows, reports
- * from other systems, orders, specialists. The model then sees an optional `description` parameter
+ * from other systems, orders, specialists. The model then sees a required `description` parameter
  * on them and fills it in the chat's language. When the call starts, the chat sends the
  * description as a `ChatSignal.Status`; it shows until the next status, so it stays after the call
  * ends. The tool's handler never receives the parameter. Quick reads need no label: the chat shows its generic working state for
@@ -54,8 +54,9 @@ export const Described = Context.Reference<boolean>("effect-assistant/ToolStatus
  *
  * **Details**
  *
- * The model sees an optional `description` parameter on the tool, and the chat shows what it
- * writes there while the call runs. The handler gets its parameters without it. A tool that has a
+ * The model sees a required `description` parameter on the tool, and the chat shows what it
+ * writes there while the call runs. Required, because models leave optional parameters out; a call
+ * without it still runs, with no status. The handler gets its parameters without it. A tool that has a
  * parameter of that name already can't be marked: the loop stops with a defect when it offers one.
  *
  * **Example** (A slow report with a status)

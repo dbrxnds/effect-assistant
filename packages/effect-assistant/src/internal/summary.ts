@@ -83,6 +83,8 @@ const workingSinceMessage = (entries: ReadonlyArray<AssistantEvent.AnyEntry>) =>
 
 const MAX_CHECK_MILLIS = 500
 
+const MIN_CHECK_MILLIS = 100
+
 // A line for a turn that shows nothing for a while, or whose line hasn't changed for longer: never while a described
 // call says what runs, or the model writes to the user, and only after something new happened.
 /** @internal */
@@ -119,5 +121,7 @@ export const run = Effect.fnUntraced(function* (
   })
 
   // Often enough that a line is filled or refreshed close to when it's due.
-  yield* tick.pipe(Effect.repeat(Schedule.spaced(Math.min(MAX_CHECK_MILLIS, after / 2, staleAfter / 2))))
+  yield* tick.pipe(
+    Effect.repeat(Schedule.spaced(Math.max(MIN_CHECK_MILLIS, Math.min(MAX_CHECK_MILLIS, after / 2, staleAfter / 2))))
+  )
 })

@@ -228,7 +228,7 @@ describe("ChatSignal", () => {
     })
   )
 
-  it.effect("offers the status parameter only on described tools", () =>
+  it.effect("offers the status parameter, required, only on described tools", () =>
     Effect.gen(function* () {
       const model = yield* Scripted.make(reportThenAnswer)
       const gate = yield* Deferred.make<void>()
@@ -241,7 +241,10 @@ describe("ChatSignal", () => {
       const [first] = yield* model.requests
       const schemas = first?.parameters ?? new Map<string, unknown>()
 
-      expect(JSON.stringify(schemas.get("campaign_report"))).toContain(ToolStatus.parameterName)
+      expect(schemas.get("campaign_report")).toMatchObject({
+        properties: { [ToolStatus.parameterName]: { type: "string" } },
+        required: expect.arrayContaining(["campaignId", ToolStatus.parameterName])
+      })
       expect(JSON.stringify(schemas.get("lookup"))).not.toContain(ToolStatus.parameterName)
     })
   )
@@ -287,6 +290,29 @@ describe("ChatSignal", () => {
 
       expect(items.flatMap(label).at(-1)).toBe("TurnFailed")
       expect(timelineOf(items).at(-1)?.activity).toEqual({ working: false, specialists: [], typing: false })
+    })
+  )
+
+  it.live("with after 0, summarizes as soon as the turn starts", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>()
+      const tools = yield* harness({ report: Effect.void })
+      const summary = yield* summarizing("Looking into last summer", { after: "0 millis" })
+      const turnModel = yield* Scripted.make(callsThenAnswer(["lookup", { campaignId: "summer" }]))
+
+      const { items } = yield* liveTurn(gate, "Find last summer's campaign.").pipe(
+        Effect.provide(
+          runMemory(
+            TestAssistant.toLayer(gatedHandler(gate, tools.tools)).pipe(Layer.provide(summary.layer)),
+            turnModel.layer
+          )
+        )
+      )
+
+      const labels = items.flatMap(label)
+
+      expect(labels.indexOf("Status: Looking into last summer")).toBe(labels.indexOf("TurnStarted") + 1)
+      expect(labels.at(-1)).toBe("TurnCompleted")
     })
   )
 

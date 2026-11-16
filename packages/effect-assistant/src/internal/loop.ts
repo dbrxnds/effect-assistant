@@ -91,9 +91,8 @@ export interface StepResult {
 // every tool's params, `unknown` for a schema of unknown type, though deferred validation encodes none.
 type RequestTool = Tool.Tool<string, any, any>
 
-const statusParameter = Schema.String.annotate({ description: ToolStatus.parameterDescription }).pipe(
-  Schema.optionalKey
-)
+// Required in what the model reads, so it writes one with every call; a call without it still runs.
+const statusParameter = Schema.String.annotate({ description: ToolStatus.parameterDescription })
 
 // What the model reads of a described tool: its parameters with the status one. Only the request has it; the call
 // runs without it (see `withoutStatus`). A record of no keys (a tool without parameters) becomes an object with it.
