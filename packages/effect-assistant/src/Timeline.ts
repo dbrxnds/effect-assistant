@@ -230,7 +230,7 @@ export type SpecialistWorking = typeof SpecialistWorking.Type
  * something that arrived. `specialists` lists the specialists that are working. When the chat is
  * idle, nothing is working, even if a workflow is waiting on a timer or on the user.
  *
- * On a live subscription (`subscribe(chatId, { live: true })`), `status` is a short line about what
+ * On a live subscription (`subscribe(chatId, { signals: true })`), `status` is a short line about what
  * the running turn is doing, and `typing` is true while the model writes a message to the user. Both
  * come from the chat's signals (see `ChatSignal`): they go when the turn ends, and a timeline
  * folded from the log alone has neither.

@@ -56,14 +56,14 @@ export class AssistantEngine extends Context.Service<
       input: AssistantEvent.Input | AssistantEvent.StoredAppEvent
     ) => Effect.Effect<void>
     /**
-     * Streams the chat's stored entries after the `after` sequence, then live ones. With `live`,
+     * Streams the chat's stored entries after the `after` sequence, then live ones. With `signals`,
      * the chat's signals too, in order with the entries.
      */
     readonly subscribe: (
       assistant: string,
       chatId: ChatId,
       after: number,
-      live: boolean
+      signals: boolean
     ) => Stream.Stream<AssistantEvent.Entry | ChatSignal.ChatSignal>
     /**
      * Deletes one of the assistant's chats. The chat's log records the deletion, and everything
@@ -191,12 +191,12 @@ export const layerMemory: Layer.Layer<AssistantEngine, never, ChatLog> = Layer.e
         yield* RcMap.invalidate(chats, new ChatKey({ assistant, chatId }))
       }),
       // The subscriber holds the chat open while it streams.
-      subscribe: (assistant, chatId, after, live) =>
+      subscribe: (assistant, chatId, after, signals) =>
         Stream.unwrap(
           Effect.gen(function* () {
             const chat = yield* RcMap.get(chats, new ChatKey({ assistant, chatId }))
 
-            return live ? chat.live(after) : chat.stream(after)
+            return signals ? chat.live(after) : chat.stream(after)
           })
         )
     })
@@ -208,7 +208,7 @@ interface EntityClient {
   readonly subscribe: (
     chatId: ChatId,
     after: number,
-    live: boolean
+    signals: boolean
   ) => Stream.Stream<AssistantEvent.Entry | ChatSignal.ChatSignal>
   readonly delete: (chatId: ChatId) => Effect.Effect<void>
 }
@@ -218,7 +218,7 @@ const Submit = Rpc.make("Submit", {
 }).annotate(ClusterSchema.Persisted, true)
 
 const Subscribe = Rpc.make("Subscribe", {
-  payload: { after: Schema.Int, live: Schema.optionalKey(Schema.Boolean) },
+  payload: { after: Schema.Int, signals: Schema.optionalKey(Schema.Boolean) },
   success: Schema.Union([AssistantEvent.Entry, ChatSignal.ChatSignal]),
   stream: true
 })
@@ -243,7 +243,7 @@ const makeClusterClient = Effect.gen(function* () {
 
     const client: EntityClient = {
       submit: (chatId, input) => makeClient(chatId).Submit({ input }, { discard: true }).pipe(Effect.orDie),
-      subscribe: (chatId, after, live) => makeClient(chatId).Subscribe({ after, live }).pipe(Stream.orDie),
+      subscribe: (chatId, after, signals) => makeClient(chatId).Subscribe({ after, signals }).pipe(Stream.orDie),
       delete: (chatId) => makeClient(chatId).Delete().pipe(Effect.orDie)
     }
 
@@ -262,12 +262,12 @@ const makeClusterClient = Effect.gen(function* () {
 
       yield* client.submit(chatId, input)
     }),
-    subscribe: (assistant, chatId, after, live) =>
+    subscribe: (assistant, chatId, after, signals) =>
       Stream.unwrap(
         Effect.gen(function* () {
           const client = yield* clientOf(assistant)
 
-          return client.subscribe(chatId, after, live)
+          return client.subscribe(chatId, after, signals)
         })
       ),
     delete: Effect.fn("AssistantEngine.delete")(function* (assistant: string, chatId: ChatId) {
@@ -354,7 +354,7 @@ export const layerCluster: Layer.Layer<AssistantEngine, never, ChatLog | Shardin
           // The turns run inside the request, so a crash leaves it unprocessed and the cluster redelivers it.
           Submit: (request) => chat.submit(request.payload.input),
           Subscribe: (request) =>
-            request.payload.live === true ? chat.live(request.payload.after) : chat.stream(request.payload.after),
+            request.payload.signals === true ? chat.live(request.payload.after) : chat.stream(request.payload.after),
           Delete: () => chat.delete
         })
       })

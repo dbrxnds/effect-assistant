@@ -355,15 +355,18 @@ export interface Service<Events = never> {
    * `show`, none by default (see `Timeline.changes`).
    */
   readonly subscribe: {
-    (chatId: ChatId, options?: SubscribeOptions & { readonly live?: false | undefined }): Stream.Stream<Entry<Events>>
+    (
+      chatId: ChatId,
+      options?: SubscribeOptions & { readonly signals?: false | undefined }
+    ): Stream.Stream<Entry<Events>>
     /**
-     * With `live: true`, the stream also has the chat's signals (see `ChatSignal`): the status of
+     * With `signals: true`, the stream also has the chat's signals (see `ChatSignal`): the status of
      * what a turn is doing, and whether a message to the user is on its way. They come in order
      * with the entries, only while the stream runs, and are never stored.
      */
     (
       chatId: ChatId,
-      options: SubscribeOptions & { readonly live: true }
+      options: SubscribeOptions & { readonly signals: true }
     ): Stream.Stream<Entry<Events> | ChatSignal.ChatSignal>
   }
   /**
@@ -605,18 +608,18 @@ export const make = <
 
     function subscribe(
       chatId: ChatId,
-      options?: SubscribeOptions & { readonly live?: false | undefined }
+      options?: SubscribeOptions & { readonly signals?: false | undefined }
     ): Stream.Stream<Entry<OwnEvents>>
     function subscribe(
       chatId: ChatId,
-      options: SubscribeOptions & { readonly live: true }
+      options: SubscribeOptions & { readonly signals: true }
     ): Stream.Stream<Entry<OwnEvents> | ChatSignal.ChatSignal>
     function subscribe(
       chatId: ChatId,
-      options?: SubscribeOptions & { readonly live?: boolean | undefined }
+      options?: SubscribeOptions & { readonly signals?: boolean | undefined }
     ): Stream.Stream<Entry<OwnEvents> | ChatSignal.ChatSignal> {
       return engine
-        .subscribe(name, chatId, options?.after ?? 0, options?.live === true)
+        .subscribe(name, chatId, options?.after ?? 0, options?.signals === true)
         .pipe(Stream.filterMap(Filter.fromPredicateOption(decode)))
     }
 
