@@ -218,17 +218,15 @@ const check = Effect.fn(function* ({ campaignId, office, audience, budget }: typ
  * @category tools
  * @since 0.1.0
  */
-export const StartCampaign = ToolStatus.described(
-  Tool.make("start_campaign", {
-    description:
-      "Starts a campaign. The user approves it first: they see the campaign, office, audience, and budget and approve or reject it, your turn ends meanwhile, and the outcome arrives later. Say in the same step what you're asking them to approve, in one line.",
-    parameters: StartCampaignParams,
-    success: Schema.Struct({ reference: Schema.String }),
-    failure: ToolFailure.ToolFailure,
-    needsApproval: true,
-    dependencies: [CurrentChat, AssistantToolCall.AssistantToolCall]
-  })
-)
+export const StartCampaign = Tool.make("start_campaign", {
+  description:
+    "Starts a campaign. The user approves it first: they see the campaign, office, audience, and budget and approve or reject it, your turn ends meanwhile, and the outcome arrives later. Say in the same step what you're asking them to approve, in one line.",
+  parameters: StartCampaignParams.pipe(ToolStatus.withStatus),
+  success: Schema.Struct({ reference: Schema.String }),
+  failure: ToolFailure.ToolFailure,
+  needsApproval: true,
+  dependencies: [CurrentChat, AssistantToolCall.AssistantToolCall]
+})
 
 /**
  * The campaign tools.

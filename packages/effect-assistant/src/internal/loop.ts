@@ -12,7 +12,6 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import * as SchemaAST from "effect/SchemaAST"
 import * as Stream from "effect/Stream"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import type * as Instructions from "../Instructions.ts"
@@ -91,49 +90,14 @@ export interface StepResult {
 // every tool's params, `unknown` for a schema of unknown type, though deferred validation encodes none.
 type RequestTool = Tool.Tool<string, any, any>
 
-// Required in what the model reads, so it writes one with every call; a call without it still runs.
-const statusParameter = Schema.String.annotate({ description: ToolStatus.parameterDescription })
-
-// What the model reads of a described tool: its parameters with the status one. Only the request has it; the call
-// runs without it (see `withoutStatus`). A record of no keys (a tool without parameters) becomes an object with it.
-const withStatusParameter = (tool: Tool.Any): Tool.Any => {
-  const ast = tool.parametersSchema.ast
-
-  if (!ToolStatus.isDescribed(tool) || !SchemaAST.isObjects(ast)) return tool
-
-  if (ast.propertySignatures.some((property) => property.name === ToolStatus.parameterName)) {
-    throw new Error(
-      `${tool.name} has a parameter named ${ToolStatus.parameterName} already, so it can't show a status: rename it.`
-    )
-  }
-
-  const added = Schema.Struct({ [ToolStatus.parameterName]: statusParameter }).ast.propertySignatures
-
-  return tool.setParameters(
-    Schema.make<Schema.Top>(
-      new SchemaAST.Objects(
-        [...ast.propertySignatures, ...added],
-        ast.indexSignatures.filter((index) => !SchemaAST.isNever(index.type)),
-        ast.annotations
-      )
-    )
-  )
-}
-
 // The loop runs the calls itself, after storing each as started, so the model call runs none. It also decides which
 // calls wait for approval: the model call would ask for approvals of its own.
 const requestToolkit = (definitions: ReadonlyArray<Tool.Any>): Toolkit.WithHandler<Record<string, RequestTool>> => ({
   tools: Object.fromEntries(
-    definitions.map((tool) => {
-      const requested = withStatusParameter(tool)
-
-      return [
-        tool.name,
-        requested.needsApproval === undefined || requested.needsApproval === false
-          ? requested
-          : requested.setNeedsApproval(false)
-      ]
-    })
+    definitions.map((tool) => [
+      tool.name,
+      tool.needsApproval === undefined || tool.needsApproval === false ? tool : tool.setNeedsApproval(false)
+    ])
   ),
   handle: () => Effect.succeed(Stream.empty)
 })
@@ -181,26 +145,23 @@ const decodeParams = Schema.decodeUnknownOption(Schema.Record(Schema.String, Sch
 const isDescribedCall = <R>(tools: Toolkits.Tools<R>, call: AssistantEvent.ToolCallPart) =>
   tools.definitions.some((tool) => tool.name === call.name && ToolStatus.isDescribed(tool))
 
-// The status the model wrote for a described tool's call, and the call as the tool's handler gets it.
-const splitStatus = (call: AssistantEvent.ToolCallPart): readonly [string | undefined, AssistantEvent.ToolCallPart] => {
-  const params = decodeParams(call.params)
-
-  if (Option.isNone(params) || !Object.hasOwn(params.value, ToolStatus.parameterName)) return [undefined, call]
-
-  const { [ToolStatus.parameterName]: written, ...rest } = params.value
-  const status = Predicate.isString(written) ? written.trim() : ""
-
-  return [status === "" ? undefined : status, { ...call, params: rest }]
-}
+const statusOf = (call: AssistantEvent.ToolCallPart): string | undefined =>
+  decodeParams(call.params).pipe(
+    Option.flatMapNullishOr((params) => params[ToolStatus.parameterName]),
+    Option.filter(Predicate.isString),
+    Option.map((written) => written.trim()),
+    Option.filter((status) => status !== ""),
+    Option.getOrUndefined
+  )
 
 // A call's status shows when it starts; a message's typing stops once the message is stored.
 const runCall = Effect.fnUntraced(function* <R>(tools: Toolkits.Tools<R>, call: AssistantEvent.ToolCallPart) {
-  const [status, run] = isDescribedCall(tools, call) ? splitStatus(call) : [undefined, call]
+  const status = isDescribedCall(tools, call) ? statusOf(call) : undefined
 
   const result = yield* Effect.gen(function* () {
     if (status !== undefined) yield* Live.use((live) => live.callStarted(call.id, status))
 
-    const result = yield* tools.run(run)
+    const result = yield* tools.run(call)
 
     yield* Telemetry.toolOutput(result.result)
 
