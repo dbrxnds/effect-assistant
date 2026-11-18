@@ -17,6 +17,7 @@ import type * as Prompt from "effect/ai/Prompt"
 import type * as Tool from "effect/ai/Tool"
 import type * as Toolkit from "effect/ai/Toolkit"
 import * as Context from "effect/Context"
+import type * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Filter from "effect/Filter"
 import * as Layer from "effect/Layer"
@@ -139,7 +140,7 @@ export type HistoryView<Events = never> = (
 export interface Entry<Events = never> {
   readonly chatId: ChatId
   readonly sequence: number
-  readonly at: number
+  readonly at: DateTime.Utc
   readonly event: AssistantEvent.AssistantEvent | Events
 }
 
@@ -508,7 +509,7 @@ function entrySchema(events: ReadonlyArray<AssistantEvent.AppEventSchema>): Sche
     Schema.Struct({
       chatId: ChatId,
       sequence: Schema.Int,
-      at: Schema.Finite,
+      at: Schema.DateTimeUtcFromMillis,
       event: Schema.Union([AssistantEvent.AssistantEvent, ...events])
     })
   )

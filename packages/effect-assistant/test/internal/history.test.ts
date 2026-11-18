@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Prompt from "effect/ai/Prompt"
 import * as Response from "effect/ai/Response"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import { AssistantEvent, ChatId, InputId, RunId } from "../../src/index.ts"
 import * as History from "../../src/internal/history.ts"
@@ -12,7 +13,7 @@ const { ModelOutput, ToolResult, ToolStarted, TurnStarted } = AssistantEvent
 const chatId = Effect.runSync(ChatId.make())
 
 const entries = (events: ReadonlyArray<AssistantEvent.AssistantEvent>) =>
-  events.map((event, i) => AssistantEvent.Entry.make({ chatId, sequence: i + 1, at: 0, event }))
+  events.map((event, i) => AssistantEvent.Entry.make({ chatId, sequence: i + 1, at: DateTime.makeUnsafe(0), event }))
 
 const call = (id: string, name: string) =>
   Response.makePart("tool-call", { id, name, params: {}, providerExecuted: false })
@@ -145,11 +146,11 @@ describe("History.fromEntries, a finished specialist run", () => {
     const runId = RunId.fromKey("history-test")
 
     const history = fromEntries([
-      AssistantEvent.Entry.make({ chatId, sequence: 1, at: 0, event: say("research Q4") }),
+      AssistantEvent.Entry.make({ chatId, sequence: 1, at: DateTime.makeUnsafe(0), event: say("research Q4") }),
       AssistantEvent.Entry.make({
         chatId,
         sequence: 2,
-        at: 1000,
+        at: DateTime.makeUnsafe(1000),
         event: AssistantEvent.SpecialistStarted.make({
           runId,
           specialist: "research",
@@ -159,7 +160,7 @@ describe("History.fromEntries, a finished specialist run", () => {
       AssistantEvent.Entry.make({
         chatId,
         sequence: 3,
-        at: 121_000,
+        at: DateTime.makeUnsafe(121_000),
         event: AssistantEvent.SpecialistFinished.make({
           id: InputId.fromKey(`${runId}:1`),
           runId,
@@ -236,7 +237,7 @@ describe("History.fromEntries, the app's own events", () => {
       AssistantEvent.Entry.make({
         chatId,
         sequence: 2,
-        at: 0,
+        at: DateTime.makeUnsafe(0),
         event: storedUpdate("workflow:Order", { status: "done" })
       })
     ])
@@ -281,7 +282,7 @@ describe("History.needsTurn, the app's own events", () => {
         TurnStarted.make({ assistant: "test" }),
         AssistantEvent.TurnCompleted.make({ throughSequence: 2 })
       ]),
-      AssistantEvent.Entry.make({ chatId, sequence: 4, at: 0, event })
+      AssistantEvent.Entry.make({ chatId, sequence: 4, at: DateTime.makeUnsafe(0), event })
     ]
 
     expect(needsTurn(after(submittedUpdate("workflow:Order", { status: "done" })))).toBe(true)

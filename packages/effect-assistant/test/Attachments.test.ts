@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
@@ -21,7 +22,9 @@ const withFile = AssistantEvent.UserMessage.make({
 })
 
 const entries = (events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>) =>
-  events.map((event, i) => AssistantEvent.Entry.make({ chatId, sequence: i + 1, at: (i + 1) * 1000, event }))
+  events.map((event, i) =>
+    AssistantEvent.Entry.make({ chatId, sequence: i + 1, at: DateTime.makeUnsafe((i + 1) * 1000), event })
+  )
 
 const userTexts = (history: ReturnType<typeof History.fromEntries>) =>
   history.flatMap((message) =>
@@ -58,7 +61,7 @@ describe("attachments", () => {
         id: withFile.id,
         text: "Print this please",
         attachments: [flyer],
-        at: 1000
+        at: DateTime.makeUnsafe(1000)
       })
     ])
   })

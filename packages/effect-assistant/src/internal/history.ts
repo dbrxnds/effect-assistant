@@ -1,5 +1,7 @@
 import * as Prompt from "effect/ai/Prompt"
 import * as Response from "effect/ai/Response"
+import * as DateTime from "effect/DateTime"
+import * as Duration from "effect/Duration"
 import * as Match from "effect/Match"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
@@ -61,8 +63,8 @@ export const notRunOutput = "Not run: the turn ended before this call ran."
 export const mayHaveRunOutput =
   "Stopped: the turn ended while this call ran. It may have done its work; check before doing it again."
 
-const ago = (millis: number) => {
-  const seconds = Math.max(0, Math.round(millis / 1000))
+const ago = (duration: Duration.Duration) => {
+  const seconds = Math.max(0, Math.round(Duration.toSeconds(duration)))
 
   return seconds < 90 ? `${seconds} seconds` : `${Math.round(seconds / 60)} minutes`
 }
@@ -88,7 +90,7 @@ const finishedText = (
     "A report from a specialist you started. The user hasn't seen it.",
     started === undefined
       ? `You started it for: ${finished.goal}`
-      : `You started it ${ago(at.at - started.at)} ago for: ${finished.goal}`,
+      : `You started it ${ago(DateTime.distance(started.at, at.at))} ago for: ${finished.goal}`,
     wrote ? "The user has written since you started it." : "The user hasn't written since you started it.",
     Match.value(finished.status).pipe(
       Match.when("answered", () => `Report:\n${finished.report ?? ""}`),

@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Prompt from "effect/ai/Prompt"
 import * as Tool from "effect/ai/Tool"
 import * as Toolkit from "effect/ai/Toolkit"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
@@ -80,7 +81,7 @@ describe("the app's own events", () => {
 
   it.effect("MyAssistant.Entry takes an entry with an app event through JSON and back, for an RPC", () =>
     Effect.gen(function* () {
-      const entry = { chatId: yield* ChatId.make(), sequence: 3, at: 0, event: summary }
+      const entry = { chatId: yield* ChatId.make(), sequence: 3, at: DateTime.makeUnsafe(0), event: summary }
       const json = yield* Schema.encodeEffect(Compacting.Entry)(entry)
       const back = yield* Schema.decodeUnknownEffect(Compacting.Entry)(JSON.parse(JSON.stringify(json)))
 

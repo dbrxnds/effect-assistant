@@ -18,6 +18,7 @@
  *
  * @since 0.3.0
  */
+import * as DateTime from "effect/DateTime"
 import { dual } from "effect/Function"
 import * as Match from "effect/Match"
 import * as Option from "effect/Option"
@@ -66,8 +67,8 @@ export const Block = Schema.Struct({
   props: Schema.Json,
   status: BlockStatus,
   answer: Schema.optional(Schema.Json),
-  /** When the user answered, in epoch milliseconds, once the block is answered. */
-  answeredAt: Schema.optional(Schema.Finite),
+  /** When the user answered, once the block is answered. Encodes as epoch milliseconds. */
+  answeredAt: Schema.optional(Schema.DateTimeUtcFromMillis),
   /** For a block that shows a tool's result (`Block.fromToolResult`): the result, as the tool's success schema encodes it. */
   result: Schema.optional(Schema.Json)
 })
@@ -81,8 +82,8 @@ export const Block = Schema.Struct({
 export type Block = typeof Block.Type
 
 /**
- * Schema for a message the user sent. `at` is when it was stored, in epoch
- * milliseconds.
+ * Schema for a message the user sent. `at` is when it was stored, a UTC `DateTime` that encodes
+ * as epoch milliseconds.
  *
  * @category schemas
  * @since 0.1.0
@@ -91,7 +92,7 @@ export const UserMessage = Schema.TaggedStruct("UserMessage", {
   id: InputId,
   text: Schema.String,
   attachments: Schema.optional(Schema.Array(AssistantEvent.Attachment)),
-  at: Schema.Finite
+  at: Schema.DateTimeUtcFromMillis
 })
 
 /**
@@ -103,7 +104,8 @@ export const UserMessage = Schema.TaggedStruct("UserMessage", {
 export type UserMessage = typeof UserMessage.Type
 
 /**
- * Schema for a message the assistant sent the user, including its block if it has one.
+ * Schema for a message the assistant sent the user, including its block if it has one. `at` is
+ * when it was stored, a UTC `DateTime` that encodes as epoch milliseconds.
  *
  * @category schemas
  * @since 0.1.0
@@ -111,7 +113,7 @@ export type UserMessage = typeof UserMessage.Type
 export const AssistantMessage = Schema.TaggedStruct("AssistantMessage", {
   id: Schema.String,
   text: Schema.String,
-  at: Schema.Finite,
+  at: Schema.DateTimeUtcFromMillis,
   block: Schema.optional(Block)
 })
 
@@ -133,13 +135,14 @@ export type AssistantMessage = typeof AssistantMessage.Type
  * beside `UserMessage` and `AssistantMessage`. The event, decoded with its schema, is in `event`,
  * and the item's own fields sit beside it rather than spread into it: an event may have an `id` or
  * an `at` of its own, and a class instance keeps its prototype. `id` is fixed per entry of the
- * chat's log, and `at` is when the event was stored, in epoch milliseconds.
+ * chat's log, and `at` is when the event was stored, a UTC `DateTime` that encodes as epoch
+ * milliseconds.
  *
  * @category models
  * @since 0.3.0
  */
 export type EventItem<E> = E extends { readonly _tag: infer Tag extends string }
-  ? { readonly _tag: Tag; readonly id: string; readonly at: number; readonly event: E }
+  ? { readonly _tag: Tag; readonly id: string; readonly at: DateTime.Utc; readonly event: E }
   : never
 
 /**
@@ -152,8 +155,8 @@ export type EventItem<E> = E extends { readonly _tag: infer Tag extends string }
  * approve, so the item carries no params. `id` is the call's id, which the decision is for (see
  * `ToolApproval.approve`), and `tool` the tool's name, for a label. `status` is where the call stands
  * (`ToolApproval.Status`); `reason` is the user's, when they rejected it with one; `outcome` is how
- * the approved call went, once it ran. `at` is when the call started waiting, in epoch
- * milliseconds. A change updates the item in place as the call is decided and run.
+ * the approved call went, once it ran. `at` is when the call started waiting, a UTC `DateTime` that
+ * encodes as epoch milliseconds. A change updates the item in place as the call is decided and run.
  *
  * @category schemas
  * @since 0.4.0
@@ -164,7 +167,7 @@ export const ApprovalItem = Schema.TaggedStruct("ToolApproval", {
   status: Schema.Literals(["pending", "approved", "rejected", "expired"]),
   reason: Schema.optional(Schema.String),
   outcome: Schema.optional(AssistantEvent.ToolOutcome),
-  at: Schema.Finite
+  at: Schema.DateTimeUtcFromMillis
 })
 
 /**
@@ -205,14 +208,14 @@ export type Item<Events = never> = UserMessage | AssistantMessage | EventItem<Ev
 
 /**
  * Schema for a specialist that is working for the assistant. It holds the specialist's name and
- * when it started, in epoch milliseconds.
+ * when it started, a UTC `DateTime` that encodes as epoch milliseconds.
  *
  * @category schemas
  * @since 0.1.0
  */
 export const SpecialistWorking = Schema.Struct({
   specialist: Schema.String,
-  since: Schema.Finite
+  since: Schema.DateTimeUtcFromMillis
 })
 
 /**
@@ -293,7 +296,12 @@ export interface Change<Events = never> {
 }
 
 const eventItem = (schema: AssistantEvent.AppEventSchema) =>
-  Schema.Struct({ _tag: Schema.Literal(AppEvents.tagOf(schema)), id: Schema.String, at: Schema.Finite, event: schema })
+  Schema.Struct({
+    _tag: Schema.Literal(AppEvents.tagOf(schema)),
+    id: Schema.String,
+    at: Schema.DateTimeUtcFromMillis,
+    event: schema
+  })
 
 function makeChange<const Events extends ReadonlyArray<AssistantEvent.AppEventSchema> = readonly []>(
   events?: Events
@@ -467,7 +475,7 @@ export const isIdle = <Events>(timeline: Timeline<Events>): boolean =>
 interface AnyEventItem {
   readonly _tag: string
   readonly id: string
-  readonly at: number
+  readonly at: DateTime.Utc
   readonly event: { readonly _tag: string }
 }
 
@@ -652,7 +660,7 @@ const sameActivity = (a: Activity, b: Activity) =>
   a.specialists.every((run, i) => {
     const other = b.specialists[i]
 
-    return other !== undefined && run.specialist === other.specialist && run.since === other.since
+    return other !== undefined && run.specialist === other.specialist && DateTime.Equivalence(run.since, other.since)
   })
 
 const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding => {
@@ -664,7 +672,7 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding =>
   let activity = AssistantActivity.empty
   let live = noLive
   let blocks: ReadonlyMap<string, BlockKit.State> = new Map()
-  const answeredAt = new Map<string, number>()
+  const answeredAt = new Map<string, DateTime.Utc>()
   // The items in order, and the assistant's messages as stored: their blocks change as the chat goes on.
   const items = new Map<string, AnyItem>()
   const sent = new Map<string, AssistantEvent.AssistantMessage>()
@@ -689,7 +697,7 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding =>
     return at === undefined ? answered : { ...answered, answeredAt: at }
   }
 
-  const itemOf = (message: AssistantEvent.AssistantMessage, at: number): AssistantMessage => {
+  const itemOf = (message: AssistantEvent.AssistantMessage, at: DateTime.Utc): AssistantMessage => {
     const block = blockOf(message)
 
     return block === undefined
@@ -697,7 +705,7 @@ const folding = (show: ReadonlyArray<AssistantEvent.AppEventSchema>): Folding =>
       : AssistantMessage.make({ id: message.id, text: message.text, at, block })
   }
 
-  const touched = (event: AssistantEvent.AssistantEvent, at: number): ReadonlyArray<string> =>
+  const touched = (event: AssistantEvent.AssistantEvent, at: DateTime.Utc): ReadonlyArray<string> =>
     Match.value(event).pipe(
       Match.tagsExhaustive({
         UserMessage: (message) => {

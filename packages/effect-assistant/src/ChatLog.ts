@@ -8,8 +8,8 @@
  *
  * @since 0.1.0
  */
-import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
@@ -89,7 +89,7 @@ export const make = (storage: Storage): ChatLog["Service"] =>
       if (events.length === 0) return []
 
       const sequence = yield* storage.lastSequence(chatId)
-      const at = yield* Clock.currentTimeMillis
+      const at = yield* DateTime.now
 
       const entries = events.map((event, n) =>
         AssistantEvent.Entry.make({ chatId, sequence: sequence + n + 1, at, event })
@@ -228,7 +228,7 @@ export const layerSql = (options?: SqlOptions): Layer.Layer<ChatLog, never, SqlC
           AssistantEvent.Entry.make({
             chatId: row.chat_id,
             sequence: row.sequence,
-            at: row.at,
+            at: DateTime.makeUnsafe(row.at),
             event: row.event
           })
         )
@@ -259,7 +259,7 @@ export const layerSql = (options?: SqlOptions): Layer.Layer<ChatLog, never, SqlC
             Effect.fnUntraced(function* (entry: AssistantEvent.Entry) {
               const event = yield* encodeEvent(entry.event)
 
-              return { chat_id: chatId, sequence: entry.sequence, at: entry.at, event }
+              return { chat_id: chatId, sequence: entry.sequence, at: DateTime.toEpochMillis(entry.at), event }
             })
           )
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import { AssistantActivity, AssistantEvent, ChatId, InputId, RunId } from "../src/index.ts"
 import { say, storedUpdate, submittedUpdate } from "./utils/fixtures.ts"
@@ -8,7 +9,9 @@ const { SpecialistFinished, SpecialistStarted, TurnCompleted, TurnFailed, TurnSt
 const chatId = Effect.runSync(ChatId.make())
 
 const entries = (events: ReadonlyArray<AssistantEvent.AssistantEvent>) =>
-  events.map((event, i) => AssistantEvent.Entry.make({ chatId, sequence: i + 1, at: (i + 1) * 1000, event }))
+  events.map((event, i) =>
+    AssistantEvent.Entry.make({ chatId, sequence: i + 1, at: DateTime.makeUnsafe((i + 1) * 1000), event })
+  )
 
 const activity = (events: ReadonlyArray<AssistantEvent.AssistantEvent>) =>
   AssistantActivity.fromEntries(entries(events))
@@ -28,7 +31,7 @@ describe("AssistantActivity", () => {
   it("works from TurnStarted until the turn ends", () => {
     const running = activity([say("hi"), TurnStarted.make({ assistant: "test" })])
 
-    expect(running.turnSince).toBe(2000)
+    expect(running.turnSince).toEqual(DateTime.makeUnsafe(2000))
     expect(AssistantActivity.isWorking(running)).toBe(true)
     expect(
       AssistantActivity.isWorking(
@@ -61,7 +64,7 @@ describe("AssistantActivity", () => {
 
     expect(afterTurn.turnSince).toBeUndefined()
     expect([...afterTurn.specialists.values()]).toEqual([
-      { runId, specialist: "research", goal: "Q4 budgets", since: 3000 }
+      { runId, specialist: "research", goal: "Q4 budgets", since: DateTime.makeUnsafe(3000) }
     ])
     expect(AssistantActivity.isWorking(afterTurn)).toBe(true)
 
@@ -104,7 +107,7 @@ describe("AssistantActivity", () => {
   it("counts an app event that came in through submit as an input, and not one a turn appended", () => {
     const after = (event: AssistantEvent.StoredAppEvent) =>
       [say("order it"), TurnStarted.make({ assistant: "test" }), TurnCompleted.make({ throughSequence: 2 }), event].map(
-        (event, i) => ({ chatId, sequence: i + 1, at: (i + 1) * 1000, event })
+        (event, i) => ({ chatId, sequence: i + 1, at: DateTime.makeUnsafe((i + 1) * 1000), event })
       )
 
     expect(

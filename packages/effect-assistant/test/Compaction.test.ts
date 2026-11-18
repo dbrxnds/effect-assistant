@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as LanguageModel from "effect/ai/LanguageModel"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
@@ -84,7 +85,9 @@ describe("Compaction", () => {
       AssistantEvent.SpecialistStarted.make({ runId, specialist: "research", goal: "Compare tote suppliers" })
     ]
 
-    const entries = events.map((event, i) => AssistantEvent.Entry.make({ chatId, sequence: i + 1, at: 0, event }))
+    const entries = events.map((event, i) =>
+      AssistantEvent.Entry.make({ chatId, sequence: i + 1, at: DateTime.makeUnsafe(0), event })
+    )
 
     expect(Compaction.openItems(entries, entries.length)).toEqual(
       Option.some(
@@ -101,9 +104,14 @@ describe("Compaction", () => {
     class Shipped extends Schema.TaggedClass<Shipped>()("Shipped", { orderId: Schema.String }) {}
 
     const entries: ReadonlyArray<Assistant.Entry<Summary | Shipped>> = [
-      { chatId, sequence: 1, at: 0, event: say("Order 300 totes.") },
-      { chatId, sequence: 2, at: 0, event: Summary.make({ text: "They ordered totes.", throughSequence: 1 }) },
-      { chatId, sequence: 3, at: 0, event: Shipped.make({ orderId: "o1" }) }
+      { chatId, sequence: 1, at: DateTime.makeUnsafe(0), event: say("Order 300 totes.") },
+      {
+        chatId,
+        sequence: 2,
+        at: DateTime.makeUnsafe(0),
+        event: Summary.make({ text: "They ordered totes.", throughSequence: 1 })
+      },
+      { chatId, sequence: 3, at: DateTime.makeUnsafe(0), event: Shipped.make({ orderId: "o1" }) }
     ]
 
     const viewed = history(entries)
@@ -122,7 +130,9 @@ describe("Compaction", () => {
       ToolApproval.reject({ id: "c2" })
     ]
 
-    const entries = events.map((event, i) => AssistantEvent.Entry.make({ chatId, sequence: i + 1, at: 0, event }))
+    const entries = events.map((event, i) =>
+      AssistantEvent.Entry.make({ chatId, sequence: i + 1, at: DateTime.makeUnsafe(0), event })
+    )
 
     expect(Compaction.openItems(entries, entries.length)).toEqual(
       Option.some(`Calls waiting for the user's approval:\n- your call to place_order (c1): {"quantity":300}`)
