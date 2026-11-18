@@ -15,6 +15,7 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
+import * as SchemaAST from "effect/SchemaAST"
 import * as Stream from "effect/Stream"
 import {
   type Assistant,
@@ -32,23 +33,19 @@ const instructions = "You help a small marketing team."
 
 const STATUS = "Checking last summer's campaign budget"
 
-const CampaignReport = ToolStatus.described(
-  Tool.make("campaign_report", {
-    description: "The spend of a past campaign.",
-    parameters: Schema.Struct({ campaignId: Schema.String }),
-    success: Schema.Struct({ spent: Schema.Finite })
-  })
-)
+const CampaignReport = Tool.make("campaign_report", {
+  description: "The spend of a past campaign.",
+  parameters: Schema.Struct({ campaignId: Schema.String }).pipe(ToolStatus.withStatus),
+  success: Schema.Struct({ spent: Schema.Finite })
+})
 
 const PLAN = "Drafting the summer campaign plan"
 
-const CampaignPlan = ToolStatus.described(
-  Tool.make("campaign_plan", {
-    description: "Drafts a campaign plan.",
-    parameters: Schema.Struct({ campaignId: Schema.String }),
-    success: Schema.Struct({ planned: Schema.Boolean })
-  })
-)
+const CampaignPlan = Tool.make("campaign_plan", {
+  description: "Drafts a campaign plan.",
+  parameters: Schema.Struct({ campaignId: Schema.String }).pipe(ToolStatus.withStatus),
+  success: Schema.Struct({ planned: Schema.Boolean })
+})
 
 const Lookup = Tool.make("lookup", {
   description: "A quick lookup.",
@@ -56,7 +53,13 @@ const Lookup = Tool.make("lookup", {
   success: Schema.Struct({ found: Schema.Boolean })
 })
 
-const Tools = Toolkit.make(CampaignReport, CampaignPlan, Lookup)
+const ArchiveNote = Tool.make("archive_note", {
+  description: "Archives a note.",
+  parameters: Schema.Struct({ noteId: Schema.String, description: Schema.String }),
+  success: Schema.Struct({ archived: Schema.Boolean })
+})
+
+const Tools = Toolkit.make(CampaignReport, CampaignPlan, Lookup, ArchiveNote)
 
 type Item = Assistant.Entry | ChatSignal.ChatSignal
 
@@ -84,7 +87,8 @@ const harness = Effect.fnUntraced(function* (options: {
     campaign_report: (params) =>
       Ref.update(received, (all) => [...all, params]).pipe(Effect.andThen(options.report), Effect.as({ spent: 1200 })),
     campaign_plan: () => Effect.succeed({ planned: true }),
-    lookup: () => (options.lookup ?? Effect.sleep("300 millis")).pipe(Effect.as({ found: true }))
+    lookup: () => (options.lookup ?? Effect.sleep("300 millis")).pipe(Effect.as({ found: true })),
+    archive_note: (params) => Ref.update(received, (all) => [...all, params]).pipe(Effect.as({ archived: true }))
   })
 
   return { received: Ref.get(received), tools }
@@ -173,8 +177,7 @@ describe("ChatSignal", () => {
         "TurnCompleted"
       ])
 
-      // The handler gets its own params only.
-      expect(yield* tools.received).toEqual([{ campaignId: "summer" }])
+      expect(yield* tools.received).toEqual([{ campaignId: "summer", description: STATUS }])
 
       // Never stored: the log has no trace of them.
       expect(stored.some(({ event }) => ChatSignal.isChatSignal(event))).toBe(false)
@@ -248,6 +251,92 @@ describe("ChatSignal", () => {
       expect(JSON.stringify(schemas.get("lookup"))).not.toContain(ToolStatus.parameterName)
     })
   )
+
+  it.effect("shows no status for a description parameter the tool has of its own", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>()
+      const tools = yield* harness({ report: Effect.void })
+      const script = callsThenAnswer(["archive_note", { noteId: "n1", description: "Old ideas" }])
+
+      const { items } = yield* liveTurn(gate, "Archive the old ideas note.").pipe(
+        Effect.provide(runMemory(TestAssistant.toLayer(gatedHandler(gate, tools.tools)), Scripted.layer(script)))
+      )
+
+      expect(items.flatMap(label)).toEqual([
+        "TurnStarted",
+        "TypingStarted",
+        "AssistantMessage",
+        "TypingStopped",
+        "TurnCompleted"
+      ])
+      expect(yield* tools.received).toEqual([{ noteId: "n1", description: "Old ideas" }])
+      expect(ToolStatus.isDescribed(ArchiveNote)).toBe(false)
+    })
+  )
+
+  it.effect("runs a described call with a blank status, and shows none", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>()
+      const tools = yield* harness({ report: Effect.void })
+      const script = callsThenAnswer(["campaign_report", { campaignId: "summer", description: "  " }])
+
+      const { items } = yield* liveTurn(gate, "What did it cost?").pipe(
+        Effect.provide(runMemory(TestAssistant.toLayer(gatedHandler(gate, tools.tools)), Scripted.layer(script)))
+      )
+
+      expect(items.flatMap(label)).toEqual([
+        "TurnStarted",
+        "TypingStarted",
+        "AssistantMessage",
+        "TypingStopped",
+        "TurnCompleted"
+      ])
+      expect(yield* tools.received).toEqual([{ campaignId: "summer", description: "  " }])
+    })
+  )
+
+  it.effect("runs a described call without its status as one with invalid params, and shows none", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>()
+      const tools = yield* harness({ report: Effect.void })
+      const script = callsThenAnswer(["campaign_report", { campaignId: "summer" }])
+
+      const { items, stored } = yield* liveTurn(gate, "What did it cost?").pipe(
+        Effect.provide(runMemory(TestAssistant.toLayer(gatedHandler(gate, tools.tools)), Scripted.layer(script)))
+      )
+
+      expect(items.flatMap(label)).toEqual([
+        "TurnStarted",
+        "TypingStarted",
+        "AssistantMessage",
+        "TypingStopped",
+        "TurnCompleted"
+      ])
+      expect(yield* tools.received).toEqual([])
+      expect(
+        stored.flatMap(({ event }) =>
+          Predicate.isTagged(event, "ToolResult") && event.tool === "campaign_report" ? [event.outcome] : []
+        )
+      ).toEqual(["failure"])
+    })
+  )
+
+  it("adds the status field to a struct and keeps its annotations", () => {
+    const Params = Schema.Struct({ noteId: Schema.String }).annotate({ title: "ArchiveParams" })
+    const WithStatus = Params.pipe(ToolStatus.withStatus)
+
+    expect(Object.keys(WithStatus.fields)).toEqual(["noteId", ToolStatus.parameterName])
+    expect(SchemaAST.resolveTitle(WithStatus.ast)).toBe("ArchiveParams")
+    expect(Schema.decodeUnknownSync(WithStatus)({ noteId: "n1", description: STATUS })).toEqual({
+      noteId: "n1",
+      description: STATUS
+    })
+    expect(ToolStatus.isDescribed(CampaignReport)).toBe(true)
+    expect(ToolStatus.isDescribed(Lookup)).toBe(false)
+
+    // @ts-expect-error
+    Schema.Struct({ description: Schema.String }).pipe(ToolStatus.withStatus)
+  })
 
   it.effect("stops the typing and clears the line when the turn fails mid-tool", () =>
     Effect.gen(function* () {
