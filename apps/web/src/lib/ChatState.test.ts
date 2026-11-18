@@ -1,11 +1,13 @@
 import * as Timeline from "effect-assistant/Timeline"
 import * as InputId from "effect-assistant/InputId"
+import * as DateTime from "effect/DateTime"
 import * as Predicate from "effect/Predicate"
 import assert from "node:assert/strict"
 import { test } from "vite-plus/test"
 import * as ChatState from "./ChatState.ts"
 
-const user = (id: string, text: string) => Timeline.UserMessage.make({ id: InputId.fromKey(id), text, at: 0 })
+const user = (id: string, text: string) =>
+  Timeline.UserMessage.make({ id: InputId.fromKey(id), text, at: DateTime.makeUnsafe(0) })
 
 const change = (sequence: number, items: ReadonlyArray<Timeline.Item>, working: boolean): Timeline.Change => ({
   sequence,
@@ -21,7 +23,11 @@ test("works while the timeline says the assistant or a specialist works", () => 
 
   const researching: Timeline.Change = {
     ...change(4, [], false),
-    activity: { working: false, specialists: [{ specialist: "research", since: 0 }], typing: false }
+    activity: {
+      working: false,
+      specialists: [{ specialist: "research", since: DateTime.makeUnsafe(0) }],
+      typing: false
+    }
   }
 
   assert.equal(ChatState.apply(ChatState.initial, researching).working, true)

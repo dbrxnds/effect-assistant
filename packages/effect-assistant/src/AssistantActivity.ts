@@ -9,6 +9,7 @@
  *
  * @since 0.1.0
  */
+import type * as DateTime from "effect/DateTime"
 import * as Match from "effect/Match"
 import * as Predicate from "effect/Predicate"
 import * as AssistantEvent from "./AssistantEvent.ts"
@@ -25,8 +26,8 @@ export interface SpecialistRun {
   readonly specialist: string
   /** The goal the run is working on. */
   readonly goal: string
-  /** When the run started, in epoch milliseconds. */
-  readonly since: number
+  /** When the run started. */
+  readonly since: DateTime.Utc
 }
 
 /**
@@ -36,8 +37,8 @@ export interface SpecialistRun {
  * @since 0.1.0
  */
 export interface State {
-  /** When the running turn started, in epoch milliseconds, or `undefined` when no turn runs. */
-  readonly turnSince: number | undefined
+  /** When the running turn started, or `undefined` when no turn runs. */
+  readonly turnSince: DateTime.Utc | undefined
   /**
    * Whether an input arrived that no finished turn has read. When this is true, a turn is about
    * to start.

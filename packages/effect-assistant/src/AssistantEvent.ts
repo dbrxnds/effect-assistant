@@ -9,6 +9,7 @@
  * @since 0.1.0
  */
 import * as Response from "effect/ai/Response"
+import type * as DateTime from "effect/DateTime"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type * as SchemaAST from "effect/SchemaAST"
@@ -586,15 +587,15 @@ export const isAppInput = (event: { readonly _tag: string }): boolean =>
 export interface AnyEntry {
   readonly chatId: ChatId
   readonly sequence: number
-  readonly at: number
+  readonly at: DateTime.Utc
   readonly event: { readonly _tag: string }
 }
 
 /**
  * Schema for a stored event with its position in the chat.
  *
- * `sequence` starts at 1 and has no gaps. `at` is the time the event was stored, in epoch
- * milliseconds.
+ * `sequence` starts at 1 and has no gaps. `at` is the time the event was stored, a UTC
+ * `DateTime` that encodes as epoch milliseconds.
  *
  * @category schemas
  * @since 0.1.0
@@ -602,7 +603,7 @@ export interface AnyEntry {
 export const Entry = Schema.Struct({
   chatId: ChatId,
   sequence: Schema.Int,
-  at: Schema.Finite,
+  at: Schema.DateTimeUtcFromMillis,
   event: Schema.Union([AssistantEvent, StoredAppEvent])
 })
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
@@ -28,7 +29,12 @@ const message = (id: string, block?: AssistantEvent.MessageBlock) =>
 const viewed = (id: string, events: ReadonlyArray<AssistantEvent.AssistantEvent>) =>
   Timeline.fromEntries(
     events.map((event, i) =>
-      AssistantEvent.Entry.make({ chatId: Effect.runSync(ChatId.make()), sequence: i + 1, at: 0, event })
+      AssistantEvent.Entry.make({
+        chatId: Effect.runSync(ChatId.make()),
+        sequence: i + 1,
+        at: DateTime.makeUnsafe(0),
+        event
+      })
     )
   ).items.find(
     (shown): shown is Timeline.AssistantMessage => shown.id === id && Predicate.isTagged(shown, "AssistantMessage")
@@ -113,7 +119,9 @@ describe("BlockKit.fromEntries", () => {
     ]
 
     const states = BlockKit.fromEntries(
-      events.map((event, i) => AssistantEvent.Entry.make({ chatId, sequence: i + 1, at: 0, event }))
+      events.map((event, i) =>
+        AssistantEvent.Entry.make({ chatId, sequence: i + 1, at: DateTime.makeUnsafe(0), event })
+      )
     )
 
     expect(states.get("m1")).toMatchObject({ open: false, answer: { value: { choice: "red" } } })
@@ -136,7 +144,7 @@ describe("BlockKit.fromEntries", () => {
     ]
 
     const entry = (event: AssistantEvent.AssistantEvent, i: number) =>
-      AssistantEvent.Entry.make({ chatId, sequence: i + 1, at: 0, event })
+      AssistantEvent.Entry.make({ chatId, sequence: i + 1, at: DateTime.makeUnsafe(0), event })
 
     const entries = events.map(entry)
 

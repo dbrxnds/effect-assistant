@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Response from "effect/ai/Response"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Match from "effect/Match"
 import * as Option from "effect/Option"
@@ -33,7 +34,9 @@ class Note extends Schema.TaggedClass<Note>()("Note", { text: Schema.String }) {
 const Viewing = Assistant.make("viewing", { events: [Update, Note] })
 
 const entries = (events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>) =>
-  events.map((event, i) => AssistantEvent.Entry.make({ chatId, sequence: i + 1, at: (i + 1) * 1000, event }))
+  events.map((event, i) =>
+    AssistantEvent.Entry.make({ chatId, sequence: i + 1, at: DateTime.makeUnsafe((i + 1) * 1000), event })
+  )
 
 const timeline = (events: ReadonlyArray<AssistantEvent.AssistantEvent | AssistantEvent.StoredAppEvent>) =>
   Timeline.fromEntries(entries(events))
@@ -85,17 +88,17 @@ describe("Timeline.fromEntries", () => {
     const shown = timeline(quoting)
 
     expect(shown.items).toEqual([
-      Timeline.UserMessage.make({ id: hi.id, text: "Order 300 totes", at: 1000 }),
+      Timeline.UserMessage.make({ id: hi.id, text: "Order 300 totes", at: DateTime.makeUnsafe(1000) }),
       Timeline.AssistantMessage.make({
         id: "m1",
         text: "That's $1,200. Which color?",
-        at: 6000,
+        at: DateTime.makeUnsafe(6000),
         block: {
           kind: "choose_one",
           props: { options: ["red", "blue"] },
           status: "answered",
           answer: { choice: "blue" },
-          answeredAt: 8000
+          answeredAt: DateTime.makeUnsafe(8000)
         }
       })
     ])
@@ -141,7 +144,7 @@ describe("Timeline.fromEntries", () => {
 
     expect(working.activity).toEqual({
       working: true,
-      specialists: [{ specialist: "research", since: 3000 }],
+      specialists: [{ specialist: "research", since: DateTime.makeUnsafe(3000) }],
       typing: false
     })
     expect(JSON.stringify(working)).not.toContain("internal brief")
@@ -177,10 +180,10 @@ describe("Timeline.fromEntries", () => {
 
     // As `subscribe` streams them: decoded.
     const decoded = [
-      { chatId, sequence: 1, at: 1000, event: hi },
-      { chatId, sequence: 2, at: 2000, event: shipped },
-      { chatId, sequence: 3, at: 2500, event: note },
-      { chatId, sequence: 4, at: 3000, event: ask }
+      { chatId, sequence: 1, at: DateTime.makeUnsafe(1000), event: hi },
+      { chatId, sequence: 2, at: DateTime.makeUnsafe(2000), event: shipped },
+      { chatId, sequence: 3, at: DateTime.makeUnsafe(2500), event: note },
+      { chatId, sequence: 4, at: DateTime.makeUnsafe(3000), event: ask }
     ]
 
     const shown: Timeline.Timeline<Update> = Timeline.fromEntries(decoded, Viewing, { show: [Update] })
@@ -191,7 +194,7 @@ describe("Timeline.fromEntries", () => {
         UserMessage: (sent) => `user: ${sent.text}`,
         AssistantMessage: (sent) => `assistant: ${sent.text}`,
         Update: (eventItem) =>
-          `${eventItem.id} at ${eventItem.at}: ${eventItem.event.source} ${eventItem.event instanceof Update}`,
+          `${eventItem.id} at ${DateTime.toEpochMillis(eventItem.at)}: ${eventItem.event.source} ${eventItem.event instanceof Update}`,
         ToolApproval: (approval) => `approve ${approval.tool}?`
       })
     )
@@ -280,8 +283,8 @@ describe("Timeline.apply", () => {
     const first: Timeline.Change = {
       sequence: 2,
       items: [
-        Timeline.UserMessage.make({ id: hi.id, text: "hi", at: 1 }),
-        Timeline.AssistantMessage.make({ id: "m1", text: "Pick", at: 2 })
+        Timeline.UserMessage.make({ id: hi.id, text: "hi", at: DateTime.makeUnsafe(1) }),
+        Timeline.AssistantMessage.make({ id: "m1", text: "Pick", at: DateTime.makeUnsafe(2) })
       ],
       activity: { working: true, specialists: [], typing: false },
       failed: false,
@@ -294,10 +297,10 @@ describe("Timeline.apply", () => {
         Timeline.AssistantMessage.make({
           id: "m1",
           text: "Pick",
-          at: 2,
+          at: DateTime.makeUnsafe(2),
           block: { kind: "k", props: null, status: "closed" }
         }),
-        Timeline.AssistantMessage.make({ id: "m2", text: "Done", at: 5 })
+        Timeline.AssistantMessage.make({ id: "m2", text: "Done", at: DateTime.makeUnsafe(5) })
       ],
       activity: { working: false, specialists: [], typing: false },
       failed: false,

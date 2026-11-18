@@ -2,6 +2,7 @@
  * Sending what the user does: typed text, or a block answer.
  */
 import { useAtomSet } from "@effect/atom-react"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as AssistantEvent from "effect-assistant/AssistantEvent"
 import type * as ChatId from "effect-assistant/ChatId"
@@ -27,7 +28,7 @@ export const useSend = (
   return useCallback(
     async (input: AssistantEvent.UserInput) => {
       const pending = Predicate.isTagged(input, "UserMessage")
-        ? Timeline.UserMessage.make({ id: input.id, text: input.text, at: Date.now() })
+        ? Timeline.UserMessage.make({ id: input.id, text: input.text, at: DateTime.nowUnsafe() })
         : undefined
 
       if (pending) setPending((all) => [...all, pending])

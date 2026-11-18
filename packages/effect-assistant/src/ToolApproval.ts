@@ -11,6 +11,7 @@
  *
  * @since 0.4.0
  */
+import type * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as AssistantEvent from "./AssistantEvent.ts"
@@ -34,8 +35,8 @@ export type Status = "pending" | "approved" | "rejected" | "expired"
  */
 export interface State {
   readonly request: AssistantEvent.ApprovalRequested
-  /** When the call started waiting, in epoch milliseconds. */
-  readonly at: number
+  /** When the call started waiting. */
+  readonly at: DateTime.Utc
   readonly status: Status
   /** The user's reason, when they rejected it with one. */
   readonly reason: string | undefined

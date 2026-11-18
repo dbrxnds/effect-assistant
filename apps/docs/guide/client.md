@@ -95,7 +95,8 @@ timeline itself uses `Timeline.fromEntries(entries, MyAssistant, { show })`.
 ## What's on a timeline
 
 - **`items`**: `UserMessage`s and `AssistantMessage`s, in order, each
-  with `at` (epoch milliseconds). An assistant's message has its `block`,
+  with `at` (a `DateTime.Utc`, epoch milliseconds on the wire). An
+  assistant's message has its `block`,
   if it has one: its `kind` and `props`, its `status` (`"open"`,
   `"answered"`, or `"closed"`), and the user's `answer`. Between them, an
   item for each of your events the timeline shows, and for each tool call
