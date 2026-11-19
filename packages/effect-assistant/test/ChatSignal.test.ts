@@ -490,6 +490,32 @@ describe("ChatSignal", () => {
     })
   )
 
+  it.live("keeps the line when the summary has nothing new, and tells it what was shown", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>()
+      const tools = yield* harness({ report: Effect.void, lookup: Effect.sleep("600 millis") })
+      const summary = yield* summarizing("-", { after: "50 millis", staleAfter: "100 millis" })
+
+      const script = callsThenAnswer(
+        ["campaign_report", { campaignId: "summer", description: STATUS }],
+        ["lookup", { campaignId: "summer" }]
+      )
+
+      const { items } = yield* liveTurn(gate, "Find last summer's campaign.").pipe(
+        Effect.provide(
+          runMemory(
+            TestAssistant.toLayer(gatedHandler(gate, tools.tools)).pipe(Layer.provide(summary.layer)),
+            Scripted.layer(script)
+          )
+        )
+      )
+
+      const reads = yield* summary.model.requests
+      expect(reads.some((read) => Scripted.lastInput(read).includes(`Shown so far: "${STATUS}"`))).toBe(true)
+      expect(items.flatMap(label).filter((line) => line.startsWith("Status"))).toEqual([`Status: ${STATUS}`])
+    })
+  )
+
   it.live("shows no summary for what the handler does after the reply", () =>
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>()

@@ -57,13 +57,33 @@ const runningCalls = (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => {
   )
 }
 
-// The latest messages, as plain lines, and what still runs: the summary's model gets no tools, so no tool call parts.
-/** @internal */
-export const transcript = (entries: ReadonlyArray<AssistantEvent.AnyEntry>): string => {
-  const running = runningCalls(entries)
-  const lastLines = History.fromEntries(entries).slice(-MAX_MESSAGES).flatMap(lines)
+const MAX_EARLIER = 4
 
-  return [...lastLines, ...(running.length === 0 ? [] : [`Running now: ${running.join(", ")}`])].join("\n")
+// The turn's input follows the end of the turn before it.
+const turnStart = (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => {
+  const started = entries.findLastIndex(({ event }) => Predicate.isTagged(event, "TurnStarted"))
+
+  return entries.slice(0, Math.max(started, 0)).findLastIndex(({ event }) => AssistantEvent.isTurnEnd(event)) + 1
+}
+
+// This turn's messages as plain lines, after a few earlier ones that are only context, with what still runs and the
+// lines the user saw: the summary's model gets no tools, so no tool call parts.
+/** @internal */
+export const transcript = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, shown: ReadonlyArray<string>): string => {
+  const start = turnStart(entries)
+  const all = History.fromEntries(entries)
+  const earlierCount = Math.min(History.fromEntries(entries.slice(0, start)).length, all.length)
+  const earlier = all.slice(0, earlierCount).slice(-MAX_EARLIER).flatMap(lines)
+  const now = all.slice(earlierCount).slice(-MAX_MESSAGES).flatMap(lines)
+  const running = runningCalls(entries.slice(start))
+
+  return [
+    ...(earlier.length === 0 ? [] : ["Earlier in the chat:", ...earlier, ""]),
+    "This turn:",
+    ...now,
+    ...(running.length === 0 ? [] : [`Running now: ${running.join(", ")}`]),
+    ...(shown.length === 0 ? [] : ["", `Shown so far: ${shown.map((line) => `"${line}"`).join(", ")}`])
+  ].join("\n")
 }
 
 const lastSequence = (entries: ReadonlyArray<AssistantEvent.AnyEntry>) => entries.at(-1)?.sequence ?? 0
@@ -113,7 +133,7 @@ export const run = Effect.fnUntraced(function* (
       return
     }
 
-    const written = yield* summary.summarize(transcript(entries))
+    const written = yield* summary.summarize(transcript(entries, current.lines))
 
     yield* Ref.set(summarized, through)
 
