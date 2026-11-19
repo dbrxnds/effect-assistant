@@ -18,6 +18,8 @@ export interface State {
   readonly shown: string | undefined
   /** When the line last changed, or the turn started, in epoch milliseconds. */
   readonly shownAt: number
+  /** Every line the turn showed, oldest first. */
+  readonly lines: ReadonlyArray<string>
   readonly typing: boolean
 }
 
@@ -54,6 +56,7 @@ export const make = Effect.fnUntraced(function* (send: (signal: ChatSignal.ChatS
     running: [],
     shown: undefined,
     shownAt: yield* Clock.currentTimeMillis,
+    lines: [],
     typing: false
   })
 
@@ -77,7 +80,7 @@ export const make = Effect.fnUntraced(function* (send: (signal: ChatSignal.ChatS
   const show = (current: State, text: string, now: number): readonly [ReadonlyArray<ChatSignal.ChatSignal>, State] =>
     current.shown === text
       ? [[], current]
-      : [[ChatSignal.Status.make({ text })], { ...current, shown: text, shownAt: now }]
+      : [[ChatSignal.Status.make({ text })], { ...current, shown: text, shownAt: now, lines: [...current.lines, text] }]
 
   const live: Live = {
     callStarted: (callId, text) =>

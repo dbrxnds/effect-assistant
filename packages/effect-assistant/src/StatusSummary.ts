@@ -7,8 +7,9 @@
  * Without it, a turn shows only the statuses its tool calls write (see `ToolStatus`). The summary
  * is a `ChatSignal.Status` like any other: it is never stored and the turn's model never reads it.
  * It never replaces the status of a described call that still runs, never shows while the model
- * writes to the user, and never after the turn's message unless the model starts new work. A
- * summary that says what the line says already isn't sent.
+ * writes to the user, and never after the turn's message unless the model starts new work. The
+ * model reads this turn, after a few earlier messages as context, and the lines the turn showed so
+ * far, and answers `-` when nothing new happened since: then the line stays as it is.
  *
  * @since 0.13.0
  */
@@ -27,7 +28,7 @@ import * as Option from "effect/Option"
  * @since 0.13.0
  */
 export const defaultInstructions =
-  'You write the status line a chat shows while an assistant works for its user. Read what the assistant did so far in this turn and say what it is doing now, in 3 to 5 plain words, in the language the user writes in, like "Comparing last year\'s budgets". No tool names, ids, code, quotes or final period. Answer with the status only.'
+  'You write the status line a chat shows while an assistant works for its user. Read this turn and say what the assistant is doing now, in 3 to 5 plain words, in the language the user writes in, like "Comparing last year\'s budgets". Earlier in the chat is only context: never describe it. Never say again, in any words, what a line shown so far says; when nothing new happened since, answer with -. No tool names, ids, code, quotes or final period. Answer with the status only.'
 
 /**
  * Represents the options accepted by {@link layer}.
@@ -56,8 +57,9 @@ export class StatusSummary extends Context.Service<
     readonly after: Duration.Duration
     readonly staleAfter: Duration.Duration
     /**
-     * Returns the status for a turn, from its transcript: the user's input and what the assistant
-     * did since. `None` when the model wrote nothing usable or its call failed.
+     * Returns the status for a turn, from its transcript: this turn after a few earlier messages,
+     * what still runs, and the lines shown so far. `None` when the model has nothing new, wrote
+     * nothing usable, or its call failed.
      */
     readonly summarize: (transcript: string) => Effect.Effect<Option.Option<string>>
   }
@@ -71,7 +73,7 @@ const clean = (text: string): Option.Option<string> => {
     .replace(/[.…]+$/, "")
     .trim()
 
-  return line === "" || line.length > MAX_LENGTH ? Option.none() : Option.some(line)
+  return line === "" || /^[-–—]+$/.test(line) || line.length > MAX_LENGTH ? Option.none() : Option.some(line)
 }
 
 /**
