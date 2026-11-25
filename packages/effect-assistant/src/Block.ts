@@ -103,10 +103,10 @@ export const NoProps = Schema.Struct({})
  * @category models
  * @since 0.5.0
  */
-export interface ToolResultBlock<T extends Tool.Any = Tool.Any> extends Block<
+export interface ToolResultBlock<T extends Tool.Any = Tool.Any, Answer extends Codec = Codec> extends Block<
   Tool.Name<T>,
   typeof NoProps,
-  Schema.Never
+  Answer
 > {
   readonly tool: T
   /** The tool's success schema, which the client decodes the result with. */
@@ -127,6 +127,10 @@ export interface ToolResultBlock<T extends Tool.Any = Tool.Any> extends Block<
  * success schema. The tool's definition is shared with the client for that, so it can't need
  * server-only services: add those on the server with `Tool.addDependency`.
  *
+ * With an `answer` schema, the user can act on the result, e.g. tick some of the items it found,
+ * and the block sends that back like any other block's answer. Without one, it only shows the
+ * result.
+ *
  * **Example** (Showing search results as cards)
  *
  * ```ts
@@ -142,16 +146,39 @@ export interface ToolResultBlock<T extends Tool.Any = Tool.Any> extends Block<
  * })
  * ```
  *
+ * **Example** (Letting the user pick some of the results)
+ *
+ * ```ts
+ * import { Block } from "effect-assistant"
+ * import * as Schema from "effect/Schema"
+ * import { SearchAssets } from "./tools.ts"
+ *
+ * const PickAssets = Block.fromToolResult(SearchAssets, {
+ *   answer: Schema.Struct({ picked: Schema.Array(Schema.String) })
+ * })
+ *
+ * // Client
+ * const search_assets = ({ result, open, answer, respond }) => (
+ *   <AssetPicker
+ *     assets={result.items}
+ *     picked={answer?.picked}
+ *     disabled={!open}
+ *     onSubmit={(picked) => respond({ picked })}
+ *   />
+ * )
+ * ```
+ *
  * @category constructors
  * @since 0.5.0
  */
-export const fromToolResult = <T extends Tool.Any>(
-  tool: T & { readonly successSchema: Codec }
-): ToolResultBlock<T> => ({
+export const fromToolResult = <T extends Tool.Any, Answer extends Codec = Schema.Never>(
+  tool: T & { readonly successSchema: Codec },
+  options?: { readonly answer?: Answer | undefined }
+): ToolResultBlock<T, Answer> => ({
   kind: tool.name,
   description: `Shows a ${tool.name} result.`,
   props: NoProps,
-  answer: undefined,
+  answer: options?.answer,
   tool,
   result: tool.successSchema
 })
