@@ -3,6 +3,7 @@ import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
+import * as Tool from "effect/ai/Tool"
 import { AssistantEvent, Block, BlockKit, ChatId, Timeline, InputId } from "../src/index.ts"
 import { say } from "./utils/fixtures.ts"
 
@@ -97,6 +98,53 @@ describe("BlockKit.toClient", () => {
 
     expect(shown("m3")).toBeUndefined()
     expect(shown("m4", AssistantEvent.MessageBlock.make({ kind: "mystery", props: {} }))).toBeUndefined()
+  })
+})
+
+describe("BlockKit.toClient with a tool result to pick from", () => {
+  const SearchItems = Tool.make("search_items", {
+    description: "Search the catalog.",
+    parameters: Schema.Struct({ query: Schema.String }),
+    success: Schema.Struct({ items: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })) })
+  })
+
+  const PickItems = Block.fromToolResult(SearchItems, {
+    answer: Schema.Struct({ picked: Schema.Array(Schema.String) })
+  })
+
+  const render = BlockKit.toClient(BlockKit.make([PickItems]), {
+    search_items: ({ result, open, answer, respond }) => {
+      if (open) respond({ picked: [result.items[1]!.id] })
+
+      return answer === undefined ? result.items.map(({ name }) => name).join("/") : `picked ${answer.picked.join("/")}`
+    }
+  })
+
+  const block = {
+    kind: "search_items",
+    props: {},
+    result: {
+      items: [
+        { id: "a", name: "Mug" },
+        { id: "b", name: "Cap" }
+      ]
+    }
+  }
+
+  const shown = (shownBlock: Timeline.Block) =>
+    Timeline.AssistantMessage.make({ id: "m1", text: "Which ones?", at: DateTime.makeUnsafe(0), block: shownBlock })
+
+  it("sends what the user picked from the result as the block's answer", () => {
+    const sent: Array<AssistantEvent.BlockAnswer> = []
+
+    expect(render(shown({ ...block, status: "open" }), { respond: (a) => sent.push(a) })).toBe("Mug/Cap")
+    expect(sent).toMatchObject([{ messageId: "m1", kind: "search_items", value: { picked: ["b"] } }])
+  })
+
+  it("passes the answer once there is one", () => {
+    expect(render(shown({ ...block, status: "answered", answer: { picked: ["b"] } }), { respond: () => {} })).toBe(
+      "picked b"
+    )
   })
 })
 
