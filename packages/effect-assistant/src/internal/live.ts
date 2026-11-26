@@ -27,7 +27,7 @@ export interface State {
 export interface Live {
   readonly callStarted: (callId: string, text: string) => Effect.Effect<void>
   readonly callEnded: (callId: string) => Effect.Effect<void>
-  // A summary's line: shown unless the model started a message, or the last line said it already.
+  // A summary's line: shown unless the model started a message, or the line says it already.
   readonly summarized: (text: string) => Effect.Effect<void>
   readonly typing: (typing: boolean) => Effect.Effect<void>
   readonly state: Effect.Effect<State>
@@ -89,7 +89,7 @@ export const make = Effect.fnUntraced(function* (send: (signal: ChatSignal.ChatS
 
         return current.typing ? [[], running] : show(running, text, now)
       }),
-    // The line goes when the last labelled call ends; while another runs, the line says that one.
+    // The line stays when the last labelled call ends; while another runs, the line says that one.
     callEnded: (callId) =>
       change((current, now) => {
         const ended = current.running.find((call) => call.callId === callId)
@@ -99,10 +99,8 @@ export const make = Effect.fnUntraced(function* (send: (signal: ChatSignal.ChatS
         const next = { ...current, running: current.running.filter((call) => call.callId !== callId) }
         const still = next.running.at(-1)
 
-        if (current.typing || current.shown !== ended.text) return [[], next]
-
-        return still === undefined
-          ? [[ChatSignal.StatusCleared.make({})], { ...next, shown: undefined, shownAt: now }]
+        return still === undefined || current.typing || current.shown !== ended.text
+          ? [[], next]
           : show(next, still.text, now)
       }),
     summarized: (text) =>
@@ -111,9 +109,7 @@ export const make = Effect.fnUntraced(function* (send: (signal: ChatSignal.ChatS
           ? undefined
           : current.shown === text
             ? [[], { ...current, shownAt: now }]
-            : current.lines.at(-1) === text
-              ? undefined
-              : show(current, text, now)
+            : show(current, text, now)
       ),
     typing: (typing) =>
       change((current, now) => {

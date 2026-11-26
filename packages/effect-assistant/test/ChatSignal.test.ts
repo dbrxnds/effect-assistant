@@ -157,7 +157,7 @@ const timelineOf = (items: ReadonlyArray<Item>) =>
   )
 
 describe("ChatSignal", () => {
-  it.effect("goes started → status → cleared → typing → message → finished", () =>
+  it.effect("goes started → status → typing → message → finished; the status stays after its call", () =>
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>()
       const tools = yield* harness({ report: Effect.void })
@@ -171,7 +171,6 @@ describe("ChatSignal", () => {
       expect(items.flatMap(label)).toEqual([
         "TurnStarted",
         `Status: ${STATUS}`,
-        "StatusCleared",
         "TypingStarted",
         "AssistantMessage",
         "TypingStopped",
@@ -185,7 +184,7 @@ describe("ChatSignal", () => {
     })
   )
 
-  it.effect("shows the status on the timeline while its call runs, and nothing once it ends", () =>
+  it.effect("shows the status on the timeline until typing hides it, and nothing once the turn ends", () =>
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>()
       const tools = yield* harness({ report: Effect.void })
@@ -197,10 +196,10 @@ describe("ChatSignal", () => {
       )
 
       const activities = timelineOf(items).map((timeline) => timeline.activity)
-      const shown = activities.findIndex((activity) => activity.status === STATUS)
+      const typing = activities.findIndex((activity) => activity.typing)
 
-      expect(shown).toBeGreaterThan(-1)
-      expect(activities[shown + 1]?.status).toBeUndefined()
+      expect(activities[typing - 1]?.status).toBe(STATUS)
+      expect(activities[typing]?.status).toBeUndefined()
       expect(activities.at(-1)).toEqual({ working: false, specialists: [], typing: false })
     })
   )
@@ -224,7 +223,6 @@ describe("ChatSignal", () => {
         `Status: ${STATUS}`,
         `Status: ${PLAN}`,
         `Status: ${STATUS}`,
-        "StatusCleared",
         "TypingStarted",
         "AssistantMessage",
         "TypingStopped",
@@ -439,7 +437,7 @@ describe("ChatSignal", () => {
     })
   )
 
-  it.live("fills the line a call left with a summary while other work runs", () =>
+  it.live("refreshes a call's status that stays after the call while other work runs", () =>
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>()
       const tools = yield* harness({ report: Effect.void, lookup: Effect.sleep("600 millis") })
@@ -461,14 +459,13 @@ describe("ChatSignal", () => {
 
       expect(items.flatMap(label).filter((line) => line.startsWith("Status") || line === "TypingStarted")).toEqual([
         `Status: ${STATUS}`,
-        "StatusCleared",
         "Status: Looking up the campaign",
         "TypingStarted"
       ])
     })
   )
 
-  it.live("sends no summary that says what the last line said already", () =>
+  it.live("sends no summary that says what the line says already", () =>
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>()
       const tools = yield* harness({ report: Effect.void, lookup: Effect.sleep("600 millis") })
@@ -489,14 +486,11 @@ describe("ChatSignal", () => {
       )
 
       expect((yield* summary.model.requests).length).toBeGreaterThan(0)
-      expect(items.flatMap(label).filter((line) => line.startsWith("Status"))).toEqual([
-        `Status: ${STATUS}`,
-        "StatusCleared"
-      ])
+      expect(items.flatMap(label).filter((line) => line.startsWith("Status"))).toEqual([`Status: ${STATUS}`])
     })
   )
 
-  it.live("shows nothing when the summary has nothing new, and tells it what was shown", () =>
+  it.live("keeps the line when the summary has nothing new, and tells it what was shown", () =>
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>()
       const tools = yield* harness({ report: Effect.void, lookup: Effect.sleep("600 millis") })
@@ -518,10 +512,7 @@ describe("ChatSignal", () => {
 
       const reads = yield* summary.model.requests
       expect(reads.some((read) => Scripted.lastInput(read).includes(`Shown so far: "${STATUS}"`))).toBe(true)
-      expect(items.flatMap(label).filter((line) => line.startsWith("Status"))).toEqual([
-        `Status: ${STATUS}`,
-        "StatusCleared"
-      ])
+      expect(items.flatMap(label).filter((line) => line.startsWith("Status"))).toEqual([`Status: ${STATUS}`])
     })
   )
 
@@ -569,7 +560,6 @@ describe("ChatSignal", () => {
       expect(items.flatMap(label)).toEqual([
         "TurnStarted",
         `Status: ${STATUS}`,
-        "StatusCleared",
         "TypingStarted",
         "AssistantMessage",
         "TypingStopped",

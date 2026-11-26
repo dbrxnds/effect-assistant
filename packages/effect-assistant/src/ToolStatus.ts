@@ -5,9 +5,9 @@
  * Give the tools that take a while or act on something a status field with {@link withStatus}:
  * workflows, reports from other systems, orders, specialists. Their parameters get an optional
  * `activity` field that the model fills in the chat's language. When the call starts, the chat
- * sends the activity as a `ChatSignal.Status`; once the last such call ends, a
- * `ChatSignal.StatusCleared` takes the line away. The call runs unchanged: the handler gets
- * `activity` with its other parameters. Quick reads need no label: the chat shows its generic
+ * sends the activity as a `ChatSignal.Status`; it shows until the next status, so it stays
+ * while the model works out its next step. The call runs unchanged: the handler gets `activity`
+ * with its other parameters. Quick reads need no label: the chat shows its generic
  * working state for them.
  *
  * @since 0.13.0

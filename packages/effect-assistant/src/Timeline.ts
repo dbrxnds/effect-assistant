@@ -632,7 +632,6 @@ const applySignal = (live: LiveState, signal: ChatSignal.ChatSignal): LiveState 
   Match.value(signal).pipe(
     Match.tagsExhaustive({
       Status: ({ text }): LiveState => ({ ...live, status: text }),
-      StatusCleared: (): LiveState => ({ ...live, status: undefined }),
       TypingStarted: (): LiveState => ({ status: undefined, typing: true }),
       TypingStopped: (): LiveState => ({ ...live, typing: false })
     })
