@@ -2,8 +2,10 @@ import * as AiError from "effect/ai/AiError"
 import type * as Prompt from "effect/ai/Prompt"
 import type * as Tool from "effect/ai/Tool"
 import type * as Toolkit from "effect/ai/Toolkit"
+import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as ErrorReporter from "effect/ErrorReporter"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
@@ -103,7 +105,8 @@ const needsApprovalNative = Effect.fnUntraced(function* <T extends Record<string
 const isParams = <T>(params: unknown): params is Tool.ParametersEncoded<T> => params !== undefined
 
 // Every failure is the call's result, for the model to read. With `failureMode: "return"` the toolkit encodes the
-// tool's own failure with its schema first.
+// tool's own failure with its schema first. A handler that dies is reported, and the model reads that the call
+// failed, so one broken tool doesn't end the turn.
 /** @internal */
 export const runNative = Effect.fnUntraced(function* <T extends Record<string, Tool.Any>>(
   toolkit: Toolkit.WithHandler<T>,
@@ -144,6 +147,11 @@ export const runNative = Effect.fnUntraced(function* <T extends Record<string, T
     Effect.catch((error) =>
       Effect.succeed(
         AiError.isAiError(error) ? failed(error.reason.message, error.reason._tag) : failure(toJson(error))
+      )
+    ),
+    Effect.catchDefect((defect) =>
+      ErrorReporter.report(Cause.die(defect)).pipe(
+        Effect.as(failed(`${call.name} failed unexpectedly; it may work if tried later.`, "UnexpectedError"))
       )
     ),
     Effect.provideService(AssistantToolCall, { callId: call.id, tool: call.name })
