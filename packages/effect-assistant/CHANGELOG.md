@@ -1,5 +1,11 @@
 # effect-assistant
 
+## 0.18.1
+
+### Patch Changes
+
+- e5a988c: A tool handler that dies no longer ends the turn: the defect goes to the `ErrorReporter`, and the model reads that the call failed unexpectedly, so it can tell the user and carry on.
+
 ## 0.18.0
 
 ### Minor Changes
