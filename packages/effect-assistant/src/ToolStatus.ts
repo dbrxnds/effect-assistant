@@ -3,11 +3,12 @@
  * short line about what the assistant is doing, like "Checking last summer's campaign budget".
  *
  * Give the tools that take a while or act on something a status field with {@link withStatus}:
- * workflows, reports from other systems, orders, specialists. Their parameters get a required
- * `description` field that the model fills in the chat's language. When the call starts, the chat
- * sends the description as a `ChatSignal.Status`; it shows until the next status, so it stays
- * after the call ends. The call runs unchanged: the handler gets `description` with its other
- * parameters. Quick reads need no label: the chat shows its generic working state for them.
+ * workflows, reports from other systems, orders, specialists. Their parameters get an optional
+ * `activity` field that the model fills in the chat's language. When the call starts, the chat
+ * sends the activity as a `ChatSignal.Status`; once the last such call ends, a
+ * `ChatSignal.StatusCleared` takes the line away. The call runs unchanged: the handler gets
+ * `activity` with its other parameters. Quick reads need no label: the chat shows its generic
+ * working state for them.
  *
  * @since 0.13.0
  */
@@ -21,7 +22,7 @@ import * as SchemaAST from "effect/SchemaAST"
  * @category constants
  * @since 0.13.0
  */
-export const parameterName = "description"
+export const parameterName = "activity"
 
 /**
  * What the model reads about the parameter.
@@ -30,7 +31,7 @@ export const parameterName = "description"
  * @since 0.13.0
  */
 export const parameterDescription =
-  "Shown to the user while this runs: 3 to 8 plain words in the user's language about what you're doing, like \"Checking last summer's campaign budget\". No tool names, ids or code."
+  "What you're doing with this call, in a few plain words the user sees while it runs. Write it from their side, with no tool names, and don't repeat something they've already seen this turn. Leave it out if there's nothing worth showing."
 
 const statusFieldKey = "effect-assistant/ToolStatus/statusField"
 
@@ -40,16 +41,18 @@ const statusFieldKey = "effect-assistant/ToolStatus/statusField"
  * @category schemas
  * @since 0.16.0
  */
-export const StatusField = Schema.String.annotate({ description: parameterDescription, [statusFieldKey]: true })
+export const StatusField = Schema.String.annotate({ description: parameterDescription, [statusFieldKey]: true }).pipe(
+  Schema.optionalKey
+)
 
 /**
- * The parameter fields a struct can't have to take a status field: a `description` field of its own.
+ * The parameter fields a struct can't have to take a status field: an `activity` field of its own.
  *
  * @category models
  * @since 0.16.0
  */
 export type WithoutStatus<Fields extends Schema.Struct.Fields> = typeof parameterName extends keyof Fields
-  ? "Error: these parameters have a description field already, so they can't take a status: rename it"
+  ? "Error: these parameters have an activity field already, so they can't take a status: rename it"
   : unknown
 
 /**
@@ -57,12 +60,11 @@ export type WithoutStatus<Fields extends Schema.Struct.Fields> = typeof paramete
  *
  * **Details**
  *
- * The struct gets a required `description` field ({@link StatusField}), and keeps its own
- * annotations and checks. Required, because models leave optional parameters out. The chat shows
- * what the model writes there while the call runs; a call with a blank one runs with no status,
- * and a call without it fails validation like a call without any other required parameter. The
- * handler gets `description` like any other parameter. A struct that has a `description` field
- * already is a type error. A tool without parameters takes `Schema.Struct({})`.
+ * The struct gets an optional `activity` field ({@link StatusField}), and keeps its own annotations
+ * and checks. The chat shows what the model writes there while the call runs; a call without one,
+ * or with a blank one, runs with no status. The handler gets `activity` like any other parameter.
+ * A struct that has an `activity` field already is a type error. A tool without parameters takes
+ * `Schema.Struct({})`.
  *
  * **Example** (A tool whose calls show a status)
  *
@@ -98,7 +100,7 @@ export const withStatus = <Fields extends Schema.Struct.Fields>(
 
 /**
  * Returns whether a tool's calls show a status: its parameters have the field {@link withStatus}
- * adds. A `description` parameter of its own doesn't count.
+ * adds. An `activity` parameter of its own doesn't count.
  *
  * @category guards
  * @since 0.13.0

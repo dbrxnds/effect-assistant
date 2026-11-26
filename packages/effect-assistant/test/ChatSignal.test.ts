@@ -55,7 +55,7 @@ const Lookup = Tool.make("lookup", {
 
 const ArchiveNote = Tool.make("archive_note", {
   description: "Archives a note.",
-  parameters: Schema.Struct({ noteId: Schema.String, description: Schema.String }),
+  parameters: Schema.Struct({ noteId: Schema.String, activity: Schema.String }),
   success: Schema.Struct({ archived: Schema.Boolean })
 })
 
@@ -126,7 +126,7 @@ const liveTurn = Effect.fnUntraced(function* (gate: Deferred.Deferred<void>, tex
 /** The model: the report with a status, then the answer. */
 const reportThenAnswer: Scripted.Script = (request) =>
   Option.isNone(Scripted.result(request, "campaign_report"))
-    ? [Scripted.call("campaign_report", { campaignId: "summer", description: STATUS })]
+    ? [Scripted.call("campaign_report", { campaignId: "summer", activity: STATUS })]
     : Scripted.reply("Last summer's campaign spent 1,200.")
 
 /** The turn's model: these calls first, then the answer. */
@@ -157,7 +157,7 @@ const timelineOf = (items: ReadonlyArray<Item>) =>
   )
 
 describe("ChatSignal", () => {
-  it.effect("goes started → status → typing → message → finished; the status stays after its call", () =>
+  it.effect("goes started → status → cleared → typing → message → finished", () =>
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>()
       const tools = yield* harness({ report: Effect.void })
@@ -171,20 +171,21 @@ describe("ChatSignal", () => {
       expect(items.flatMap(label)).toEqual([
         "TurnStarted",
         `Status: ${STATUS}`,
+        "StatusCleared",
         "TypingStarted",
         "AssistantMessage",
         "TypingStopped",
         "TurnCompleted"
       ])
 
-      expect(yield* tools.received).toEqual([{ campaignId: "summer", description: STATUS }])
+      expect(yield* tools.received).toEqual([{ campaignId: "summer", activity: STATUS }])
 
       // Never stored: the log has no trace of them.
       expect(stored.some(({ event }) => ChatSignal.isChatSignal(event))).toBe(false)
     })
   )
 
-  it.effect("shows the status on the timeline until typing hides it, and nothing once the turn ends", () =>
+  it.effect("shows the status on the timeline while its call runs, and nothing once it ends", () =>
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>()
       const tools = yield* harness({ report: Effect.void })
@@ -196,10 +197,10 @@ describe("ChatSignal", () => {
       )
 
       const activities = timelineOf(items).map((timeline) => timeline.activity)
-      const typing = activities.findIndex((activity) => activity.typing)
+      const shown = activities.findIndex((activity) => activity.status === STATUS)
 
-      expect(activities[typing - 1]?.status).toBe(STATUS)
-      expect(activities[typing]?.status).toBeUndefined()
+      expect(shown).toBeGreaterThan(-1)
+      expect(activities[shown + 1]?.status).toBeUndefined()
       expect(activities.at(-1)).toEqual({ working: false, specialists: [], typing: false })
     })
   )
@@ -210,8 +211,8 @@ describe("ChatSignal", () => {
       const tools = yield* harness({ report: Effect.sleep("200 millis") })
 
       const script = callsThenAnswer(
-        ["campaign_report", { campaignId: "summer", description: STATUS }],
-        ["campaign_plan", { campaignId: "summer", description: PLAN }]
+        ["campaign_report", { campaignId: "summer", activity: STATUS }],
+        ["campaign_plan", { campaignId: "summer", activity: PLAN }]
       )
 
       const { items } = yield* liveTurn(gate, "Plan the summer campaign.").pipe(
@@ -223,6 +224,7 @@ describe("ChatSignal", () => {
         `Status: ${STATUS}`,
         `Status: ${PLAN}`,
         `Status: ${STATUS}`,
+        "StatusCleared",
         "TypingStarted",
         "AssistantMessage",
         "TypingStopped",
@@ -231,7 +233,7 @@ describe("ChatSignal", () => {
     })
   )
 
-  it.effect("offers the status parameter, required, only on described tools", () =>
+  it.effect("offers the status parameter, optional, only on described tools", () =>
     Effect.gen(function* () {
       const model = yield* Scripted.make(reportThenAnswer)
       const gate = yield* Deferred.make<void>()
@@ -246,17 +248,17 @@ describe("ChatSignal", () => {
 
       expect(schemas.get("campaign_report")).toMatchObject({
         properties: { [ToolStatus.parameterName]: { type: "string" } },
-        required: expect.arrayContaining(["campaignId", ToolStatus.parameterName])
+        required: ["campaignId"]
       })
       expect(JSON.stringify(schemas.get("lookup"))).not.toContain(ToolStatus.parameterName)
     })
   )
 
-  it.effect("shows no status for a description parameter the tool has of its own", () =>
+  it.effect("shows no status for an activity parameter the tool has of its own", () =>
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>()
       const tools = yield* harness({ report: Effect.void })
-      const script = callsThenAnswer(["archive_note", { noteId: "n1", description: "Old ideas" }])
+      const script = callsThenAnswer(["archive_note", { noteId: "n1", activity: "Old ideas" }])
 
       const { items } = yield* liveTurn(gate, "Archive the old ideas note.").pipe(
         Effect.provide(runMemory(TestAssistant.toLayer(gatedHandler(gate, tools.tools)), Scripted.layer(script)))
@@ -269,7 +271,7 @@ describe("ChatSignal", () => {
         "TypingStopped",
         "TurnCompleted"
       ])
-      expect(yield* tools.received).toEqual([{ noteId: "n1", description: "Old ideas" }])
+      expect(yield* tools.received).toEqual([{ noteId: "n1", activity: "Old ideas" }])
       expect(ToolStatus.isDescribed(ArchiveNote)).toBe(false)
     })
   )
@@ -278,7 +280,7 @@ describe("ChatSignal", () => {
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>()
       const tools = yield* harness({ report: Effect.void })
-      const script = callsThenAnswer(["campaign_report", { campaignId: "summer", description: "  " }])
+      const script = callsThenAnswer(["campaign_report", { campaignId: "summer", activity: "  " }])
 
       const { items } = yield* liveTurn(gate, "What did it cost?").pipe(
         Effect.provide(runMemory(TestAssistant.toLayer(gatedHandler(gate, tools.tools)), Scripted.layer(script)))
@@ -291,11 +293,11 @@ describe("ChatSignal", () => {
         "TypingStopped",
         "TurnCompleted"
       ])
-      expect(yield* tools.received).toEqual([{ campaignId: "summer", description: "  " }])
+      expect(yield* tools.received).toEqual([{ campaignId: "summer", activity: "  " }])
     })
   )
 
-  it.effect("runs a described call without its status as one with invalid params, and shows none", () =>
+  it.effect("runs a described call without its status, and shows none", () =>
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>()
       const tools = yield* harness({ report: Effect.void })
@@ -312,12 +314,12 @@ describe("ChatSignal", () => {
         "TypingStopped",
         "TurnCompleted"
       ])
-      expect(yield* tools.received).toEqual([])
+      expect(yield* tools.received).toEqual([{ campaignId: "summer" }])
       expect(
         stored.flatMap(({ event }) =>
           Predicate.isTagged(event, "ToolResult") && event.tool === "campaign_report" ? [event.outcome] : []
         )
-      ).toEqual(["failure"])
+      ).toEqual(["success"])
     })
   )
 
@@ -327,15 +329,15 @@ describe("ChatSignal", () => {
 
     expect(Object.keys(WithStatus.fields)).toEqual(["noteId", ToolStatus.parameterName])
     expect(SchemaAST.resolveTitle(WithStatus.ast)).toBe("ArchiveParams")
-    expect(Schema.decodeUnknownSync(WithStatus)({ noteId: "n1", description: STATUS })).toEqual({
+    expect(Schema.decodeUnknownSync(WithStatus)({ noteId: "n1", activity: STATUS })).toEqual({
       noteId: "n1",
-      description: STATUS
+      activity: STATUS
     })
     expect(ToolStatus.isDescribed(CampaignReport)).toBe(true)
     expect(ToolStatus.isDescribed(Lookup)).toBe(false)
 
     // @ts-expect-error
-    Schema.Struct({ description: Schema.String }).pipe(ToolStatus.withStatus)
+    Schema.Struct({ activity: Schema.String }).pipe(ToolStatus.withStatus)
   })
 
   it.effect("stops the typing and clears the line when the turn fails mid-tool", () =>
@@ -346,7 +348,7 @@ describe("ChatSignal", () => {
       // The model writes to the user and runs the report in the same step: the report fails the turn.
       const script: Scripted.Script = () => [
         Scripted.call("send_user_message", { text: "Looking it up." }),
-        Scripted.call("campaign_report", { campaignId: "summer", description: STATUS })
+        Scripted.call("campaign_report", { campaignId: "summer", activity: STATUS })
       ]
 
       const { items } = yield* liveTurn(gate, "What did it cost?").pipe(
@@ -370,7 +372,7 @@ describe("ChatSignal", () => {
       const script: Scripted.Script = (request) => {
         if (Option.isSome(Scripted.result(request, "campaign_report"))) throw new Error("model overloaded")
 
-        return [Scripted.call("campaign_report", { campaignId: "summer", description: STATUS })]
+        return [Scripted.call("campaign_report", { campaignId: "summer", activity: STATUS })]
       }
 
       const { items } = yield* liveTurn(gate, "What did it cost?").pipe(
@@ -437,14 +439,14 @@ describe("ChatSignal", () => {
     })
   )
 
-  it.live("refreshes a call's status that stays after the call while other work runs", () =>
+  it.live("fills the line a call left with a summary while other work runs", () =>
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>()
       const tools = yield* harness({ report: Effect.void, lookup: Effect.sleep("600 millis") })
       const summary = yield* summarizing("Looking up the campaign", { after: "50 millis", staleAfter: "150 millis" })
 
       const script = callsThenAnswer(
-        ["campaign_report", { campaignId: "summer", description: STATUS }],
+        ["campaign_report", { campaignId: "summer", activity: STATUS }],
         ["lookup", { campaignId: "summer" }]
       )
 
@@ -459,20 +461,21 @@ describe("ChatSignal", () => {
 
       expect(items.flatMap(label).filter((line) => line.startsWith("Status") || line === "TypingStarted")).toEqual([
         `Status: ${STATUS}`,
+        "StatusCleared",
         "Status: Looking up the campaign",
         "TypingStarted"
       ])
     })
   )
 
-  it.live("sends no summary that says what the line says already", () =>
+  it.live("sends no summary that says what the last line said already", () =>
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>()
       const tools = yield* harness({ report: Effect.void, lookup: Effect.sleep("600 millis") })
       const summary = yield* summarizing(STATUS, { after: "50 millis", staleAfter: "100 millis" })
 
       const script = callsThenAnswer(
-        ["campaign_report", { campaignId: "summer", description: STATUS }],
+        ["campaign_report", { campaignId: "summer", activity: STATUS }],
         ["lookup", { campaignId: "summer" }]
       )
 
@@ -486,18 +489,21 @@ describe("ChatSignal", () => {
       )
 
       expect((yield* summary.model.requests).length).toBeGreaterThan(0)
-      expect(items.flatMap(label).filter((line) => line.startsWith("Status"))).toEqual([`Status: ${STATUS}`])
+      expect(items.flatMap(label).filter((line) => line.startsWith("Status"))).toEqual([
+        `Status: ${STATUS}`,
+        "StatusCleared"
+      ])
     })
   )
 
-  it.live("keeps the line when the summary has nothing new, and tells it what was shown", () =>
+  it.live("shows nothing when the summary has nothing new, and tells it what was shown", () =>
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>()
       const tools = yield* harness({ report: Effect.void, lookup: Effect.sleep("600 millis") })
       const summary = yield* summarizing("-", { after: "50 millis", staleAfter: "100 millis" })
 
       const script = callsThenAnswer(
-        ["campaign_report", { campaignId: "summer", description: STATUS }],
+        ["campaign_report", { campaignId: "summer", activity: STATUS }],
         ["lookup", { campaignId: "summer" }]
       )
 
@@ -512,7 +518,10 @@ describe("ChatSignal", () => {
 
       const reads = yield* summary.model.requests
       expect(reads.some((read) => Scripted.lastInput(read).includes(`Shown so far: "${STATUS}"`))).toBe(true)
-      expect(items.flatMap(label).filter((line) => line.startsWith("Status"))).toEqual([`Status: ${STATUS}`])
+      expect(items.flatMap(label).filter((line) => line.startsWith("Status"))).toEqual([
+        `Status: ${STATUS}`,
+        "StatusCleared"
+      ])
     })
   )
 
@@ -560,6 +569,7 @@ describe("ChatSignal", () => {
       expect(items.flatMap(label)).toEqual([
         "TurnStarted",
         `Status: ${STATUS}`,
+        "StatusCleared",
         "TypingStarted",
         "AssistantMessage",
         "TypingStopped",
