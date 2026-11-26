@@ -12,7 +12,7 @@ timeline and nothing else.
 A `Timeline` holds the chat's items: the messages with their blocks, the app's own events
 it shows (each typed with its event, see `EventItem`), and the tool calls waiting for the
 user's approval (`ApprovalItem`). It also holds the chat's
-`Activity`, and whether the last turn failed or the chat was deleted. It never contains the
+`Status`, and whether the last turn failed or the chat was deleted. It never contains the
 model's output, tool calls or results, what the model read, or why a turn failed. The server
 streams `Change`s by piping the assistant's `subscribe` through `changes`, and the
 client folds them with `fold` (or `apply`, from `empty`). On the server,
@@ -110,7 +110,7 @@ Returns the timeline after a change.
 **Details**
 
 Each item in the change replaces the item with the same id, in place, and new items are added
-after the rest. The change's activity, `failed`, and `deleted` replace the timeline's. Applying a
+after the rest. The change's status, `failed`, and `deleted` replace the timeline's. Applying a
 change twice changes nothing, so a client that resubscribes from the start can fold again and get
 the same timeline.
 
@@ -222,11 +222,12 @@ The item's `_tag` is the event's, so a match over a timeline's items takes a han
 beside `UserMessage` and `AssistantMessage`. The event, decoded with its schema, is in `event`,
 and the item's own fields sit beside it rather than spread into it: an event may have an `id` or
 an `at` of its own, and a class instance keeps its prototype. `id` is fixed per entry of the
-chat's log, and `at` is when the event was stored, in epoch milliseconds.
+chat's log, and `at` is when the event was stored, a UTC `DateTime` that encodes as epoch
+milliseconds.
 
 ```ts
 type EventItem<E> = E extends { readonly _tag: infer Tag extends string }
-  ? { readonly _tag: Tag; readonly id: string; readonly at: number; readonly event: E }
+  ? { readonly _tag: Tag; readonly id: string; readonly at: DateTime.Utc; readonly event: E }
   : never
 ```
 
@@ -282,12 +283,12 @@ type SpecialistWorking = typeof SpecialistWorking.Type
 
 <small>Since 0.1.0</small>
 
-### Activity
+### Status
 
 Represents what is working in the chat.
 
 ```ts
-type Activity = typeof Activity.Type
+type Status = typeof Status.Type
 ```
 
 <small>Since 0.1.0</small>
@@ -302,7 +303,7 @@ whether the chat was deleted. `sequence` is the position in the chat's log that 
 interface Timeline<Events = never> {
   readonly sequence: number
   readonly items: ReadonlyArray<Item<Events>>
-  readonly activity: Activity
+  readonly status: Status
   /** Whether the last turn failed with no message after it. */
   readonly failed: boolean
   /** Whether the chat was deleted. A deleted chat accepts nothing more, and its stream ends. */
@@ -319,7 +320,7 @@ Represents a change to a chat's timeline, typed with the app's events it shows.
 **Details**
 
 A change holds each item that is new or changed (for example, a message whose block was
-answered or closed, or a call the user approved), in full. It also holds the current activity, whether the last turn failed,
+answered or closed, or a call the user approved), in full. It also holds the current status, whether the last turn failed,
 and whether the chat was deleted. `sequence` is the position in the chat's log that the change is up
 to.
 
@@ -327,7 +328,7 @@ to.
 interface Change<Events = never> {
   readonly sequence: number
   readonly items: ReadonlyArray<Item<Events>>
-  readonly activity: Activity
+  readonly status: Status
   readonly failed: boolean
   readonly deleted: boolean
 }
@@ -413,8 +414,8 @@ const Block = Schema.Struct({ …
 
 ### UserMessage
 
-Schema for a message the user sent. `at` is when it was stored, in epoch
-milliseconds.
+Schema for a message the user sent. `at` is when it was stored, a UTC `DateTime` that encodes
+as epoch milliseconds.
 
 ```ts
 const UserMessage = Schema.TaggedStruct("UserMessage", { …
@@ -424,7 +425,8 @@ const UserMessage = Schema.TaggedStruct("UserMessage", { …
 
 ### AssistantMessage
 
-Schema for a message the assistant sent the user, including its block if it has one.
+Schema for a message the assistant sent the user, including its block if it has one. `at` is
+when it was stored, a UTC `DateTime` that encodes as epoch milliseconds.
 
 ```ts
 const AssistantMessage = Schema.TaggedStruct("AssistantMessage", { …
@@ -443,8 +445,8 @@ It is only the yes or no: the assistant's own message tells the user what it ask
 approve, so the item carries no params. `id` is the call's id, which the decision is for (see
 `ToolApproval.approve`), and `tool` the tool's name, for a label. `status` is where the call stands
 (`ToolApproval.Status`); `reason` is the user's, when they rejected it with one; `outcome` is how
-the approved call went, once it ran. `at` is when the call started waiting, in epoch
-milliseconds. A change updates the item in place as the call is decided and run.
+the approved call went, once it ran. `at` is when the call started waiting, a UTC `DateTime` that
+encodes as epoch milliseconds. A change updates the item in place as the call is decided and run.
 
 ```ts
 const ApprovalItem = Schema.TaggedStruct("ToolApproval", { …
@@ -455,7 +457,7 @@ const ApprovalItem = Schema.TaggedStruct("ToolApproval", { …
 ### SpecialistWorking
 
 Schema for a specialist that is working for the assistant. It holds the specialist's name and
-when it started, in epoch milliseconds.
+when it started, a UTC `DateTime` that encodes as epoch milliseconds.
 
 ```ts
 const SpecialistWorking = Schema.Struct({ …
@@ -463,7 +465,7 @@ const SpecialistWorking = Schema.Struct({ …
 
 <small>Since 0.1.0</small>
 
-### Activity
+### Status
 
 Schema for what is working in the chat.
 
@@ -471,8 +473,13 @@ Schema for what is working in the chat.
 something that arrived. `specialists` lists the specialists that are working. When the chat is
 idle, nothing is working, even if a workflow is waiting on a timer or on the user.
 
+On a live subscription (`subscribe(chatId, { signals: true })`), `activity` is a short line about what
+the running turn is doing, and `typing` is true while the model writes a message to the user. Both
+come from the chat's signals (see `ChatSignal`): they go when the turn ends, and a timeline
+folded from the log alone has neither.
+
 ```ts
-const Activity = Schema.Struct({ …
+const Status = Schema.Struct({ …
 ```
 
 <small>Since 0.1.0</small>
@@ -591,9 +598,11 @@ const changes: {
   <Events, const Show extends Shown<Events> = readonly []>(
     definition: Definition<Events>,
     options?: ChangesOptions<Show>
-  ): <E, R>(entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>) => Stream.Stream<Change<Show[number]["Type"]>, E, R>
+  ): <E, R>(
+    entries: Stream.Stream<AssistantEvent.AnyEntry | ChatSignal.ChatSignal, E, R>
+  ) => Stream.Stream<Change<Show[number]["Type"]>, E, R>
   <E, R, Events, const Show extends Shown<Events> = readonly []>(
-    entries: Stream.Stream<AssistantEvent.AnyEntry, E, R>,
+    entries: Stream.Stream<AssistantEvent.AnyEntry | ChatSignal.ChatSignal, E, R>,
     definition: Definition<Events>,
     options?: ChangesOptions<Show>
   ): Stream.Stream<Change<Show[number]["Type"]>, E, R>

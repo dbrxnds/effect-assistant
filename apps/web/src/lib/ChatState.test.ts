@@ -12,7 +12,7 @@ const user = (id: string, text: string) =>
 const change = (sequence: number, items: ReadonlyArray<Timeline.Item>, working: boolean): Timeline.Change => ({
   sequence,
   items,
-  activity: { working, specialists: [], typing: false },
+  status: { working, specialists: [], typing: false },
   failed: false,
   deleted: false
 })
@@ -23,7 +23,7 @@ test("works while the timeline says the assistant or a specialist works", () => 
 
   const researching: Timeline.Change = {
     ...change(4, [], false),
-    activity: {
+    status: {
       working: false,
       specialists: [{ specialist: "research", since: DateTime.makeUnsafe(0) }],
       typing: false

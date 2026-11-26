@@ -107,8 +107,8 @@ Represents a tool call that waited, or waits, for the user's approval.
 ```ts
 interface State {
   readonly request: AssistantEvent.ApprovalRequested
-  /** When the call started waiting, in epoch milliseconds. */
-  readonly at: number
+  /** When the call started waiting. */
+  readonly at: DateTime.Utc
   readonly status: Status
   /** The user's reason, when they rejected it with one. */
   readonly reason: string | undefined

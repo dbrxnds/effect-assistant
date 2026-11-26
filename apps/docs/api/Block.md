@@ -69,6 +69,10 @@ On the client, `BlockKit.toClient` gives the block's renderer the result, decode
 success schema. The tool's definition is shared with the client for that, so it can't need
 server-only services: add those on the server with `Tool.addDependency`.
 
+With an `answer` schema, the user can act on the result, e.g. tick some of the items it found,
+and the block sends that back like any other block's answer. Without one, it only shows the
+result.
+
 **Example** (Showing search results as cards)
 
 ```ts
@@ -84,10 +88,33 @@ const renderBlock = BlockKit.toClient<typeof Blocks, ReactNode>(Blocks, {
 })
 ```
 
+**Example** (Letting the user pick some of the results)
+
 ```ts
-const fromToolResult: <T extends Tool.Any>(
-  tool: T & { readonly successSchema: Codec }
-) => ToolResultBlock<T>
+import { Block } from "effect-assistant"
+import * as Schema from "effect/Schema"
+import { SearchAssets } from "./tools.ts"
+
+const PickAssets = Block.fromToolResult(SearchAssets, {
+  answer: Schema.Struct({ picked: Schema.Array(Schema.String) })
+})
+
+// Client
+const search_assets = ({ result, open, answer, respond }) => (
+  <AssetPicker
+    assets={result.items}
+    picked={answer?.picked}
+    disabled={!open}
+    onSubmit={(picked) => respond({ picked })}
+  />
+)
+```
+
+```ts
+const fromToolResult: <T extends Tool.Any, Answer extends Codec = Schema.Never>(
+  tool: T & { readonly successSchema: Codec },
+  options?: { readonly answer?: Answer | undefined }
+) => ToolResultBlock<T, Answer>
 ```
 
 <small>Since 0.5.0</small>
@@ -118,10 +145,10 @@ Represents a block that shows a tool's results, made with `fromToolResult`. Its 
 tool's name.
 
 ```ts
-interface ToolResultBlock<T extends Tool.Any = Tool.Any> extends Block<
+interface ToolResultBlock<T extends Tool.Any = Tool.Any, Answer extends Codec = Codec> extends Block<
   Tool.Name<T>,
   typeof NoProps,
-  Schema.Never
+  Answer
 > {
   readonly tool: T
   /** The tool's success schema, which the client decodes the result with. */

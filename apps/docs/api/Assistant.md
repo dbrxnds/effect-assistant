@@ -172,7 +172,7 @@ Represents an entry in a chat's log, with the assistant's own events decoded to 
 interface Entry<Events = never> {
   readonly chatId: ChatId
   readonly sequence: number
-  readonly at: number
+  readonly at: DateTime.Utc
   readonly event: AssistantEvent.AssistantEvent | Events
 }
 ```
@@ -318,6 +318,19 @@ interface Chat<Events = never> {
 
 <small>Since 0.1.0</small>
 
+### SubscribeOptions
+
+Represents the options accepted by an assistant's `subscribe`.
+
+```ts
+interface SubscribeOptions {
+  /** The `sequence` after which the stream starts. Defaults to `0`, the whole log. */
+  readonly after?: number | undefined
+}
+```
+
+<small>Since 0.13.0</small>
+
 ### Service
 
 Represents the service that `yield* MyAssistant` returns. It gives code outside a chat, such as
@@ -349,10 +362,21 @@ interface Service<Events = never> {
    * on the timeline depends on earlier entries. The timeline shows only the app events named in its
    * `show`, none by default (see `Timeline.changes`).
    */
-  readonly subscribe: (
-    chatId: ChatId,
-    options?: { readonly after?: number | undefined }
-  ) => Stream.Stream<Entry<Events>>
+  readonly subscribe: {
+    (
+      chatId: ChatId,
+      options?: SubscribeOptions & { readonly signals?: false | undefined }
+    ): Stream.Stream<Entry<Events>>
+    /**
+     * With `signals: true`, the stream also has the chat's signals (see `ChatSignal`): the status of
+     * what a turn is doing, and whether a message to the user is on its way. They come in order
+     * with the entries, only while the stream runs, and are never stored.
+     */
+    (
+      chatId: ChatId,
+      options: SubscribeOptions & { readonly signals: true }
+    ): Stream.Stream<Entry<Events> | ChatSignal.ChatSignal>
+  }
   /**
    * Deletes a chat by storing a `ChatDeleted` event and stopping everything that works in it.
    *
@@ -520,3 +544,29 @@ type Any = Assistant<any, any, any>
 ```
 
 <small>Since 0.1.0</small>
+
+## References
+
+### TurnTracer
+
+Sets the tracer that an assistant's turns and specialist runs record their spans with. Each
+turn's `invoke_agent` span is then the root of a trace on that tracer, with the turn's model
+calls and tool calls below it. By default they use the tracer of the fiber that runs them.
+
+Provide it to the assistant's layer to send the agent's work to its own backend, such as an LLM
+observability tool, while the rest of the app traces elsewhere.
+
+```ts
+const AgentTracer = Layer.effect(
+  Assistant.TurnTracer,
+  OtlpTracer.make({ url: "https://llm-observability.example.com/v1/traces" }).pipe(Effect.map(Option.some))
+)
+
+const MyAssistantLive = MyAssistant.toLayer(handler).pipe(Layer.provide(AgentTracer))
+```
+
+```ts
+const TurnTracer: Context.Reference<Option.Option<Tracer.Tracer>>
+```
+
+<small>Since 0.12.0</small>

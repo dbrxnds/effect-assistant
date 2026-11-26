@@ -155,8 +155,16 @@ class AssistantEngine extends Context.Service<
       chatId: ChatId,
       input: AssistantEvent.Input | AssistantEvent.StoredAppEvent
     ) => Effect.Effect<void>
-    /** Streams the chat's stored entries after the `after` sequence, then live ones. */
-    readonly subscribe: (assistant: string, chatId: ChatId, after: number) => Stream.Stream<AssistantEvent.Entry>
+    /**
+     * Streams the chat's stored entries after the `after` sequence, then live ones. With `signals`,
+     * the chat's signals too, in order with the entries.
+     */
+    readonly subscribe: (
+      assistant: string,
+      chatId: ChatId,
+      after: number,
+      signals: boolean
+    ) => Stream.Stream<AssistantEvent.Entry | ChatSignal.ChatSignal>
     /**
      * Deletes one of the assistant's chats. The chat's log records the deletion, and everything
      * that works in the chat stops.

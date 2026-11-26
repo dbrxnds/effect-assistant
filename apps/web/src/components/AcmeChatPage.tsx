@@ -173,7 +173,7 @@ export function AcmeChatPage() {
                   </div>
                 </ThreadPrimitive.Empty>
                 <ThreadPrimitive.Messages components={messageComponents} />
-                {state.working ? <Typing status={state.activity.status} typing={state.activity.typing} /> : null}
+                {state.working ? <Typing activity={state.status.activity} typing={state.status.typing} /> : null}
               </ThreadPrimitive.Viewport>
               {state.failed ? <p className="notice">Something went wrong on my side. Try again.</p> : null}
               <div className="composer-wrap">
