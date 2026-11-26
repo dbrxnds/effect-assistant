@@ -104,6 +104,46 @@ describe("AssistantLoop.run with a call it can't run", () => {
   )
 })
 
+describe("AssistantLoop.run with a tool that dies", () => {
+  it.live("reports the defect and gives the model a failed result, so the turn goes on", () =>
+    Effect.gen(function* () {
+      const reported: Array<string> = []
+
+      const reporter = ErrorReporter.make(({ error }) => {
+        reported.push(error.message)
+      })
+
+      const model = Scripted.layer((request) =>
+        Option.match(Scripted.result(request, "lookup"), {
+          onNone: () => [Scripted.call("lookup", { id: "7" })],
+          onSome: (result) => Scripted.reply(result)
+        })
+      )
+
+      const handlers = Own.toLayer((turn) =>
+        AssistantLoop.run({
+          instructions: turn.instructions("Be brief."),
+          toolkit: LookupTools,
+          history: turn.history()
+        })
+      ).pipe(Layer.provide(LookupTools.toLayer({ lookup: () => Effect.die(new Error("the index is down")) })))
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* (yield* Own).submit(chat, say("Look up 7."))
+
+        return yield* collectUntil(Own, chat, (es) => turnsDone(es) >= 1, "10 seconds")
+      }).pipe(Effect.provide(runMemory(handlers, model)), Effect.provide(ErrorReporter.layer([reporter])))
+
+      expect(failures(entries)).toEqual([])
+      expect(reported).toEqual(["the index is down"])
+      expect(
+        entries.flatMap(({ event }) => (Predicate.isTagged(event, "AssistantMessage") ? [event.text] : []))
+      ).toEqual([expect.stringContaining("lookup failed unexpectedly")])
+    })
+  )
+})
+
 describe("A failed turn", () => {
   it.live("is reported to the ErrorReporter, besides the chat", () =>
     Effect.gen(function* () {
