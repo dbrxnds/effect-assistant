@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
-import { AssistantActivity, AssistantEvent, ChatId, InputId, RunId } from "../src/index.ts"
+import { AssistantStatus, AssistantEvent, ChatId, InputId, RunId } from "../src/index.ts"
 import { say, storedUpdate, submittedUpdate } from "./utils/fixtures.ts"
 
 const { SpecialistFinished, SpecialistStarted, TurnCompleted, TurnFailed, TurnStarted } = AssistantEvent
@@ -13,28 +13,27 @@ const entries = (events: ReadonlyArray<AssistantEvent.AssistantEvent>) =>
     AssistantEvent.Entry.make({ chatId, sequence: i + 1, at: DateTime.makeUnsafe((i + 1) * 1000), event })
   )
 
-const activity = (events: ReadonlyArray<AssistantEvent.AssistantEvent>) =>
-  AssistantActivity.fromEntries(entries(events))
+const activity = (events: ReadonlyArray<AssistantEvent.AssistantEvent>) => AssistantStatus.fromEntries(entries(events))
 
-describe("AssistantActivity", () => {
+describe("AssistantStatus", () => {
   it("works from an input until a turn that read it ends", () => {
     expect(activity([say("hi")]).queued).toBe(true)
-    expect(AssistantActivity.isWorking(activity([say("hi")]))).toBe(true)
+    expect(AssistantStatus.isWorking(activity([say("hi")]))).toBe(true)
 
     // The turn read through sequence 2; "two" (sequence 3) arrived after, so another turn is coming.
     const events = [say("one"), TurnStarted.make({ assistant: "test" }), say("two")]
 
-    expect(AssistantActivity.isWorking(activity([...events, TurnCompleted.make({ throughSequence: 2 })]))).toBe(true)
-    expect(AssistantActivity.isWorking(activity([...events, TurnCompleted.make({ throughSequence: 3 })]))).toBe(false)
+    expect(AssistantStatus.isWorking(activity([...events, TurnCompleted.make({ throughSequence: 2 })]))).toBe(true)
+    expect(AssistantStatus.isWorking(activity([...events, TurnCompleted.make({ throughSequence: 3 })]))).toBe(false)
   })
 
   it("works from TurnStarted until the turn ends", () => {
     const running = activity([say("hi"), TurnStarted.make({ assistant: "test" })])
 
     expect(running.turnSince).toEqual(DateTime.makeUnsafe(2000))
-    expect(AssistantActivity.isWorking(running)).toBe(true)
+    expect(AssistantStatus.isWorking(running)).toBe(true)
     expect(
-      AssistantActivity.isWorking(
+      AssistantStatus.isWorking(
         activity([say("hi"), TurnStarted.make({ assistant: "test" }), TurnCompleted.make({ throughSequence: 2 })])
       )
     ).toBe(false)
@@ -48,7 +47,7 @@ describe("AssistantActivity", () => {
       TurnFailed.make({ throughSequence: 3, message: "boom" })
     ])
 
-    expect(AssistantActivity.isWorking(resumed)).toBe(false)
+    expect(AssistantStatus.isWorking(resumed)).toBe(false)
   })
 
   it("keeps working while a specialist runs after its turn ended", () => {
@@ -66,7 +65,7 @@ describe("AssistantActivity", () => {
     expect([...afterTurn.specialists.values()]).toEqual([
       { runId, specialist: "research", goal: "Q4 budgets", since: DateTime.makeUnsafe(3000) }
     ])
-    expect(AssistantActivity.isWorking(afterTurn)).toBe(true)
+    expect(AssistantStatus.isWorking(afterTurn)).toBe(true)
 
     const answered = activity([
       ...spawned,
@@ -101,7 +100,7 @@ describe("AssistantActivity", () => {
 
     // A run the assistant stopped starts no turn.
     expect(stopped.specialists.size).toBe(0)
-    expect(AssistantActivity.isWorking(stopped)).toBe(false)
+    expect(AssistantStatus.isWorking(stopped)).toBe(false)
   })
 
   it("counts an app event that came in through submit as an input, and not one a turn appended", () => {
@@ -111,13 +110,13 @@ describe("AssistantActivity", () => {
       )
 
     expect(
-      AssistantActivity.isWorking(
-        AssistantActivity.fromEntries(after(submittedUpdate("workflow:Order", { status: "shipped" })))
+      AssistantStatus.isWorking(
+        AssistantStatus.fromEntries(after(submittedUpdate("workflow:Order", { status: "shipped" })))
       )
     ).toBe(true)
     expect(
-      AssistantActivity.isWorking(
-        AssistantActivity.fromEntries(after(storedUpdate("workflow:Order", { status: "shipped" })))
+      AssistantStatus.isWorking(
+        AssistantStatus.fromEntries(after(storedUpdate("workflow:Order", { status: "shipped" })))
       )
     ).toBe(false)
   })

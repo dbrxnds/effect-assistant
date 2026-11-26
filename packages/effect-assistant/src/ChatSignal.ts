@@ -24,7 +24,7 @@ import * as Schema from "effect/Schema"
  * @category schemas
  * @since 0.13.0
  */
-export class Status extends Schema.TaggedClass<Status>()("Status", {
+export class Activity extends Schema.TaggedClass<Activity>()("Activity", {
   text: Schema.String
 }) {}
 
@@ -51,7 +51,7 @@ export class TypingStopped extends Schema.TaggedClass<TypingStopped>()("TypingSt
  * @category schemas
  * @since 0.13.0
  */
-export const ChatSignal = Schema.Union([Status, TypingStarted, TypingStopped])
+export const ChatSignal = Schema.Union([Activity, TypingStarted, TypingStopped])
 
 /**
  * Represents any of a chat's signals.

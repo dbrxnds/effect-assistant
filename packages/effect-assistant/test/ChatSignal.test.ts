@@ -22,9 +22,9 @@ import {
   AssistantEvent,
   ChatLog,
   ChatSignal,
-  StatusSummary,
+  ActivitySummary,
   Timeline,
-  ToolStatus
+  ToolActivity
 } from "../src/index.ts"
 import { newChat, runEntity, runMemory, say, TestAssistant, withHandlers, withTools } from "./utils/fixtures.ts"
 import * as Scripted from "./utils/scripted.ts"
@@ -35,7 +35,7 @@ const STATUS = "Checking last summer's campaign budget"
 
 const CampaignReport = Tool.make("campaign_report", {
   description: "The spend of a past campaign.",
-  parameters: Schema.Struct({ campaignId: Schema.String }).pipe(ToolStatus.withStatus),
+  parameters: Schema.Struct({ campaignId: Schema.String }).pipe(ToolActivity.withActivity),
   success: Schema.Struct({ spent: Schema.Finite })
 })
 
@@ -43,7 +43,7 @@ const PLAN = "Drafting the summer campaign plan"
 
 const CampaignPlan = Tool.make("campaign_plan", {
   description: "Drafts a campaign plan.",
-  parameters: Schema.Struct({ campaignId: Schema.String }).pipe(ToolStatus.withStatus),
+  parameters: Schema.Struct({ campaignId: Schema.String }).pipe(ToolActivity.withActivity),
   success: Schema.Struct({ planned: Schema.Boolean })
 })
 
@@ -73,7 +73,7 @@ const label = (item: Item): ReadonlyArray<string> => {
     return ["TurnStarted", "AssistantMessage", "TurnCompleted", "TurnFailed"].includes(tag) ? [tag] : []
   }
 
-  return [Predicate.isTagged(item, "Status") ? `Status: ${item.text}` : item._tag]
+  return [Predicate.isTagged(item, "Activity") ? `Activity: ${item.text}` : item._tag]
 }
 
 /** The tools' handlers, recording the params the report got. */
@@ -137,12 +137,12 @@ const callsThenAnswer =
       ? calls.map(([name, params]) => Scripted.call(name, params))
       : Scripted.reply("Done.")
 
-const summarizing = (text: string, options: StatusSummary.Options) =>
+const summarizing = (text: string, options: ActivitySummary.Options) =>
   Effect.map(
     Scripted.make(() => [Scripted.text(text)]),
     (model) => ({
       model,
-      layer: StatusSummary.layer(options).pipe(Layer.provide(model.layer))
+      layer: ActivitySummary.layer(options).pipe(Layer.provide(model.layer))
     })
   )
 
@@ -170,7 +170,7 @@ describe("ChatSignal", () => {
 
       expect(items.flatMap(label)).toEqual([
         "TurnStarted",
-        `Status: ${STATUS}`,
+        `Activity: ${STATUS}`,
         "TypingStarted",
         "AssistantMessage",
         "TypingStopped",
@@ -195,12 +195,12 @@ describe("ChatSignal", () => {
         )
       )
 
-      const activities = timelineOf(items).map((timeline) => timeline.activity)
-      const typing = activities.findIndex((activity) => activity.typing)
+      const statuses = timelineOf(items).map((timeline) => timeline.status)
+      const typing = statuses.findIndex((status) => status.typing)
 
-      expect(activities[typing - 1]?.status).toBe(STATUS)
-      expect(activities[typing]?.status).toBeUndefined()
-      expect(activities.at(-1)).toEqual({ working: false, specialists: [], typing: false })
+      expect(statuses[typing - 1]?.activity).toBe(STATUS)
+      expect(statuses[typing]?.activity).toBeUndefined()
+      expect(statuses.at(-1)).toEqual({ working: false, specialists: [], typing: false })
     })
   )
 
@@ -220,9 +220,9 @@ describe("ChatSignal", () => {
 
       expect(items.flatMap(label)).toEqual([
         "TurnStarted",
-        `Status: ${STATUS}`,
-        `Status: ${PLAN}`,
-        `Status: ${STATUS}`,
+        `Activity: ${STATUS}`,
+        `Activity: ${PLAN}`,
+        `Activity: ${STATUS}`,
         "TypingStarted",
         "AssistantMessage",
         "TypingStopped",
@@ -245,10 +245,10 @@ describe("ChatSignal", () => {
       const schemas = first?.parameters ?? new Map<string, unknown>()
 
       expect(schemas.get("campaign_report")).toMatchObject({
-        properties: { [ToolStatus.parameterName]: { type: "string" } },
+        properties: { [ToolActivity.parameterName]: { type: "string" } },
         required: ["campaignId"]
       })
-      expect(JSON.stringify(schemas.get("lookup"))).not.toContain(ToolStatus.parameterName)
+      expect(JSON.stringify(schemas.get("lookup"))).not.toContain(ToolActivity.parameterName)
     })
   )
 
@@ -270,7 +270,7 @@ describe("ChatSignal", () => {
         "TurnCompleted"
       ])
       expect(yield* tools.received).toEqual([{ noteId: "n1", activity: "Old ideas" }])
-      expect(ToolStatus.isDescribed(ArchiveNote)).toBe(false)
+      expect(ToolActivity.hasActivity(ArchiveNote)).toBe(false)
     })
   )
 
@@ -323,19 +323,19 @@ describe("ChatSignal", () => {
 
   it("adds the status field to a struct and keeps its annotations", () => {
     const Params = Schema.Struct({ noteId: Schema.String }).annotate({ title: "ArchiveParams" })
-    const WithStatus = Params.pipe(ToolStatus.withStatus)
+    const WithStatus = Params.pipe(ToolActivity.withActivity)
 
-    expect(Object.keys(WithStatus.fields)).toEqual(["noteId", ToolStatus.parameterName])
+    expect(Object.keys(WithStatus.fields)).toEqual(["noteId", ToolActivity.parameterName])
     expect(SchemaAST.resolveTitle(WithStatus.ast)).toBe("ArchiveParams")
     expect(Schema.decodeUnknownSync(WithStatus)({ noteId: "n1", activity: STATUS })).toEqual({
       noteId: "n1",
       activity: STATUS
     })
-    expect(ToolStatus.isDescribed(CampaignReport)).toBe(true)
-    expect(ToolStatus.isDescribed(Lookup)).toBe(false)
+    expect(ToolActivity.hasActivity(CampaignReport)).toBe(true)
+    expect(ToolActivity.hasActivity(Lookup)).toBe(false)
 
     // @ts-expect-error
-    Schema.Struct({ activity: Schema.String }).pipe(ToolStatus.withStatus)
+    Schema.Struct({ activity: Schema.String }).pipe(ToolActivity.withActivity)
   })
 
   it.effect("stops the typing and clears the line when the turn fails mid-tool", () =>
@@ -358,7 +358,7 @@ describe("ChatSignal", () => {
       expect(labels.at(-1)).toBe("TurnFailed")
       expect(labels.lastIndexOf("TypingStopped")).toBeGreaterThan(labels.lastIndexOf("TypingStarted"))
       expect(labels.lastIndexOf("TypingStopped")).toBeLessThan(labels.indexOf("TurnFailed"))
-      expect(timelineOf(items).at(-1)?.activity).toEqual({ working: false, specialists: [], typing: false })
+      expect(timelineOf(items).at(-1)?.status).toEqual({ working: false, specialists: [], typing: false })
     })
   )
 
@@ -378,7 +378,7 @@ describe("ChatSignal", () => {
       )
 
       expect(items.flatMap(label).at(-1)).toBe("TurnFailed")
-      expect(timelineOf(items).at(-1)?.activity).toEqual({ working: false, specialists: [], typing: false })
+      expect(timelineOf(items).at(-1)?.status).toEqual({ working: false, specialists: [], typing: false })
     })
   )
 
@@ -400,7 +400,7 @@ describe("ChatSignal", () => {
 
       const labels = items.flatMap(label)
 
-      expect(labels.indexOf("Status: Looking into last summer")).toBe(labels.indexOf("TurnStarted") + 1)
+      expect(labels.indexOf("Activity: Looking into last summer")).toBe(labels.indexOf("TurnStarted") + 1)
       expect(labels.at(-1)).toBe("TurnCompleted")
     })
   )
@@ -423,8 +423,8 @@ describe("ChatSignal", () => {
 
       const labels = items.flatMap(label)
 
-      expect(labels.filter((line) => line.startsWith("Status"))).toEqual(["Status: Looking up the campaign"])
-      expect(labels.indexOf("Status: Looking up the campaign")).toBeLessThan(labels.indexOf("TypingStarted"))
+      expect(labels.filter((line) => line.startsWith("Activity"))).toEqual(["Activity: Looking up the campaign"])
+      expect(labels.indexOf("Activity: Looking up the campaign")).toBeLessThan(labels.indexOf("TypingStarted"))
       expect(labels.at(-1)).toBe("TurnCompleted")
 
       const reads = yield* summary.model.requests
@@ -457,9 +457,9 @@ describe("ChatSignal", () => {
         )
       )
 
-      expect(items.flatMap(label).filter((line) => line.startsWith("Status") || line === "TypingStarted")).toEqual([
-        `Status: ${STATUS}`,
-        "Status: Looking up the campaign",
+      expect(items.flatMap(label).filter((line) => line.startsWith("Activity") || line === "TypingStarted")).toEqual([
+        `Activity: ${STATUS}`,
+        "Activity: Looking up the campaign",
         "TypingStarted"
       ])
     })
@@ -486,7 +486,7 @@ describe("ChatSignal", () => {
       )
 
       expect((yield* summary.model.requests).length).toBeGreaterThan(0)
-      expect(items.flatMap(label).filter((line) => line.startsWith("Status"))).toEqual([`Status: ${STATUS}`])
+      expect(items.flatMap(label).filter((line) => line.startsWith("Activity"))).toEqual([`Activity: ${STATUS}`])
     })
   )
 
@@ -512,7 +512,7 @@ describe("ChatSignal", () => {
 
       const reads = yield* summary.model.requests
       expect(reads.some((read) => Scripted.lastInput(read).includes(`Shown so far: "${STATUS}"`))).toBe(true)
-      expect(items.flatMap(label).filter((line) => line.startsWith("Status"))).toEqual([`Status: ${STATUS}`])
+      expect(items.flatMap(label).filter((line) => line.startsWith("Activity"))).toEqual([`Activity: ${STATUS}`])
     })
   )
 
@@ -541,7 +541,7 @@ describe("ChatSignal", () => {
 
       const labels = items.flatMap(label)
 
-      expect(labels.slice(labels.indexOf("AssistantMessage"))).not.toContain("Status: Tidying up")
+      expect(labels.slice(labels.indexOf("AssistantMessage"))).not.toContain("Activity: Tidying up")
       expect(labels.at(-1)).toBe("TurnCompleted")
     })
   )
@@ -559,7 +559,7 @@ describe("ChatSignal", () => {
 
       expect(items.flatMap(label)).toEqual([
         "TurnStarted",
-        `Status: ${STATUS}`,
+        `Activity: ${STATUS}`,
         "TypingStarted",
         "AssistantMessage",
         "TypingStopped",

@@ -18,7 +18,7 @@ import * as ChatId from "effect-assistant/ChatId"
 import { CurrentChat } from "effect-assistant/CurrentChat"
 import * as RunId from "effect-assistant/RunId"
 import * as ToolFailure from "effect-assistant/ToolFailure"
-import * as ToolStatus from "effect-assistant/ToolStatus"
+import * as ToolActivity from "effect-assistant/ToolActivity"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
@@ -176,7 +176,7 @@ export const quote = Effect.fn(function* ({ office, product, quantity }: typeof 
 export const QuoteOrder = Tool.make("quote_order", {
   description:
     "What an order of branded products comes to for an office: units (rounded up to whole packs and the minimum), total, budget left after it, and lead time. Places nothing.",
-  parameters: OrderInput.pipe(ToolStatus.withStatus),
+  parameters: OrderInput.pipe(ToolActivity.withActivity),
   success: Schema.Struct({
     office: Schema.String,
     product: Schema.String,
@@ -211,7 +211,7 @@ export const PlaceOrderParams = Schema.Struct({
 export const PlaceOrder = Tool.make("place_order", {
   description:
     "Places a product order, with exactly what quote_order returned. The user approves it first: they see the order and approve or reject it, your turn ends meanwhile, and the outcome arrives later. Say in the same step what you're asking them to approve, in one line.",
-  parameters: PlaceOrderParams.pipe(ToolStatus.withStatus),
+  parameters: PlaceOrderParams.pipe(ToolActivity.withActivity),
   success: Schema.Struct({ reference: Schema.String }),
   failure: ToolFailure.ToolFailure,
   needsApproval: true,

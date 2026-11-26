@@ -12,7 +12,7 @@ export * as Assistant from "./Assistant.ts"
 /**
  * @since 0.1.0
  */
-export * as AssistantActivity from "./AssistantActivity.ts"
+export * as AssistantStatus from "./AssistantStatus.ts"
 
 /**
  * @since 0.1.0
@@ -112,7 +112,7 @@ export * as Specialist from "./Specialist.ts"
 /**
  * @since 0.13.0
  */
-export * as StatusSummary from "./StatusSummary.ts"
+export * as ActivitySummary from "./ActivitySummary.ts"
 
 /**
  * @since 0.3.0
@@ -142,4 +142,4 @@ export * as ToolResult from "./ToolResult.ts"
 /**
  * @since 0.13.0
  */
-export * as ToolStatus from "./ToolStatus.ts"
+export * as ToolActivity from "./ToolActivity.ts"

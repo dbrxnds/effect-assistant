@@ -9,7 +9,7 @@ import * as AnthropicLanguageModel from "@effect/ai-anthropic/AnthropicLanguageM
 import type * as Assistant from "effect-assistant/Assistant"
 import * as BlockKit from "effect-assistant/BlockKit"
 import * as Skill from "effect-assistant/Skill"
-import * as StatusSummary from "effect-assistant/StatusSummary"
+import * as ActivitySummary from "effect-assistant/ActivitySummary"
 import * as ToolApproval from "effect-assistant/ToolApproval"
 import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
@@ -61,11 +61,11 @@ export const model = Config.String("ACME_MODEL").pipe(Config.withDefault("claude
  * Layer for the status of a turn that works a while with nothing to show, written by the small
  * model.
  */
-const layerStatusSummary = Layer.unwrap(
+const layerActivitySummary = Layer.unwrap(
   Effect.gen(function* () {
     const apiKey = yield* Config.Redacted("ANTHROPIC_API_KEY")
 
-    return StatusSummary.layer().pipe(
+    return ActivitySummary.layer().pipe(
       Layer.provide(AnthropicLanguageModel.model(yield* statusModel)),
       Layer.provide(AnthropicClient.layer({ apiKey })),
       Layer.provide(FetchHttpClient.layer)
@@ -99,7 +99,7 @@ export const layer = AcmeAssistant.toLayer(
       })
     })
   })
-).pipe(Layer.provide(Tools.layerResearch), Layer.provide(layerTools), Layer.provide(layerStatusSummary))
+).pipe(Layer.provide(Tools.layerResearch), Layer.provide(layerTools), Layer.provide(layerActivitySummary))
 
 /**
  * Layer for the model: Anthropic's `ACME_MODEL` with `ANTHROPIC_API_KEY`, and

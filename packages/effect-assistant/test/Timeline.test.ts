@@ -142,7 +142,7 @@ describe("Timeline.fromEntries", () => {
       })
     ])
 
-    expect(working.activity).toEqual({
+    expect(working.status).toEqual({
       working: true,
       specialists: [{ specialist: "research", since: DateTime.makeUnsafe(3000) }],
       typing: false
@@ -155,7 +155,7 @@ describe("Timeline.fromEntries", () => {
       AssistantEvent.TurnFailed.make({ throughSequence: 2, message: "AnthropicError: overloaded" })
     ])
 
-    expect(failed.activity).toEqual({ working: false, specialists: [], typing: false })
+    expect(failed.status).toEqual({ working: false, specialists: [], typing: false })
     expect(failed.failed).toBe(true)
     expect(JSON.stringify(failed)).not.toContain("overloaded")
     expect(Timeline.isIdle(failed)).toBe(true)
@@ -163,10 +163,10 @@ describe("Timeline.fromEntries", () => {
     // A workflow's update, submitted, wakes a turn: working until a turn reads it.
     const woken = timeline([submittedUpdate("workflow:Order", { status: "shipped" })])
 
-    expect(woken.activity.working).toBe(true)
+    expect(woken.status.working).toBe(true)
 
     // One a turn appended wakes nothing.
-    expect(timeline([storedUpdate("workflow:Order", { status: "shipped" })]).activity.working).toBe(false)
+    expect(timeline([storedUpdate("workflow:Order", { status: "shipped" })]).status.working).toBe(false)
   })
 
   it("shows the app events in `show` as items typed with their schemas, and leaves out the rest", () => {
@@ -242,7 +242,7 @@ describe("Timeline.fromEntries", () => {
           { "_tag": "Update", "id": "app-event:3", "at": 3, "event": { "_tag": "Update", "source": 7 } },
           { "_tag": "Update", "id": "app-event:4", "at": 4, "event": { "_tag": "Update", "id": "u", "source": "s", "payload": {} } }
         ],
-        "activity": { "working": false, "specialists": [], "typing": false },
+        "status": { "working": false, "specialists": [], "typing": false },
         "failed": false,
         "deleted": false
       }`)
@@ -286,7 +286,7 @@ describe("Timeline.apply", () => {
         Timeline.UserMessage.make({ id: hi.id, text: "hi", at: DateTime.makeUnsafe(1) }),
         Timeline.AssistantMessage.make({ id: "m1", text: "Pick", at: DateTime.makeUnsafe(2) })
       ],
-      activity: { working: true, specialists: [], typing: false },
+      status: { working: true, specialists: [], typing: false },
       failed: false,
       deleted: false
     }
@@ -302,7 +302,7 @@ describe("Timeline.apply", () => {
         }),
         Timeline.AssistantMessage.make({ id: "m2", text: "Done", at: DateTime.makeUnsafe(5) })
       ],
-      activity: { working: false, specialists: [], typing: false },
+      status: { working: false, specialists: [], typing: false },
       failed: false,
       deleted: false
     }

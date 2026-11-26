@@ -115,7 +115,9 @@ const repairParams = Effect.fnUntraced(function* (tool: Tool.Any | undefined, pa
 
   const parsed = Option.map(
     decodeJsonObject(params),
-    Record.map((value): Schema.Json => (Predicate.isString(value) ? Option.getOrElse(parseJsonValue(value), () => value) : value))
+    Record.map((value): Schema.Json =>
+      Predicate.isString(value) ? Option.getOrElse(parseJsonValue(value), () => value) : value
+    )
   )
 
   if (Option.isNone(parsed) || (yield* decodes(params))) return params
