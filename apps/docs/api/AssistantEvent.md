@@ -125,7 +125,7 @@ The folds over a chat take this type, so a client's typed entries fit too.
 interface AnyEntry {
   readonly chatId: ChatId
   readonly sequence: number
-  readonly at: number
+  readonly at: DateTime.Utc
   readonly event: { readonly _tag: string }
 }
 ```
@@ -576,8 +576,8 @@ const StoredAppEvent = Schema.StructWithRest( …
 
 Schema for a stored event with its position in the chat.
 
-`sequence` starts at 1 and has no gaps. `at` is the time the event was stored, in epoch
-milliseconds.
+`sequence` starts at 1 and has no gaps. `at` is the time the event was stored, a UTC
+`DateTime` that encodes as epoch milliseconds.
 
 ```ts
 const Entry = Schema.Struct({ …

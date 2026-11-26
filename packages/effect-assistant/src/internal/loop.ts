@@ -15,7 +15,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as AssistantEvent from "../AssistantEvent.ts"
 import type * as Instructions from "../Instructions.ts"
-import * as ToolStatus from "../ToolStatus.ts"
+import * as ToolActivity from "../ToolActivity.ts"
 import * as History from "./history.ts"
 import * as Live from "./live.ts"
 import * as Streamed from "./stream.ts"
@@ -142,12 +142,12 @@ const toolCalls = (parts: ReadonlyArray<AssistantEvent.ModelPart>): ReadonlyArra
 
 const decodeParams = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Json))
 
-const isDescribedCall = <R>(tools: Toolkits.Tools<R>, call: AssistantEvent.ToolCallPart) =>
-  tools.definitions.some((tool) => tool.name === call.name && ToolStatus.isDescribed(tool))
+const hasActivityCall = <R>(tools: Toolkits.Tools<R>, call: AssistantEvent.ToolCallPart) =>
+  tools.definitions.some((tool) => tool.name === call.name && ToolActivity.hasActivity(tool))
 
 const statusOf = (call: AssistantEvent.ToolCallPart): string | undefined =>
   decodeParams(call.params).pipe(
-    Option.flatMapNullishOr((params) => params[ToolStatus.parameterName]),
+    Option.flatMapNullishOr((params) => params[ToolActivity.parameterName]),
     Option.filter(Predicate.isString),
     Option.map((written) => written.trim()),
     Option.filter((status) => status !== ""),
@@ -156,7 +156,7 @@ const statusOf = (call: AssistantEvent.ToolCallPart): string | undefined =>
 
 // A call's status shows when it starts; a message's typing stops once the message is stored.
 const runCall = Effect.fnUntraced(function* <R>(tools: Toolkits.Tools<R>, call: AssistantEvent.ToolCallPart) {
-  const status = isDescribedCall(tools, call) ? statusOf(call) : undefined
+  const status = hasActivityCall(tools, call) ? statusOf(call) : undefined
 
   const result = yield* Effect.gen(function* () {
     if (status !== undefined) yield* Live.use((live) => live.callStarted(call.id, status))
@@ -239,19 +239,30 @@ const runCalls = <R, S, E, R2>(
         Stream.concat(
           Stream.unwrap(
             Effect.gen(function* () {
-              const explained = pending.some(({ call }) => isUserMessage(call))
-
               // Text that became no message, or a message that failed, stops the typing too.
-              const done = yield* Effect.forEach(
+              const ran = yield* Effect.forEach(
                 pending,
-                ({ call }, i): Effect.Effect<Event, never, R> =>
-                  waits[i] !== true
-                    ? runCall(tools, call)
-                    : explained
-                      ? awaitApproval(call)
-                      : Effect.succeed(unexplained(call)),
+                (
+                  { call },
+                  i
+                ): Effect.Effect<{ call: AssistantEvent.ToolCallPart; event: Option.Option<Event> }, never, R> =>
+                  waits[i] === true
+                    ? Effect.succeed({ call, event: Option.none() })
+                    : runCall(tools, call).pipe(Effect.map((event) => ({ call, event: Option.some(event) }))),
                 { concurrency: "unbounded" }
               ).pipe(Effect.ensuring(Live.use((live) => live.typing(false))))
+
+              // An approval waits only beside a message the user got: one that failed leaves the model a step to fix it.
+              const explained = ran.some(
+                ({ call, event }) => isUserMessage(call) && Option.exists(event, (result) => !isFailure(result))
+              )
+
+              const done = yield* Effect.forEach(ran, ({ call, event }) =>
+                Option.match(event, {
+                  onSome: Effect.succeed,
+                  onNone: () => (explained ? awaitApproval(call) : Effect.succeed(unexplained(call)))
+                })
+              )
 
               return Stream.fromIterable(done.map(value)).pipe(
                 Stream.concat(

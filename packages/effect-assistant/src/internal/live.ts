@@ -80,7 +80,10 @@ export const make = Effect.fnUntraced(function* (send: (signal: ChatSignal.ChatS
   const show = (current: State, text: string, now: number): readonly [ReadonlyArray<ChatSignal.ChatSignal>, State] =>
     current.shown === text
       ? [[], current]
-      : [[ChatSignal.Status.make({ text })], { ...current, shown: text, shownAt: now, lines: [...current.lines, text] }]
+      : [
+          [ChatSignal.Activity.make({ text })],
+          { ...current, shown: text, shownAt: now, lines: [...current.lines, text] }
+        ]
 
   const live: Live = {
     callStarted: (callId, text) =>

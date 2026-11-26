@@ -14,7 +14,7 @@ import type * as Prompt from "effect/ai/Prompt"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import type * as Assistant from "./Assistant.ts"
-import * as AssistantActivity from "./AssistantActivity.ts"
+import * as AssistantStatus from "./AssistantStatus.ts"
 import * as AssistantEvent from "./AssistantEvent.ts"
 import * as BlockKit from "./BlockKit.ts"
 import { userText } from "./internal/history.ts"
@@ -89,7 +89,7 @@ export const openItems = (
       : []
   })
 
-  const specialists = [...AssistantActivity.fromEntries(entries).specialists.values()].flatMap((run) =>
+  const specialists = [...AssistantStatus.fromEntries(entries).specialists.values()].flatMap((run) =>
     opened(
       sequenceOf(
         (event) =>

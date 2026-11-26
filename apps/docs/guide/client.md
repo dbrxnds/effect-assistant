@@ -11,7 +11,7 @@ The assistant's `subscribe(chatId)` (`yield* MyAssistant`) streams the chat's
 log; pipe it through
 [`Timeline.changes(MyAssistant)`](/api/Timeline#changes) to stream the
 timeline as [`Timeline.Change`](/api/Timeline#change)s: each one has the
-items that are new or changed since the last (whole), and the activity now.
+items that are new or changed since the last (whole), and the status now.
 None of the app's own events are in it unless you `show` them (see
 [your events on the timeline](#your-events-on-the-timeline)). The client
 folds the changes with [`Timeline.fold`](/api/Timeline#fold), or one at a
@@ -101,9 +101,10 @@ timeline itself uses `Timeline.fromEntries(entries, MyAssistant, { show })`.
   `"answered"`, or `"closed"`), and the user's `answer`. Between them, an
   item for each of your events the timeline shows, and for each tool call
   waiting for the user's approval (see below).
-- **`activity`**: `working` while a turn runs, or is about to start for
+- **`status`**: `working` while a turn runs, or is about to start for
   something that arrived; `specialists`, the ones working (which, since
-  when). `Timeline.isIdle(timeline)` is neither. A workflow waiting on a timer
+  when); on a live subscription, `activity`, a short line about what the
+  running turn is doing, and `typing`. `Timeline.isIdle(timeline)` is neither. A workflow waiting on a timer
   isn't working.
 - **`failed`**: the last turn failed, and no message came after. Show
   something generic; the server's log says why.

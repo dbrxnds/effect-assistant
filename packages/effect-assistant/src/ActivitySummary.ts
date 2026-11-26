@@ -4,8 +4,8 @@
  * the turn so far and writes a few words about it, like "Comparing last year's budgets".
  *
  * Provide {@link layer} next to the assistant's `toLayer`, with a small, fast model of its own.
- * Without it, a turn shows only the statuses its tool calls write (see `ToolStatus`). The summary
- * is a `ChatSignal.Status` like any other: it is never stored and the turn's model never reads it.
+ * Without it, a turn shows only the statuses its tool calls write (see `ToolActivity`). The summary
+ * is a `ChatSignal.Activity` like any other: it is never stored and the turn's model never reads it.
  * It never replaces the status of a described call that still runs, never shows while the model
  * writes to the user, and never after the turn's message unless the model starts new work. The
  * model reads this turn, after a few earlier messages as context, and the lines the turn showed so
@@ -51,8 +51,8 @@ export interface Options {
  * @category services
  * @since 0.13.0
  */
-export class StatusSummary extends Context.Service<
-  StatusSummary,
+export class ActivitySummary extends Context.Service<
+  ActivitySummary,
   {
     readonly after: Duration.Duration
     readonly staleAfter: Duration.Duration
@@ -63,7 +63,7 @@ export class StatusSummary extends Context.Service<
      */
     readonly summarize: (transcript: string) => Effect.Effect<Option.Option<string>>
   }
->()("effect-assistant/StatusSummary") {}
+>()("effect-assistant/ActivitySummary") {}
 
 const MAX_LENGTH = 60
 
@@ -82,28 +82,28 @@ const clean = (text: string): Option.Option<string> => {
  * **Example** (A cheap model for statuses)
  *
  * ```ts
- * import { StatusSummary } from "effect-assistant"
+ * import { ActivitySummary } from "effect-assistant"
  * import * as Layer from "effect/Layer"
  *
  * declare const MyAssistantLive: Layer.Layer<never>
  * declare const FastModel: Layer.Layer<import("effect/ai/LanguageModel").LanguageModel>
  *
  * export const Live = MyAssistantLive.pipe(
- *   Layer.provide(StatusSummary.layer({ after: "2 seconds" }).pipe(Layer.provide(FastModel)))
+ *   Layer.provide(ActivitySummary.layer({ after: "2 seconds" }).pipe(Layer.provide(FastModel)))
  * )
  * ```
  *
  * @category layers
  * @since 0.13.0
  */
-export const layer = (options?: Options): Layer.Layer<StatusSummary, never, LanguageModel.LanguageModel> =>
+export const layer = (options?: Options): Layer.Layer<ActivitySummary, never, LanguageModel.LanguageModel> =>
   Layer.effect(
-    StatusSummary,
+    ActivitySummary,
     Effect.gen(function* () {
       const model = yield* LanguageModel.LanguageModel
       const instructions = options?.instructions ?? defaultInstructions
 
-      const summarize = Effect.fn("StatusSummary.summarize")(function* (transcript: string) {
+      const summarize = Effect.fn("ActivitySummary.summarize")(function* (transcript: string) {
         const response = yield* model.generateText({
           prompt: Prompt.fromMessages([
             Prompt.systemMessage({ content: instructions }),
@@ -114,7 +114,7 @@ export const layer = (options?: Options): Layer.Layer<StatusSummary, never, Lang
         return clean(response.text)
       })
 
-      return StatusSummary.of({
+      return ActivitySummary.of({
         after: Duration.fromInputUnsafe(options?.after ?? "2 seconds"),
         staleAfter: Duration.fromInputUnsafe(options?.staleAfter ?? "5 seconds"),
         summarize: (transcript) =>

@@ -13,7 +13,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import {
   Assistant,
-  AssistantActivity,
+  AssistantStatus,
   AssistantEngine,
   AssistantEvent,
   ChatId,
@@ -202,7 +202,7 @@ export const idle = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
 
 /** Whether no turn and no specialist run is working. */
 export const notWorking = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
-  entries.length > 0 && !AssistantActivity.isWorking(AssistantActivity.fromEntries(entries))
+  entries.length > 0 && !AssistantStatus.isWorking(AssistantStatus.fromEntries(entries))
 
 export const text = (entries: ReadonlyArray<AssistantEvent.Entry>) =>
   AssistantEvent.assistantTexts(entries).join(" ").toLowerCase()

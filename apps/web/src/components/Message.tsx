@@ -34,13 +34,13 @@ export function Message() {
  * Shown while Acme works on something the user sent: the dots while it writes to the user, what
  * it is doing when the turn says so, and a plain working line otherwise.
  */
-export function Typing({ status, typing }: { readonly status: string | undefined; readonly typing: boolean }) {
+export function Typing({ activity, typing }: { readonly activity: string | undefined; readonly typing: boolean }) {
   if (!typing) {
     return (
       <div className="row assistant">
         <Avatar />
         <div className="status" role="status" aria-live="polite">
-          {status ?? "Working"}…
+          {activity ?? "Working"}…
         </div>
       </div>
     )

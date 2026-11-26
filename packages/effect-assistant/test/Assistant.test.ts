@@ -14,7 +14,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import {
   Assistant,
-  AssistantActivity,
+  AssistantStatus,
   AssistantEngine,
   AssistantEvent,
   Block,
@@ -438,7 +438,7 @@ describe("specialist runs", () => {
       const entries = yield* log.read(chat)
 
       expect(finished(entries).map((run) => run.status)).toEqual(["cut_off"])
-      expect(AssistantActivity.fromEntries(entries).specialists.size).toBe(0)
+      expect(AssistantStatus.fromEntries(entries).specialists.size).toBe(0)
     }).pipe(Effect.provide(layerStorage))
   )
 })

@@ -7,7 +7,7 @@ import * as Predicate from "effect/Predicate"
 import * as Ref from "effect/Ref"
 import * as Schedule from "effect/Schedule"
 import * as AssistantEvent from "../AssistantEvent.ts"
-import type * as StatusSummary from "../StatusSummary.ts"
+import type * as ActivitySummary from "../ActivitySummary.ts"
 import * as History from "./history.ts"
 import * as Live from "./live.ts"
 import { toJsonText } from "./schema.ts"
@@ -109,7 +109,7 @@ const MIN_CHECK_MILLIS = 100
 // call says what runs, or the model writes to the user, and only after something new happened.
 /** @internal */
 export const run = Effect.fnUntraced(function* (
-  summary: StatusSummary.StatusSummary["Service"],
+  summary: ActivitySummary.ActivitySummary["Service"],
   live: Live.Live,
   chat: Writer
 ) {

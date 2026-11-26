@@ -22,7 +22,7 @@ import * as Loop from "./loop.ts"
 import * as BlockKit from "../BlockKit.ts"
 import type { CurrentChat } from "../CurrentChat.ts"
 import * as Instructions from "../Instructions.ts"
-import { StatusSummary } from "../StatusSummary.ts"
+import { ActivitySummary } from "../ActivitySummary.ts"
 import * as ToolApproval from "../ToolApproval.ts"
 import type * as Specialist from "../Specialist.ts"
 import * as AppEvents from "./events.ts"
@@ -83,7 +83,7 @@ export interface Registration {
   }>
   readonly builtins: Toolkits.Tools<Assistant.TurnServices>
   // Writes a status for a turn that has been working a while with nothing to show.
-  readonly summary: Option.Option<StatusSummary["Service"]>
+  readonly summary: Option.Option<ActivitySummary["Service"]>
 }
 
 /** @internal */
@@ -121,7 +121,7 @@ export const register = Effect.fnUntraced(function* (
     open: options.open,
     specialists,
     builtins,
-    summary: yield* Effect.serviceOption(StatusSummary)
+    summary: yield* Effect.serviceOption(ActivitySummary)
   }
 
   return registration

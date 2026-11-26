@@ -9,6 +9,7 @@ import { AssistantToolCall } from "../AssistantToolCall.ts"
 import * as Block from "../Block.ts"
 import type * as BlockKit from "../BlockKit.ts"
 import { CurrentChat } from "../CurrentChat.ts"
+import * as ToolApproval from "../ToolApproval.ts"
 import * as ToolFailure from "../ToolFailure.ts"
 import * as Toolkits from "./toolkit.ts"
 import * as Uuid from "./uuid.ts"
@@ -58,8 +59,38 @@ const append = Effect.fnUntraced(function* (message: AssistantEvent.AssistantMes
       AssistantEvent.isLibraryEvent(event) && Predicate.isTagged(event, "AssistantMessage") && event.id === message.id
   )
 
-  if (!sent) yield* chat.append(message)
+  if (sent) return
+
+  const expiring = besideClosed(entries, message.closes ?? [])
+
+  if (expiring.length > 0) yield* chat.append(AssistantEvent.ApprovalsExpired.make({ callIds: expiring }))
+
+  yield* chat.append(message)
 })
+
+// A closed message's block asked for the approvals called in the same step: they expire with it, so a card the model
+// replaced doesn't leave an order or a send waiting on the user.
+const besideClosed = (entries: ReadonlyArray<AssistantEvent.AnyEntry>, closes: ReadonlyArray<string>) => {
+  if (closes.length === 0) return []
+
+  const closed = new Set(closes)
+
+  const beside = new Set(
+    entries.flatMap(({ event }) => {
+      if (!AssistantEvent.isLibraryEvent(event) || !Predicate.isTagged(event, "ModelOutput")) return []
+
+      const calls = event.parts.flatMap((part) => (part.type === "tool-call" ? [part] : []))
+
+      return calls.some((call) => call.name === sendUserMessageName && closed.has(Uuid.fromKey(`message:${call.id}`)))
+        ? calls.map((call) => call.id)
+        : []
+    })
+  )
+
+  return [...ToolApproval.fromEntries(entries).values()].flatMap((state) =>
+    state.status === "pending" && beside.has(state.request.callId) ? [state.request.callId] : []
+  )
+}
 
 const PlainMessage = Tool.make(sendUserMessageName, {
   description,
@@ -152,7 +183,7 @@ ${catalog}`,
       ),
       closes: Schema.optional(Schema.Array(Schema.String)).annotate({
         description:
-          "Ids of your earlier messages whose block the user just answered by typing instead of using it. Those blocks close. Leave it out otherwise: a block stays open when the user talks about something else."
+          "Ids of your earlier messages whose block is done: the user answered it by typing instead, or this message replaces it. Those blocks close, and an approval asked beside one is withdrawn. Leave it out otherwise: a block stays open when the user talks about something else."
       })
     }),
     success: Schema.String,

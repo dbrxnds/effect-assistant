@@ -79,7 +79,7 @@ const said = (timelines: Timelines, pattern: RegExp) =>
 
 /** Whether a specialist worked, and the assistant said something after it and is done. */
 const reportedBack = (timelines: Timelines) => {
-  const from = timelines.findIndex((timeline) => timeline.activity.specialists.length > 0)
+  const from = timelines.findIndex((timeline) => timeline.status.specialists.length > 0)
 
   return from !== -1 && idle(timelines) && sent(latest(timelines)).length > sent(timelines[from]!).length
 }
@@ -222,7 +222,7 @@ const program = Effect.gen(function* () {
       const chatId = yield* newChat
       yield* send(chatId, "What did the Amsterdam office order recently?")
       // Working on it: the second question arrives while the first turn runs.
-      yield* waitFor(chatId, "working", (timelines) => latest(timelines).activity.working)
+      yield* waitFor(chatId, "working", (timelines) => latest(timelines).status.working)
       yield* Effect.sleep("1500 millis")
       yield* send(chatId, "Also: what's the address of the London office?")
 

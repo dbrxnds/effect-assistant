@@ -2,10 +2,10 @@
  * This module provides status labels for tool calls: while a call runs, the chat shows the user a
  * short line about what the assistant is doing, like "Checking last summer's campaign budget".
  *
- * Give the tools that take a while or act on something a status field with {@link withStatus}:
+ * Give the tools that take a while or act on something a status field with {@link withActivity}:
  * workflows, reports from other systems, orders, specialists. Their parameters get an optional
  * `activity` field that the model fills in the chat's language. When the call starts, the chat
- * sends the activity as a `ChatSignal.Status`; it shows until the next status, so it stays
+ * sends the activity as a `ChatSignal.Activity`; it shows until the next status, so it stays
  * while the model works out its next step. The call runs unchanged: the handler gets `activity`
  * with its other parameters. Quick reads need no label: the chat shows its generic
  * working state for them.
@@ -33,15 +33,15 @@ export const parameterName = "activity"
 export const parameterDescription =
   "What you're doing with this call, in a few plain words the user sees while it runs. Write it from their side, with no tool names, and don't repeat something they've already seen this turn. Leave it out if there's nothing worth showing."
 
-const statusFieldKey = "effect-assistant/ToolStatus/statusField"
+const statusFieldKey = "effect-assistant/ToolActivity/statusField"
 
 /**
- * The schema of the status field {@link withStatus} adds.
+ * The schema of the status field {@link withActivity} adds.
  *
  * @category schemas
  * @since 0.16.0
  */
-export const StatusField = Schema.String.annotate({ description: parameterDescription, [statusFieldKey]: true }).pipe(
+export const ActivityField = Schema.String.annotate({ description: parameterDescription, [statusFieldKey]: true }).pipe(
   Schema.optionalKey
 )
 
@@ -51,7 +51,7 @@ export const StatusField = Schema.String.annotate({ description: parameterDescri
  * @category models
  * @since 0.16.0
  */
-export type WithoutStatus<Fields extends Schema.Struct.Fields> = typeof parameterName extends keyof Fields
+export type WithoutActivity<Fields extends Schema.Struct.Fields> = typeof parameterName extends keyof Fields
   ? "Error: these parameters have an activity field already, so they can't take a status: rename it"
   : unknown
 
@@ -60,7 +60,7 @@ export type WithoutStatus<Fields extends Schema.Struct.Fields> = typeof paramete
  *
  * **Details**
  *
- * The struct gets an optional `activity` field ({@link StatusField}), and keeps its own annotations
+ * The struct gets an optional `activity` field ({@link ActivityField}), and keeps its own annotations
  * and checks. The chat shows what the model writes there while the call runs; a call without one,
  * or with a blank one, runs with no status. The handler gets `activity` like any other parameter.
  * A struct that has an `activity` field already is a type error. A tool without parameters takes
@@ -69,13 +69,13 @@ export type WithoutStatus<Fields extends Schema.Struct.Fields> = typeof paramete
  * **Example** (A tool whose calls show a status)
  *
  * ```ts
- * import { ToolStatus } from "effect-assistant"
+ * import { ToolActivity } from "effect-assistant"
  * import * as Tool from "effect/ai/Tool"
  * import * as Schema from "effect/Schema"
  *
  * export const ArchiveNote = Tool.make("archive_note", {
  *   description: "Archives a note and the files attached to it.",
- *   parameters: Schema.Struct({ noteId: Schema.String }).pipe(ToolStatus.withStatus),
+ *   parameters: Schema.Struct({ noteId: Schema.String }).pipe(ToolActivity.withActivity),
  *   success: Schema.Struct({ archived: Schema.Boolean })
  * })
  * ```
@@ -83,10 +83,10 @@ export type WithoutStatus<Fields extends Schema.Struct.Fields> = typeof paramete
  * @category combinators
  * @since 0.16.0
  */
-export const withStatus = <Fields extends Schema.Struct.Fields>(
-  self: Schema.Struct<Fields> & WithoutStatus<Fields>
+export const withActivity = <Fields extends Schema.Struct.Fields>(
+  self: Schema.Struct<Fields> & WithoutActivity<Fields>
 ) => {
-  const struct = self.mapFields((fields) => ({ ...fields, [parameterName]: StatusField }))
+  const struct = self.mapFields((fields) => ({ ...fields, [parameterName]: ActivityField }))
 
   return struct.rebuild(
     new SchemaAST.Objects(
@@ -99,13 +99,13 @@ export const withStatus = <Fields extends Schema.Struct.Fields>(
 }
 
 /**
- * Returns whether a tool's calls show a status: its parameters have the field {@link withStatus}
+ * Returns whether a tool's calls show a status: its parameters have the field {@link withActivity}
  * adds. An `activity` parameter of its own doesn't count.
  *
  * @category guards
  * @since 0.13.0
  */
-export const isDescribed = (tool: Tool.Any): boolean => {
+export const hasActivity = (tool: Tool.Any): boolean => {
   const ast = tool.parametersSchema.ast
 
   return (

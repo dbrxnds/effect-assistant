@@ -10,7 +10,7 @@ import * as Locations from "@acme/demo-shared/Locations"
 import * as Orders from "@acme/demo-shared/Orders"
 import * as Performance from "@acme/demo-shared/Performance"
 import * as ToolFailure from "effect-assistant/ToolFailure"
-import * as ToolStatus from "effect-assistant/ToolStatus"
+import * as ToolActivity from "effect-assistant/ToolActivity"
 import * as Config from "effect/Config"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -39,7 +39,7 @@ export const OrderHistory = Tool.make("order_history", {
     office: OfficeInput,
     kind: Schema.optional(Schema.Literals(["product", "campaign"])),
     limit: Schema.optional(Schema.Int)
-  }).pipe(ToolStatus.withStatus),
+  }).pipe(ToolActivity.withActivity),
   success: Schema.Struct({
     placedThroughAcme: Schema.Array(LiveOrders.LiveOrder),
     history: Schema.Array(Orders.Order)
@@ -86,7 +86,7 @@ export const OfficeBudget = Tool.make("office_budget", {
   description:
     "An office's marketing budget this quarter: total, spent (including orders placed through you), and left.",
   parameters: Schema.Struct({ office: Schema.String.annotate({ description: "Office name, like Amsterdam." }) }).pipe(
-    ToolStatus.withStatus
+    ToolActivity.withActivity
   ),
   success: Budgets.OfficeBudget,
   failure: ToolFailure.ToolFailure

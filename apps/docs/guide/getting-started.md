@@ -100,7 +100,7 @@ Effect.runPromise(program.pipe(Effect.provide(MyAssistantLive)))
 ```
 
 A chat UI does the same over RPC: it folds the changes and renders the
-messages, and shows a working indicator while the timeline's `activity` says
+messages, and shows a working indicator while the timeline's `status` says
 something works. See [the chat client](./client).
 
 `subscribe` streams the chat's whole log instead, every event the

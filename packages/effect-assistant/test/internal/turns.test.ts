@@ -11,7 +11,7 @@ import * as Deferred from "effect/Deferred"
 import * as Schema from "effect/Schema"
 import {
   type Assistant,
-  AssistantActivity,
+  AssistantStatus,
   AssistantEngine,
   AssistantEvent,
   BlockKit,
@@ -118,7 +118,7 @@ describe("turn completion", () => {
       }).pipe(Effect.provide(updatingAssistant(handler, Scripted.unused)))
 
       expect(entries.map(({ event }) => event._tag)).toEqual(["UserMessage", "TurnStarted", "Update", "TurnCompleted"])
-      expect(AssistantActivity.isWorking(AssistantActivity.fromEntries(entries))).toBe(false)
+      expect(AssistantStatus.isWorking(AssistantStatus.fromEntries(entries))).toBe(false)
     })
   )
 

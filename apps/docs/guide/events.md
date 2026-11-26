@@ -148,24 +148,24 @@ chat (see [engines](./engines)). Code that writes a chat with the base
 
 Turns and specialist runs each open with one event and close with another,
 and an input is open until a turn that read it ends.
-[`AssistantActivity`](/api/AssistantActivity) folds the log into what is open,
+[`AssistantStatus`](/api/AssistantStatus) folds the log into what is open,
 for a working indicator:
 
 ```ts
-import { AssistantActivity } from "effect-assistant"
+import { AssistantStatus } from "effect-assistant"
 
-const activity = AssistantActivity.fromEntries(entries)
+const status = AssistantStatus.fromEntries(entries)
 
-AssistantActivity.isWorking(activity) // a turn, one about to start, or a specialist run
-activity.specialists // which specialists, since when
+AssistantStatus.isWorking(status) // a turn, one about to start, or a specialist run
+status.specialists // which specialists, since when
 ```
 
 Server-side code that folds the log one entry at a time uses
-`AssistantActivity.apply`. Over the log as stored (`ChatLog.read`), your
+`AssistantStatus.apply`. Over the log as stored (`ChatLog.read`), your
 events that came in through `submit` count as inputs; `subscribe` streams
 them decoded, without that mark, so there a turn shows from its
 `TurnStarted`. A chat client gets the same from its
-[timeline](./client)'s `activity`. A workflow waiting on a timer
+[timeline](./client)'s `status`. A workflow waiting on a timer
 isn't working: the assistant took its last step, and the workflow's next
 event wakes it.
 
