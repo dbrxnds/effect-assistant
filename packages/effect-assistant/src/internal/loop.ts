@@ -239,19 +239,27 @@ const runCalls = <R, S, E, R2>(
         Stream.concat(
           Stream.unwrap(
             Effect.gen(function* () {
-              const explained = pending.some(({ call }) => isUserMessage(call))
-
               // Text that became no message, or a message that failed, stops the typing too.
-              const done = yield* Effect.forEach(
+              const ran = yield* Effect.forEach(
                 pending,
-                ({ call }, i): Effect.Effect<Event, never, R> =>
-                  waits[i] !== true
-                    ? runCall(tools, call)
-                    : explained
-                      ? awaitApproval(call)
-                      : Effect.succeed(unexplained(call)),
+                ({ call }, i): Effect.Effect<{ call: AssistantEvent.ToolCallPart; event: Option.Option<Event> }, never, R> =>
+                  waits[i] === true
+                    ? Effect.succeed({ call, event: Option.none() })
+                    : runCall(tools, call).pipe(Effect.map((event) => ({ call, event: Option.some(event) }))),
                 { concurrency: "unbounded" }
               ).pipe(Effect.ensuring(Live.use((live) => live.typing(false))))
+
+              // An approval waits only beside a message the user got: one that failed leaves the model a step to fix it.
+              const explained = ran.some(
+                ({ call, event }) => isUserMessage(call) && Option.exists(event, (result) => !isFailure(result))
+              )
+
+              const done = yield* Effect.forEach(ran, ({ call, event }) =>
+                Option.match(event, {
+                  onSome: Effect.succeed,
+                  onNone: () => (explained ? awaitApproval(call) : Effect.succeed(unexplained(call)))
+                })
+              )
 
               return Stream.fromIterable(done.map(value)).pipe(
                 Stream.concat(

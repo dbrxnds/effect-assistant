@@ -257,3 +257,44 @@ describe("AssistantLoop.run's trace", () => {
     })
   )
 })
+
+const FileNote = Tool.make("file_note", {
+  description: "Files a note.",
+  parameters: Schema.Struct({ note: Schema.Struct({ title: Schema.String }) }),
+  success: Schema.String
+})
+
+const NoteTools = Toolkit.make(FileNote)
+
+describe("AssistantLoop.run with an object parameter written as a JSON string", () => {
+  it.live("parses it, so the call runs", () =>
+    Effect.gen(function* () {
+      const model = Scripted.layer((request) =>
+        Option.match(Scripted.result(request, "file_note"), {
+          onNone: () => [Scripted.call("file_note", { note: JSON.stringify({ title: "Plan" }) })],
+          onSome: (result) => Scripted.reply(result)
+        })
+      )
+
+      const handlers = Own.toLayer((turn) =>
+        AssistantLoop.run({
+          instructions: turn.instructions("Be brief."),
+          toolkit: NoteTools,
+          history: turn.history()
+        })
+      ).pipe(Layer.provide(NoteTools.toLayer({ file_note: ({ note }) => Effect.succeed(`filed ${note.title}`) })))
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* (yield* Own).submit(chat, say("File the plan."))
+
+        return yield* collectUntil(Own, chat, (es) => turnsDone(es) >= 1, "10 seconds")
+      }).pipe(Effect.provide(runMemory(handlers, model)))
+
+      expect(failures(entries)).toEqual([])
+      expect(
+        entries.flatMap(({ event }) => (Predicate.isTagged(event, "AssistantMessage") ? [event.text] : []))
+      ).toEqual([expect.stringContaining("filed Plan")])
+    })
+  )
+})

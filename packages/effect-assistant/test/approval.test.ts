@@ -25,6 +25,8 @@ import {
   AssistantEvent,
   AssistantLoop,
   AssistantToolCall,
+  Block,
+  BlockKit,
   ChatId,
   ChatLog,
   Specialist,
@@ -87,6 +89,14 @@ const orderTools = Effect.gen(function* () {
 })
 
 const Ordering = Assistant.make("approval")
+
+const Confirm = Block.make("confirm", {
+  description: "A yes or no.",
+  props: Schema.Struct({ question: Schema.String }),
+  answer: Schema.Struct({ yes: Schema.Boolean })
+})
+
+const CardOrdering = Assistant.make("approval-cards", { blocks: BlockKit.make([Confirm]) })
 
 /** The model asks to place the order, with a message, and reads what came of it. */
 const script: Scripted.Script = (request) => {
@@ -195,6 +205,95 @@ describe("a tool with needsApproval, in a turn", () => {
       ])
       expect(requested(entries).map(({ tool }) => tool)).toEqual(["place_order"])
       expect(text(entries)).toContain("approve to place it")
+      expect(yield* runs).toEqual([])
+    })
+  )
+
+  it.live("refuses a call whose message failed, and asks once the model sends it", () =>
+    Effect.gen(function* () {
+      // The first message has a wrong param, so it fails; told why, the model sends it again with the call.
+      const model = yield* Scripted.make((request) =>
+        Option.isSome(Scripted.lastResult(request, "place_order"))
+          ? [
+              Scripted.call("send_user_message", { text: "300 totes: approve to place it.", wait: false }),
+              Scripted.call("place_order", { sku: "tote", quantity: 300 })
+            ]
+          : [
+              Scripted.call("send_user_message", { text: "300 totes: approve to place it.", wait: "yes" }),
+              Scripted.call("place_order", { sku: "tote", quantity: 300 })
+            ]
+      )
+
+      const { runs, layer } = yield* orderTools
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* (yield* Ordering).submit(chat, say("Order 300 totes."))
+
+        return yield* collectUntil(Ordering, chat, (es) => turnsDone(es) >= 1)
+      }).pipe(Effect.provide(runMemory(Ordering.toLayer(looping).pipe(Layer.provide(layer)), model.layer)))
+
+      const refused = entries.flatMap(({ event }) =>
+        Predicate.isTagged(event, "ToolResult") && event.tool === "place_order" ? [event] : []
+      )
+
+      expect(refused.map(({ outcome, reason }) => ({ outcome, reason }))).toEqual([
+        { outcome: "failure", reason: "ApprovalNeedsMessage" }
+      ])
+      expect(requested(entries)).toHaveLength(1)
+      expect(yield* runs).toEqual([])
+    })
+  )
+
+  it.live("withdraws the call beside a card the model closes, and keeps the one it asks next", () =>
+    Effect.gen(function* () {
+      // Asked again for a different amount, the model closes its earlier card: that order shouldn't wait any more.
+      const model = yield* Scripted.make((request) => {
+        if (!Scripted.lastInput(request).includes("make it 2")) {
+          return Scripted.hasCalled(request, "place_order")
+            ? Scripted.wait()
+            : [
+                Scripted.call("place_order", { sku: "tote", quantity: 10 }),
+                Scripted.call("send_user_message", {
+                  text: "10 totes: approve to place it.",
+                  wait: true,
+                  block: { kind: "confirm", props: { question: "Place 10 totes?" } }
+                })
+              ]
+        }
+
+        const earlier = Scripted.toolResults(request)
+          .flatMap((part) => /sent as message ([\w-]+)/.exec(Scripted.resultText(part))?.slice(1) ?? [])
+          .at(0)
+
+        return Scripted.toolCalls(request).filter(({ name }) => name === "place_order").length > 1
+          ? Scripted.wait()
+          : [
+              Scripted.call("place_order", { sku: "tote", quantity: 2 }),
+              Scripted.call("send_user_message", {
+                text: "2 totes: approve to place it.",
+                wait: true,
+                closes: earlier === undefined ? [] : [earlier]
+              })
+            ]
+      })
+
+      const { runs, layer } = yield* orderTools
+
+      const entries = yield* Effect.gen(function* () {
+        const chat = yield* newChat
+        yield* (yield* CardOrdering).submit(chat, say("Order 10 totes."))
+        yield* collectUntil(CardOrdering, chat, (es) => turnsDone(es) >= 1)
+        yield* (yield* CardOrdering).submit(chat, say("Actually, make it 2."))
+
+        return yield* collectUntil(CardOrdering, chat, (es) => turnsDone(es) >= 2)
+      }).pipe(Effect.provide(runMemory(CardOrdering.toLayer(looping).pipe(Layer.provide(layer)), model.layer)))
+
+      expect(approvalItems(entries).map(({ status }) => status)).toEqual(["expired", "pending"])
+      expect(requested(entries).map(({ params }) => params)).toEqual([
+        { sku: "tote", quantity: 10 },
+        { sku: "tote", quantity: 2 }
+      ])
       expect(yield* runs).toEqual([])
     })
   )

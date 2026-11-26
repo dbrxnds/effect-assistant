@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect"
 import * as ErrorReporter from "effect/ErrorReporter"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
+import * as Record from "effect/Record"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import type * as AssistantEvent from "../AssistantEvent.ts"
@@ -93,11 +94,33 @@ const needsApprovalNative = Effect.fnUntraced(function* <T extends Record<string
   if (tool === undefined || needs === undefined || Predicate.isBoolean(needs)) return needs === true
 
   return yield* Effect.gen(function* () {
-    const params = yield* Schema.decodeUnknownEffect(tool.parametersSchema)(call.params)
+    const params = yield* Schema.decodeUnknownEffect(tool.parametersSchema)(yield* repairParams(tool, call.params))
     const decided = needs(params, { toolCallId: call.id, messages: history })
 
     return Effect.isEffect(decided) ? yield* decided : decided
   }).pipe(Effect.orElseSucceed(() => false))
+})
+
+const parseJsonValue = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Union([Schema.Record(Schema.String, Schema.Json), Schema.Array(Schema.Json)]))
+)
+
+// Models sometimes write an object or list parameter as a JSON string. When the params don't decode as written but do
+// with those strings parsed, the call gets the parsed ones.
+const repairParams = Effect.fnUntraced(function* (tool: Tool.Any | undefined, params: Schema.Json) {
+  if (tool === undefined) return params
+
+  const decodes = (candidate: Schema.Json) =>
+    Schema.decodeUnknownEffect(tool.parametersSchema)(candidate).pipe(Effect.isSuccess)
+
+  const parsed = Option.map(
+    decodeJsonObject(params),
+    Record.map((value): Schema.Json => (Predicate.isString(value) ? Option.getOrElse(parseJsonValue(value), () => value) : value))
+  )
+
+  if (Option.isNone(parsed) || (yield* decodes(params))) return params
+
+  return (yield* decodes(parsed.value)) ? parsed.value : params
 })
 
 // The toolkit decodes the params with the tool's schema before its handler sees them, and a call whose params don't
@@ -116,7 +139,7 @@ export const runNative = Effect.fnUntraced(function* <T extends Record<string, T
 
   if (!hasTool(toolkit, name)) return failed(`No tool named ${call.name}.`, "ToolNotFoundError")
 
-  const params: unknown = call.params
+  const params: unknown = yield* repairParams(toolNamed(toolkit, call.name), call.params)
 
   if (!isParams<T[keyof T]>(params)) {
     return failed(`Invalid parameters for ${call.name}.`, "ToolParameterValidationError")
