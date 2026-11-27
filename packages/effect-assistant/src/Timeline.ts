@@ -472,6 +472,110 @@ export const fold = <Events, E, R>(
 export const isIdle = <Events>(timeline: Timeline<Events>): boolean =>
   !timeline.status.working && timeline.status.specialists.length === 0
 
+const isAssistantMessage = Schema.is(AssistantMessage)
+
+const isApprovalItem = Schema.is(ApprovalItem)
+
+/**
+ * Returns whether the timeline doesn't show a user's input yet: a message it has no item for, an
+ * answer to a block that is still open, or a decision on a call that still waits for one.
+ *
+ * **When to use**
+ *
+ * Use it on the client to keep what the user sent until the chat's changes show it, and to drop
+ * it once they do.
+ *
+ * @see {@link withPending} to show those inputs on the timeline
+ *
+ * @category guards
+ * @since 0.22.0
+ */
+export const isPending = <Events>(timeline: Timeline<Events>, input: AssistantEvent.UserInput): boolean =>
+  Match.valueTags(input, {
+    UserMessage: ({ id }) => !timeline.items.some((item) => item.id === id),
+    BlockAnswer: ({ messageId }) =>
+      timeline.items.some((item) => isAssistantMessage(item) && item.id === messageId && item.block?.status === "open"),
+    ApprovalDecision: ({ callId }) =>
+      timeline.items.some((item) => isApprovalItem(item) && item.id === callId && item.status === "pending")
+  })
+
+const withInput = <Events>(
+  timeline: Timeline<Events>,
+  input: AssistantEvent.UserInput,
+  at: DateTime.Utc
+): Timeline<Events> =>
+  Match.valueTags(input, {
+    UserMessage: ({ id, text, attachments }) => ({
+      ...timeline,
+      items: [
+        ...timeline.items,
+        UserMessage.make(attachments === undefined ? { id, text, at } : { id, text, attachments, at })
+      ]
+    }),
+    BlockAnswer: ({ messageId, value }) => ({
+      ...timeline,
+      items: timeline.items.map((item): Item<Events> =>
+        isAssistantMessage(item) && item.id === messageId && item.block !== undefined
+          ? AssistantMessage.make({
+              ...item,
+              block: { ...item.block, status: "answered", answer: toJson(value), answeredAt: at }
+            })
+          : item
+      )
+    }),
+    ApprovalDecision: ({ callId, decision, reason }) => ({
+      ...timeline,
+      items: timeline.items.map((item): Item<Events> =>
+        isApprovalItem(item) && item.id === callId
+          ? ApprovalItem.make(
+              reason === undefined ? { ...item, status: decision } : { ...item, status: decision, reason }
+            )
+          : item
+      )
+    })
+  })
+
+/**
+ * Returns the timeline as it will look once the chat has the inputs the user sent: each input it
+ * doesn't show yet (see {@link isPending}) is put on it, and the chat counts as working.
+ *
+ * **Details**
+ *
+ * A message is added as the last item, an answer marks its block answered, and a decision marks
+ * its call approved or rejected. Inputs the timeline already shows change nothing, so the client
+ * can keep its list of sent inputs and apply it to every new timeline. An input that failed to
+ * send is simply left out, and the timeline goes back to what the chat has. `at` stands in for the
+ * time the chat will store, on new messages and answers.
+ *
+ * **Example** (A chat's timeline with what the user just sent)
+ *
+ * ```ts
+ * import { AssistantEvent, Timeline } from "effect-assistant"
+ * import * as DateTime from "effect/DateTime"
+ *
+ * declare const timeline: Timeline.Timeline
+ * declare const sent: ReadonlyArray<AssistantEvent.UserInput>
+ *
+ * const shown = Timeline.withPending(timeline, sent, DateTime.nowUnsafe())
+ * ```
+ *
+ * @category combinators
+ * @since 0.22.0
+ */
+export const withPending = <Events>(
+  timeline: Timeline<Events>,
+  inputs: ReadonlyArray<AssistantEvent.UserInput>,
+  at: DateTime.Utc
+): Timeline<Events> => {
+  const pending = inputs.filter((input) => isPending(timeline, input))
+
+  if (pending.length === 0) return timeline
+
+  const shown = pending.reduce((current, input) => withInput(current, input, at), timeline)
+
+  return { ...shown, status: { ...shown.status, working: true } }
+}
+
 interface AnyEventItem {
   readonly _tag: string
   readonly id: string
