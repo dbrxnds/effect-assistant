@@ -169,6 +169,41 @@ const fold: <Events, E, R>(
 
 <small>Since 0.3.0</small>
 
+### withPending
+
+Returns the timeline as it will look once the chat has the inputs the user sent: each input it
+doesn't show yet (see `isPending`) is put on it, and the chat counts as working.
+
+**Details**
+
+A message is added as the last item, an answer marks its block answered, and a decision marks
+its call approved or rejected. Inputs the timeline already shows change nothing, so the client
+can keep its list of sent inputs and apply it to every new timeline. An input that failed to
+send is simply left out, and the timeline goes back to what the chat has. `at` stands in for the
+time the chat will store, on new messages and answers.
+
+**Example** (A chat's timeline with what the user just sent)
+
+```ts
+import { AssistantEvent, Timeline } from "effect-assistant"
+import * as DateTime from "effect/DateTime"
+
+declare const timeline: Timeline.Timeline
+declare const sent: ReadonlyArray<AssistantEvent.UserInput>
+
+const shown = Timeline.withPending(timeline, sent, DateTime.nowUnsafe())
+```
+
+```ts
+const withPending: <Events>(
+  timeline: Timeline<Events>,
+  inputs: ReadonlyArray<AssistantEvent.UserInput>,
+  at: DateTime.Utc
+) => Timeline<Events>
+```
+
+<small>Since 0.22.0</small>
+
 ## Models
 
 ### BlockStatus
@@ -535,6 +570,22 @@ const isIdle: <Events>(timeline: Timeline<Events>) => boolean
 ```
 
 <small>Since 0.1.0</small>
+
+### isPending
+
+Returns whether the timeline doesn't show a user's input yet: a message it has no item for, an
+answer to a block that is still open, or a decision on a call that still waits for one.
+
+**When to use**
+
+Use it on the client to keep what the user sent until the chat's changes show it, and to drop
+it once they do.
+
+```ts
+const isPending: <Events>(timeline: Timeline<Events>, input: AssistantEvent.UserInput) => boolean
+```
+
+<small>Since 0.22.0</small>
 
 ## Utility types
 

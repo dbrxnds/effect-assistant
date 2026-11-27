@@ -396,3 +396,77 @@ describe("AssistantEvent.UserMessage", () => {
     expect(given.id).toBe(InputId.fromKey("client:1"))
   })
 })
+
+describe("Timeline.withPending", () => {
+  const at = DateTime.makeUnsafe(10)
+
+  const waiting: Timeline.Timeline = {
+    sequence: 3,
+    items: [
+      Timeline.AssistantMessage.make({
+        id: "m1",
+        text: "Pick one",
+        at: DateTime.makeUnsafe(1),
+        block: { kind: "choice", props: null, status: "open" }
+      }),
+      Timeline.ApprovalItem.make({ id: "call1", tool: "order", status: "pending", at: DateTime.makeUnsafe(2) })
+    ],
+    status: { working: false, specialists: [], typing: false },
+    failed: false,
+    deleted: false
+  }
+
+  const message = AssistantEvent.UserMessage.make({ text: "hello" })
+
+  const answer = AssistantEvent.BlockAnswer.make({
+    id: InputId.fromKey("a1"),
+    messageId: "m1",
+    kind: "choice",
+    value: { picked: 2 }
+  })
+
+  const decision = AssistantEvent.ApprovalDecision.make({
+    id: InputId.fromKey("d1"),
+    callId: "call1",
+    decision: "rejected",
+    reason: "too many"
+  })
+
+  it("shows sent inputs the timeline doesn't have yet, and counts the chat as working", () => {
+    const shown = Timeline.withPending(waiting, [message, answer, decision], at)
+
+    expect(shown.items).toEqual([
+      Timeline.AssistantMessage.make({
+        id: "m1",
+        text: "Pick one",
+        at: DateTime.makeUnsafe(1),
+        block: { kind: "choice", props: null, status: "answered", answer: { picked: 2 }, answeredAt: at }
+      }),
+      Timeline.ApprovalItem.make({
+        id: "call1",
+        tool: "order",
+        status: "rejected",
+        reason: "too many",
+        at: DateTime.makeUnsafe(2)
+      }),
+      Timeline.UserMessage.make({ id: message.id, text: "hello", at })
+    ])
+    expect(Timeline.isIdle(shown)).toBe(false)
+  })
+
+  it("changes nothing for inputs the timeline already shows", () => {
+    const confirmed = Timeline.withPending(waiting, [message, answer, decision], at)
+    const settled: Timeline.Timeline = { ...confirmed, status: waiting.status }
+
+    expect([message, answer, decision].map((input) => Timeline.isPending(settled, input))).toEqual([
+      false,
+      false,
+      false
+    ])
+    expect(Timeline.withPending(settled, [message, answer, decision], at)).toBe(settled)
+  })
+
+  it("leaves the timeline as the chat has it without the inputs", () => {
+    expect(Timeline.withPending(waiting, [], at)).toBe(waiting)
+  })
+})
